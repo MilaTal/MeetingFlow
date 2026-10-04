@@ -1,0 +1,176 @@
+{
+  "id": "default",
+  "title": "Проект по совещаниям",
+  "vocabulary": {
+    "app_title": "MeetFlow",
+    "app_subtitle": "Проект по совещаниям",
+    "meeting": "встреча",
+    "meetings": "Встречи",
+    "protocol": "Протокол встречи",
+    "registry": "Реестр задач",
+    "new_tasks": "Новые задачи",
+    "closed_tasks": "Закрыто по итогам встречи",
+    "cards": "Конфликты",
+    "team": "Команда",
+    "sources_line": "Откуда: собран",
+    "sources_from": "из",
+    "not_discussed": "Не обсуждалось.",
+    "unassigned": "Не назначен",
+    "no_new_tasks": "Новых задач не поставлено.",
+    "task_table": [
+      "№",
+      "Задача",
+      "Ответственный",
+      "Срок"
+    ],
+    "search": "Поиск по проекту",
+    "roadmap": "Дорожная карта",
+    "units": "Из записи встречи"
+  },
+  "formats": {
+    "date": "%d.%m.%Y",
+    "datetime": "%d.%m.%Y %H:%M"
+  },
+  "permissions": {
+    "task_status": [
+      "director",
+      "project_admin",
+      "super_admin"
+    ],
+    "upload_source": [
+      "director",
+      "project_admin",
+      "super_admin"
+    ],
+    "admin": [
+      "project_admin",
+      "super_admin"
+    ]
+  },
+  "protocol_skeleton": [
+    "Участники",
+    "Обсуждение",
+    "Решения",
+    "Открытые вопросы"
+  ],
+  "notes_markers": [
+    "протокол",
+    "повестка",
+    "решили",
+    "ответственный",
+    "срок"
+  ],
+  "own_output_markers": [
+    "Откуда: собран",
+    "Новые задачи",
+    "Закрыто по итогам встречи"
+  ],
+  "roles": [
+    "member",
+    "project_admin",
+    "super_admin"
+  ],
+  "people": {
+    "diminutives": {},
+    "department_heads": {}
+  },
+  "gates": {
+    "quote_coverage": 0.7,
+    "quote_window": 4,
+    "duplicate_jaccard": 0.6,
+    "require_assignee": false,
+    "task_first": true
+  },
+  "budget": {
+    "max_calls": 14,
+    "verify_reserve": 1,
+    "max_cost_usd": 0.4,
+    "max_chars_per_call": 400000,
+    "max_seconds": 3600
+  },
+  "intake": {
+    "duration_min": 20,
+    "duration_max": 180,
+    "max_text_mb": 20
+  },
+  "closing": {
+    "mass_max": 3,
+    "mass_share": 0.5
+  },
+  "operator": {
+    "confirmations": 2,
+    "card_cleanup_days": 3
+  },
+  "search": {
+    "raw_speech": false,
+    "raw_speech_decision": "TODO: [владелец тематики: искать ли по сырой речи — расшифровкам, записям, дословным цитатам. Это решение о доступе: поиск открыт всем ролям]"
+  },
+  "units": {
+    "enabled": false,
+    "close_same_meeting": false,
+    "kinds": [
+      "task",
+      "decision",
+      "agreement",
+      "clarification",
+      "open_question",
+      "milestone"
+    ]
+  },
+  "design": {
+    "palette": "emerald",
+    "dark": "auto",
+    "document_font": "Times New Roman",
+    "document_size_pt": 12
+  },
+  "llm": {
+    "tool_choice": "MEETFLOW_LLM при развёртывании: mock — стенд без модели; ollama — локальная модель (llm.generator / llm.verifier); openrouter — llm.openrouter.*, ключ OPENROUTER_API_KEY. Решение владельца 03.10.26",
+    "max_answer_tokens": 4096,
+    "max_answer_tokens_source": "Решение владельца 03.10.26: потолок ответа 4096 токенов на вызов — гарантирует денежный предел прогона и защищает от зависания на длинном ответе. Планёрка ставит 32000 из-за обрывов на больших таблицах (16.09.26); у MeetFlow вызовы узкие, обрыв видно сообщением",
+    "openrouter": {
+      "generator": {
+        "model": "qwen/qwen-plus",
+        "family": "qwen",
+        "profile": "qwen",
+        "source": "как в Планёрке (run_dev.ps1, QWEN_MODEL)"
+      },
+      "verifier": {
+        "model": "meta/muse-spark-1.3",
+        "family": "muse",
+        "profile": "generic",
+        "source": "как в Планёрке (QWEN_VERIFY_MODEL, решение владельца «на проде проверяющая модель Muse»)"
+      }
+    },
+    "generator": {
+      "model": "PLACEHOLDER: glm-4.7-flash",
+      "profile": "glm",
+      "num_ctx": 32768
+    },
+    "verifier": {
+      "model": "PLACEHOLDER: deepseek-r1",
+      "profile": "deepseek",
+      "num_ctx": 32768
+    },
+    "vision": {
+      "model": "PLACEHOLDER: deepseek-vision"
+    },
+    "allow_same_verifier": false
+  },
+  "asr": {
+    "model": "large-v3",
+    "language": "ru",
+    "keep_media": false
+  },
+  "prompts": {
+    "domain_role": "Ты помогаешь вести рабочий проект по итогам совещаний. Источник фактов — только текст встречи."
+  },
+  "connectors": {
+    "extra": []
+  },
+  "roadmap": {
+    "blocks": [],
+    "other_title": "Ход проекта",
+    "items_per_part": 5,
+    "stale_days": 30
+  }
+}

@@ -1,0 +1,12 @@
+РЕЕСТР ЗАДАЧ (прямое чтение базы, отдельно от агента)
+{'id': 1, 'description': 'Подготовить спецификацию на фильтры', 'responsible_id': 'u05', 'status': 'active', 'due': 'до пятницы', 'date_set': '2026-10-01', 'date_closed': None}
+{'id': 2, 'description': 'Запросить коммерческие предложения у трёх поставщиков', 'responsible_id': 'u06', 'status': 'done', 'due': 'до 10.10', 'date_set': '2026-10-01', 'date_closed': '2026-10-02'}
+{'id': 3, 'description': 'Подготовить график отгрузки', 'responsible_id': 'u07', 'status': 'active', 'due': 'к понедельнику', 'date_set': '2026-10-01', 'date_closed': None}
+{'id': 4, 'description': 'Посчитать экономику по трём предложениям', 'responsible_id': 'u08', 'status': 'active', 'due': 'до среды', 'date_set': '2026-10-02', 'date_closed': None}
+
+ИСТОРИЯ СТАТУСОВ
+{'task_id': 1, 'old': None, 'new': 'active', 'quote': 'Гаврилов Павел: Назаров, подготовьте спецификацию на фильтры до пятницы.', 'meeting_id': 1}
+{'task_id': 2, 'old': None, 'new': 'active', 'quote': 'Гаврилов Павел: Ершова, запросите коммерческие предложения у трёх поставщиков до 10.10.', 'meeting_id': 1}
+{'task_id': 3, 'old': None, 'new': 'active', 'quote': 'Илюшин Антон: Я подготовлю график отгрузки к понедельнику.', 'meeting_id': 1}
+{'task_id': 4, 'old': None, 'new': 'active', 'quote': 'Гаврилов Павел: Седова, посчитайте экономику по трём предложениям до среды.', 'meeting_id': 2}
+{'task_id': 2, 'old': 'active', 'new': 'done', 'quote': 'Ершова Светлана: Коммерческие предложения у трёх поставщиков получили, сравнение готово.', 'meeting_id': 2}

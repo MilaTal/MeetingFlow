@@ -1,0 +1,399 @@
+/* MeetFlow — интерфейс без сборки (как в исходных проектах).
+   Правила экрана: номер для человека с 1, внутренний id скрыт; системные
+   сообщения не в рабочих вкладках; кнопок, на которые нет прав, нет вовсе;
+   пользователю — понятные фразы; всё экранируется (урок XSS через #search). */
+"use strict";
+const S = { theme: null, project: null, role: "member", name: "" };
+const ROLE_RU = { member: "Участник", director: "Директор", project_admin: "Админ проекта", super_admin: "Супер-админ" };
+// заняты проектами-примерами и пресетами: индиго и зелёные; для новых проектов — нижний ряд
+const PALETTES = { emerald: "#1f845a", indigo: "#6863bf", forest: "#2f4f41", polaris: "#008060", sage: "#4b6358", meadow: "#257e52" };
+const PALETTES_NEW = { petrol: "#1d5e69", ocean: "#245a8c", slate: "#46586f", graphite: "#3f4249", ochre: "#8a5a12", clay: "#a14e36", copper: "#8c5232", claret: "#7d3045" };
+const ACTOR = { meeting: ["actor-model", "со встречи"], web_form: ["actor-operator", "вручную"],
+  member_note: ["actor-operator", "комментарий"], system: ["actor-store", "система"] };
+const $ = (s, el = document) => el.querySelector(s);
+const esc = (v) => String(v ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+const isAdmin = () => (S.theme?.permissions?.admin || ["project_admin", "super_admin"]).includes(S.role);
+const store = { get(k, d) { try { return localStorage.getItem(k) ?? d; } catch { return d; } },
+  set(k, v) { try { localStorage.setItem(k, v); } catch { /* приватное окно */ } } };
+
+async function api(path, opts = {}) {
+  const headers = { "X-User-Role": S.role, "X-User-Name": encodeURIComponent(S.name), ...(opts.headers || {}) };
+  if (opts.json !== undefined) { headers["Content-Type"] = "application/json"; opts.body = JSON.stringify(opts.json); }
+  const r = await fetch(path, { ...opts, headers });
+  const ct = r.headers.get("content-type") || "";
+  const data = ct.includes("json") ? await r.json() : await r.text();
+  if (!r.ok) throw new Error((data && data.detail && (typeof data.detail === "string" ? data.detail : "Проверьте введённые данные.")) || "Не получилось.");
+  return data;
+}
+function toast(msg) {
+  const t = document.createElement("div"); t.className = "toast"; t.textContent = msg;
+  document.body.appendChild(t); setTimeout(() => t.remove(), 4000);
+}
+const fmtDate = (iso) => esc(iso ? String(iso).slice(0, 10).split("-").reverse().join(".") : "—"); // глубина защиты (ревью)
+
+function md(mdText) { // минимальный markdown: заголовки, таблицы, курсив, списки
+  const out = []; let table = [];
+  const flush = () => { if (!table.length) return;
+    const rows = table.filter((r) => !/^\s*\|?[\s:-]+\|/.test(r) || /[^\s|:-]/.test(r));
+    out.push("<table>" + rows.map((r, i) => "<tr>" + r.trim().replace(/^\||\|$/g, "").split("|")
+      .map((c) => (i === 0 ? `<th>${esc(c.trim())}</th>` : `<td>${esc(c.trim())}</td>`)).join("") + "</tr>").join("") + "</table>");
+    table = []; };
+  // строчная разметка — после экранирования: **жирный**, *курсив*
+  const inline = (t) => esc(t).replace(/\*\*([^*]+)\*\*/g, "<strong>$1</strong>").replace(/\*([^*]+)\*/g, '<em class="sub-inline">$1</em>');
+  let list = [];
+  const flushList = () => { if (list.length) { out.push(`<ul>${list.map((x) => `<li>${inline(x)}</li>`).join("")}</ul>`); list = []; } };
+  for (const line of mdText.split("\n")) {
+    if (/^\s*\|.*\|\s*$/.test(line)) { flushList(); if (!/^\s*\|[\s:|-]+\|\s*$/.test(line)) table.push(line); continue; }
+    flush();
+    let m;
+    if ((m = line.match(/^\s*[-*]\s+(.*)$/))) { list.push(m[1]); continue; }
+    flushList();
+    if ((m = line.match(/^(#{1,3})\s+(.*)$/))) out.push(`<h${m[1].length + 1}>${esc(m[2])}</h${m[1].length + 1}>`);
+    else if ((m = line.match(/^\*\*(.+)\*\*$/))) out.push(`<p class="part-label"><strong>${esc(m[1])}</strong></p>`);
+    else if ((m = line.match(/^\*([^*].*)\*$/))) out.push(`<p class="doc-sources-line">${esc(m[1])}</p>`);
+    else if (line.trim()) out.push(`<p>${inline(line)}</p>`);
+  }
+  flushList(); flush(); return out.join("\n");
+}
+
+const routes = {
+  async tasks() {
+    const view = store.get("tasks-view", "active");
+    const rows = await api(`/api/projects/${S.project}/tasks?status=${view}`);
+    const tabs = ["active", "done", "dropped"].map((v) => `<button class="btn ${v === view ? "btn-primary" : ""}" data-view="${v}">${
+      { active: "В работе", done: "Выполненные", dropped: "Снятые" }[v]}</button>`).join("");
+    const body = rows.length ? `<div class="table-wrap"><table><tr><th>№</th><th>Задача</th><th>Ответственный</th><th>Срок</th><th>Комментарий</th><th></th></tr>${
+      rows.map((t) => {
+        const mine = S.name && S.name === t.assignee;
+        const can = isAdmin() || S.role === "director" || mine;
+        return `<tr><td class="no" title="Внутренний номер: ${esc(t.id)}">${esc(t.no)}<small>${fmtDate(t.date_set)}</small></td>
+          <td>${esc(t.description)}${t.source_quote ? `<span class="sub">«${esc(t.source_quote.slice(0, 160))}»</span>` : ""}</td>
+          <td>${esc(t.assignee || "Не назначен")}</td><td>${esc(t.due_date || "—")}</td><td>${esc(t.last_comment || "")}</td>
+          <td>${can && view === "active" ? `<button class="btn" data-done="${t.id}">Выполнено</button>` : ""}
+              ${can && view !== "active" ? `<button class="btn btn-ghost" data-back="${t.id}">Вернуть</button>` : ""}</td></tr>`;
+      }).join("")}</table></div>` : `<p class="empty">Задач нет.</p>`;
+    $("#main").innerHTML = `<h1>${esc(S.theme.vocabulary.registry)}</h1><div class="row" style="margin-bottom:16px">${tabs}</div><div class="card-output">${body}</div>`;
+    $("#main").querySelectorAll("[data-view]").forEach((b) => b.onclick = () => { store.set("tasks-view", b.dataset.view); render(); });
+    $("#main").querySelectorAll("[data-done]").forEach((b) => b.onclick = () => undoable(b, b.dataset.done, "done"));
+    $("#main").querySelectorAll("[data-back]").forEach((b) => b.onclick = async () => { await api(`/api/tasks/${b.dataset.back}`, { method: "PATCH", json: { status: "active" } }); render(); });
+  },
+
+  async search() {
+    const hints = ["задачи с ответственным (ФИО)", "в этой задаче есть о ...", "было ли упомянуто", "протокол встречи от", "информация о"];
+    const q = store.get("search-q", "");
+    $("#main").innerHTML = `<h1>${esc(S.theme.vocabulary.search || "Поиск по проекту")}</h1>
+      <div class="card stack"><div class="row"><input id="sq" style="flex:1;min-width:240px" placeholder="Слово, ФИО или дата встречи" value="${esc(q)}">
+      <button class="btn btn-primary" id="sgo">Найти</button>${q ? '<button class="btn btn-ghost" id="sreset">✕ Сбросить</button>' : ""}</div>
+      <div class="row">${hints.map((h) => `<button class="btn btn-ghost" data-hint="${esc(h.replace(/\s*\(.*\)|\.{2,}/g, ""))}">${esc(h)}</button>`).join("")}</div></div>
+      <div id="sres"></div>`;
+    const run = async () => {
+      const v = $("#sq").value.trim(); store.set("search-q", v);
+      if (!v) { $("#sres").innerHTML = ""; return; }
+      const r = await api(`/api/projects/${S.project}/search?q=${encodeURIComponent(v)}`);
+      const kind = { protocol: "протокол", source: "источник", task: "задача", unit: "из записи" };
+      $("#sres").innerHTML = r.problem ? `<div class="card-output"><p class="empty">${esc(r.problem)}</p></div>`
+        : !r.results.length ? `<div class="card-output"><p class="empty">Ничего не найдено. Проверьте написание или попробуйте другое слово.</p></div>`
+        : `<div class="card-output"><p class="sub">Найдено: ${esc(r.total)}</p>${r.results.map((x) => `<div class="note"><span class="badge">${esc(kind[x.type] || x.type)}</span> <span class="meta">${fmtDate(x.meeting_date)}</span> ${x.type === "protocol" || x.type === "source" || x.type === "unit" ? `<a href="#meeting/${esc(x.id)}">открыть встречу</a>` : ""}<q>${esc(x.snippet)}</q></div>`).join("")}</div>`;
+    };
+    $("#sgo").onclick = run;
+    $("#sq").onkeydown = (e) => { if (e.key === "Enter") run(); };
+    const rs = $("#sreset"); if (rs) rs.onclick = () => { store.set("search-q", ""); render(); };
+    $("#main").querySelectorAll("[data-hint]").forEach((b) => b.onclick = () => { $("#sq").value = b.dataset.hint + " "; $("#sq").focus(); });
+    if (q) run();
+  },
+
+  async roadmap() {
+    const r = await api(`/api/projects/${S.project}/roadmap`);
+    $("#main").innerHTML = `<div class="row" style="justify-content:space-between;align-items:baseline"><h1>${esc(S.theme.vocabulary.roadmap || "Дорожная карта")}</h1>
+      <a class="btn" href="/api/projects/${encodeURIComponent(S.project)}/roadmap.docx">Скачать .docx</a></div>
+      <p class="page-sub">Собирается из реестра задач и записей встреч при каждом открытии — всегда актуальна. Решено не значит сделано: решения стоят в «Действует».</p>
+      <article class="doc-content">${md(r.markdown.split("\n").slice(1).join("\n"))}</article>`;
+  },
+
+  async meetings() {
+    const rows = await api(`/api/projects/${S.project}/meetings`);
+    const form = isAdmin() ? `<div class="card stack"><h2 style="margin:0">Новая ${esc(S.theme.vocabulary.meeting)}</h2>
+      <div class="row"><input id="m-date" type="date" required><input id="m-label" placeholder="Название (необязательно)">
+      <button class="btn btn-primary" id="m-add">Создать</button></div></div>` : "";
+    $("#main").innerHTML = `<h1>${esc(S.theme.vocabulary.meetings)}</h1>${form}<div class="card-output">${rows.length ?
+      `<table><tr><th>Дата</th><th>Название</th><th>Протокол</th></tr>${rows.map((m) => `<tr><td><a href="#meeting/${m.id}">${fmtDate(m.date)}</a></td>
+      <td>${esc(m.label)}</td><td>${m.has_protocol ? `<a href="#meeting/${m.id}">Есть, открыть</a>` : "Нет"}</td></tr>`).join("")}</table>` : `<p class="empty">Встреч пока нет.</p>`}</div>`;
+    const add = $("#m-add");
+    if (add) add.onclick = async () => { try { await api(`/api/projects/${S.project}/meetings`, { method: "POST", json: { date: $("#m-date").value, label: $("#m-label").value } }); render(); } catch (e) { toast(e.message); } };
+  },
+
+  async meeting(id) {
+    const srcs = await api(`/api/meetings/${id}/sources`);
+    let proto = null; try { proto = await api(`/api/meetings/${id}/protocol`); } catch { /* ещё нет */ }
+    const notes = (proto && proto.review_notes) || [];
+    $("#main").innerHTML = `<p><a href="#meetings">← ${esc(S.theme.vocabulary.meetings)}</a></p>
+      <h1>${esc(S.theme.vocabulary.protocol)}</h1>
+      <div class="card stack"><div class="dropzone" id="drop">Перетащите файлы встречи сюда или <label style="text-decoration:underline;cursor:pointer">выберите<input type="file" id="file" multiple hidden></label></div>
+      ${srcs.length ? `<div>${srcs.map((s) => `<span class="badge">${esc({ transcript: "расшифровка", notes: "заметки", other: "материал" }[s.kind] || s.kind)}</span> ${esc(s.name)}`).join("<br>")}</div>` : ""}
+      ${isAdmin() ? `<button class="btn btn-primary" id="run">${proto ? "Пересобрать протокол" : "Сформировать протокол"}</button>` : ""}</div>
+      ${proto ? `<div class="doc-with-notes"><div><div class="row" style="justify-content:flex-end;margin-bottom:8px"><a class="btn" href="/api/meetings/${encodeURIComponent(id)}/protocol.docx">Скачать .docx</a></div>
+      <article class="doc-content">${md(proto.markdown)}</article></div>
+      <aside class="notes-panel"><h2 style="margin-top:0">Замечания проверки · ${notes.length}</h2>${notes.length ? notes.map((n) => `<div class="note">${n.by === "код" ? `<span class="badge">проверка кодом</span> ` : ""}${esc(n.issue)}${n.quote ? `<q>${esc(n.quote)}</q>` : ""}</div>`).join("") : `<p class="empty">Замечаний нет.</p>`}</aside></div>` : `<p class="empty">Протокола пока нет.</p>`}
+      ${proto && proto.units && proto.units.length ? `<div class="card-output"><h2 style="margin-top:0">${esc(S.theme.vocabulary.units || "Из записи встречи")}: решения, договорённости, вопросы, вехи</h2>
+        <p class="sub">Собрано из записи с цитатой. Протокол при этом не меняется. Убранное можно вернуть.</p>
+        ${proto.units.map((u) => `<div class="note"><span class="badge">${esc(u.kind_ru)}</span> ${u.ts ? `<span class="meta">${esc(u.ts)}</span>` : ""} ${esc(u.text)}
+          ${u.status !== "open" && u.status !== "active" ? `<span class="sub">${esc({ closed: "закрыто", replaced: "заменено", removed: "убрано" }[u.status] || u.status)}${u.why && u.status !== "removed" ? " — " + esc(u.why) : ""}</span>` : ""}
+          ${u.roles.length ? `<span class="sub">${u.roles.map((r) => esc(r.role + ": " + r.person)).join(" · ")}</span>` : ""}
+          <q>${esc(u.quote)}</q>
+          ${isAdmin() ? (u.status === "removed" || u.status === "closed" || u.status === "replaced" ? `<button class="btn btn-ghost" data-ureturn="${u.id}">Вернуть</button>` : `<button class="btn btn-ghost btn-danger" data-uremove="${u.id}">Убрать</button>`) : ""}</div>`).join("")}</div>` : ""}`;
+    const upload = async (files) => { for (const f of files) { const fd = new FormData(); fd.append("file", f);
+      try { const r = await api(`/api/meetings/${id}/sources`, { method: "POST", body: fd }); toast(r.status === "duplicate" ? `«${f.name}» уже загружен` : `«${f.name}» принят`); } catch (e) { toast(e.message); } } render(); };
+    $("#file").onchange = (e) => upload(e.target.files);
+    const dz = $("#drop");
+    document.ondragover = (e) => { e.preventDefault(); dz.classList.add("drag-over"); };
+    document.ondragleave = () => dz.classList.remove("drag-over");
+    document.ondrop = (e) => { e.preventDefault(); dz.classList.remove("drag-over"); upload(e.dataTransfer.files); };
+    $("#main").querySelectorAll("[data-uremove]").forEach((b) => b.onclick = async () => { try { await api(`/api/units/${b.dataset.uremove}/remove`, { method: "POST" }); toast("Пункт убран. Его можно вернуть."); render(); } catch (e) { toast(e.message); } });
+    $("#main").querySelectorAll("[data-ureturn]").forEach((b) => b.onclick = async () => { try { await api(`/api/units/${b.dataset.ureturn}/return`, { method: "POST" }); toast("Пункт возвращён."); render(); } catch (e) { toast(e.message); } });
+    const run = $("#run");
+    if (run) run.onclick = async () => { run.disabled = true; run.textContent = "Формирую…";
+      try { const r = await api(`/api/meetings/${id}/run`, { method: "POST" });
+        toast(r.status === "ok" ? `Готово: задач ${r.tasks_added}, на разбор ${r.tasks_held}, закрыто ${r.tasks_closed}` : r.detail);
+      } catch (e) { toast(e.message); } render(); };
+  },
+
+  async team() {
+    const rows = await api(`/api/projects/${S.project}/people`);
+    // своя команда — фамилия и имя; внешняя — организация и роль, ФИО не обязательно (решение 03.10.26)
+    $("#main").innerHTML = `<h1>${esc(S.theme.vocabulary.team)}</h1>${isAdmin() ? `<div class="card row"><input id="p-name" placeholder="Фамилия Имя (внешнему — как называют)"><input id="p-role" placeholder="Роль на проекте"><input id="p-dept" placeholder="Отдел"><input id="p-org" placeholder="Организация (для внешних)"><label class="row" style="gap:6px"><input type="checkbox" id="p-ext"> внешняя команда</label><button class="btn btn-primary" id="p-add">Завести</button></div>` : ""}
+      <div class="card-output">${rows.length ? `<table><tr><th>№</th><th>ФИО</th><th>Роль</th><th>Отдел</th><th>Организация</th></tr>${rows.map((p, i) => `<tr><td class="no">${i + 1}</td><td>${esc(p.full_name)}${p.confirmed ? "" : ' <span class="badge">не подтверждён</span>'}${p.external ? ' <span class="badge">внешний</span>' : ""}</td><td>${esc(p.role)}</td><td>${esc(p.department)}</td><td>${esc(p.organization || "")}</td></tr>`).join("")}</table>` : `<p class="empty">Команда пуста.</p>`}</div>`;
+    const add = $("#p-add");
+    // новый человек сверяется с «Командой» до записи: совпала фамилия — вопрос «тот же или новый?» (письмо 13)
+    const send = (confirm_new) => api(`/api/projects/${S.project}/people`, { method: "POST", json: { full_name: $("#p-name").value, role: $("#p-role").value, department: $("#p-dept").value, organization: $("#p-org").value, external: $("#p-ext").checked, confirm_new } });
+    if (add) add.onclick = async () => {
+      try { await send(false); render(); }
+      catch (e) {
+        if (/подтвердите/.test(e.message) && window.confirm(`${e.message}\n\nЗавести как нового человека?`)) {
+          try { await send(true); render(); } catch (e2) { toast(e2.message); }
+        } else toast(e.message);
+      } };
+  },
+
+  async cards() {
+    const rows = await api(`/api/projects/${S.project}/cards`);
+    const why = { no_verbatim_quote: "нет дословной цитаты", no_assignee: "исполнитель не назван", assignee_not_in_team: "человека нет в Команде",
+      assignee_ambiguous: "неясно, о ком речь", duplicate: "похоже на существующую задачу", question_not_assignment: "это вопрос, а не поручение",
+      negation_in_quote: "в цитате отрицание", suspicious_instruction: "в тексте похоже на внедрённую инструкцию",
+      report_not_assignment: "похоже на отчёт о сделанном, а не на поручение",
+      same_or_new: "рядом признак, что это может быть другой человек",
+      department_without_head: "назван отдел, а руководителя у отдела нет" };
+    const st = { done: "выполнено", dropped: "снято" };
+    const body = (c) => {
+      const p = c.payload;
+      // задача уже заведена без исполнителя; выбор ставит исполнителя в неё (решение владельца 03.10.26, письмо 30)
+      if (c.kind === "assign_person") return `<span class="sub">Задача уже в реестре без исполнителя. ${p.reason === "same_or_new" ? `Тот же человек или новый? Рядом: ${(p.marks || []).map(esc).join(", ")}.` : p.reason === "unknown" ? `«${esc(p.mention || "")}» нет в «Команде». Назначьте исполнителя в реестре или заведите нового.` : "Кто из них? Подсказки только упорядочивают список."}</span>
+        ${(p.candidates || []).map((x) => `<div class="row"><button class="btn ${p.reason === "same_or_new" ? "btn-primary" : ""}" data-r="${c.id}" data-s="accepted" data-choice="${esc(x.id != null ? x.id : x.name)}">${p.reason === "same_or_new" ? "Это он: " : ""}${esc(x.name)}</button>
+          <span class="sub">${x.hints && x.hints.length ? x.hints.map(esc).join(" · ") : ""}</span></div>`).join("")}
+        ${p.reason === "same_or_new" || p.reason === "unknown" ? `<div class="row"><input id="nn-${c.id}" placeholder="Новый человек: как называют" value="${esc(p.mention || "")}"><input id="no-${c.id}" placeholder="Организация"><input id="nr-${c.id}" placeholder="Роль на проекте">
+          <button class="btn" data-new="${c.id}">Завести нового и назначить</button></div>` : ""}
+        <div class="row"><button class="btn btn-ghost" data-r="${c.id}" data-s="rejected">Оставить без исполнителя</button></div>`;
+      if (p.marks && p.marks.length && p.candidates && p.candidates.length) return `<span class="sub">Тот же человек или новый? Рядом: ${p.marks.map(esc).join(", ")}. Ответ «это он» запомнится, и в следующий раз вопроса не будет.</span>
+        <div class="row">${p.candidates.map((x) => `<button class="btn btn-primary" data-r="${c.id}" data-s="accepted" data-choice="${esc(x.id != null ? x.id : x.name)}">Это он: ${esc(x.name)}</button>`).join("")}
+        <a class="btn" href="#team">Новый человек — завести в «Команде»</a>
+        <button class="btn btn-ghost" data-r="${c.id}" data-s="rejected">Не человек</button></div>`;
+      if (p.candidates && p.candidates.length) return `<span class="sub">О ком речь? Выберите — задача заведётся на этого человека. Подсказки только упорядочивают список.</span>
+        ${p.candidates.map((x) => `<div class="row"><button class="btn" data-r="${c.id}" data-s="accepted" data-choice="${esc(x.id != null ? x.id : x.name)}">${esc(x.name)}</button>
+          <span class="sub">${x.hints.length ? x.hints.map(esc).join(" · ") : "подсказок нет"}</span></div>`).join("")}
+        <div class="row"><button class="btn btn-ghost" data-r="${c.id}" data-s="rejected">Не задача</button></div>`;
+      const list = p.closings ? `<ol>${p.closings.map((x) => `<li>${esc(st[x.status] || x.status)}: «${esc(x.quote)}»</li>`).join("")}</ol>` : "";
+      return `${list}<div class="row"><button class="btn btn-primary" data-r="${c.id}" data-s="accepted">Подтвердить</button>
+        <button class="btn" data-r="${c.id}" data-s="rejected">Не нужно</button></div>`;
+    };
+    $("#main").innerHTML = `<h1>${esc(S.theme.vocabulary.cards)}</h1><p class="page-sub">Здесь только то, что система не решила сама. «Подтвердить» выполняет предложенное: заводит задачу или применяет закрытие.</p>
+      ${rows.length ? rows.map((c) => `<div class="card-output stack"><strong>${esc(c.title)}</strong>
+        ${c.payload.reasons ? `<span class="sub">Почему: ${c.payload.reasons.map((r) => esc(why[r] || r)).join(", ")}</span>` : ""}
+        ${c.payload.quote ? `<q class="sub">«${esc(c.payload.quote)}»</q>` : ""}
+        ${body(c)}</div>`).join("") : `<p class="empty">Очередь пуста.</p>`}`;
+    $("#main").querySelectorAll("[data-new]").forEach((b) => b.onclick = async () => {
+      const id = b.dataset.new;
+      try {
+        await api(`/api/cards/${id}/resolve`, { method: "POST", json: { status: "accepted", new_full_name: $(`#nn-${id}`).value, new_organization: $(`#no-${id}`).value, new_role: $(`#nr-${id}`).value } });
+        toast("Новый человек заведён и назначен исполнителем."); render();
+      } catch (e) { toast(e.message); } });
+    $("#main").querySelectorAll("[data-r]").forEach((b) => b.onclick = async () => {
+      try {
+        const r = await api(`/api/cards/${b.dataset.r}/resolve`, { method: "POST", json: { status: b.dataset.s, choice: b.dataset.choice || "" } });
+        toast(r.rule ? `Решение записано. Правило: ${r.rule}` : "Решение записано."); render();
+      } catch (e) { toast(e.message); } });
+  },
+
+  async decisions() {
+    const rows = await api(`/api/projects/${S.project}/decisions`);
+    $("#main").innerHTML = `<h1>Реестр решений</h1><div class="card-output">${rows.length ? `<table><tr><th>Что</th><th>Решение</th><th>Почему</th><th>Когда</th></tr>${rows.map((d) => `<tr><td>${esc(d.what)}</td><td>${esc(d.decision)}</td><td>${esc(d.why)}</td><td>${fmtDate(d.at)}</td></tr>`).join("")}</table>` : `<p class="empty">Решений пока нет.</p>`}</div>`;
+  },
+
+  async monitoring(tab) {
+    // горизонтальные вкладки под разные задачи мониторинга (по образцу «Технических служб» Планёрки)
+    const TABS = { services: "Службы", intake: "Приём записей", voices: "База голосов", runs: "Прогоны и расход",
+      tech: "Технические сообщения", todo: "Заглушки" };
+    const cur = TABS[tab] ? tab : store.get("mon-tab", "services");
+    store.set("mon-tab", cur);
+    const bar = `<div class="seg-tabs" role="tablist">${Object.entries(TABS).map(([k, v]) =>
+      `<a class="seg-tab" role="tab" href="#monitoring/${k}" aria-selected="${k === cur}">${v}</a>`).join("")}</div>`;
+    const yes = (b) => (b ? "да" : '<span class="overdue">нет</span>');
+    const kv = (rows) => `<dl class="kv">${rows.map(([k, v]) => `<dt>${esc(k)}</dt><dd>${v}</dd>`).join("")}</dl>`;
+    const scanLine = (s) => !s ? "проходов ещё не было" : s.status === "unavailable" ? `<span class="overdue">папка недоступна</span> · <span class="meta">${esc(String(s.at).replace("T", " "))}</span>`
+      : `<span class="meta">${esc(String(s.at).replace("T", " "))}</span> · принято ${s.ingested.length}, ждут записи ${s.held.length}, не принято ${s.rejected.length}, повторы ${s.duplicates.length}, без даты ${s.no_date.length}, ещё пишутся ${s.waiting.length}`;
+    let body = "";
+    if (cur === "services") {
+      const m = await api("/api/monitoring");
+      const t = m.llm_tool || {};
+      const toolRu = { mock: "стенд без модели", ollama: "локальная модель (Ollama)", openrouter: "OpenRouter" }[t.tool] || t.tool;
+      body = `<p class="page-sub">Подключение модели: <strong>${esc(toolRu)}</strong>${t.tool !== "mock" ? ` · генерирует ${esc(t.generator)}, проверяет ${esc(t.verifier)}` : ""} · потолок ответа ${esc(t.max_answer_tokens)} токенов${t.tool === "openrouter" ? ` · ключ ${t.openrouter_key_set ? "задан" : '<span class="overdue">не задан</span>'}` : ""}. Выбирается при развёртывании: MEETFLOW_LLM = mock / ollama / openrouter.</p>
+      <div class="card-output"><table><tr><th>Тип</th><th>Коннектор</th><th>Состояние</th><th>Пояснение</th></tr>${m.connectors.map((c) => `<tr><td>${esc(c.kind)}</td><td class="meta">${esc(c.name)}</td><td>${c.ok === true ? "работает" : c.ok === false ? '<span class="overdue">не работает</span>' : "по запросу"}</td><td>${esc(c.detail || "")}</td></tr>`).join("")}</table></div>`;
+    } else if (cur === "intake") {
+      const rows = await api("/api/monitoring/intake");
+      body = rows.length ? rows.map((r) => `<div class="card-output"><h2 style="margin-top:0">${esc(r.project)}</h2>${kv([
+        ["Папка-приёмник", r.folder ? `<span class="meta">${esc(r.folder)}</span>` : 'не задана — <a href="#settings">задать в «Настройках»</a>'],
+        ["Папка доступна", r.folder ? yes(r.exists) : "—"], ["Файл-метка", r.folder ? yes(r.marker) : "—"],
+        ["Файлов ждёт в папке", r.folder && r.exists ? esc(r.files_waiting) : "—"],
+        ["Опрос", `раз в ${esc(r.interval)} с · фоновый забор ${r.worker ? "работает" : '<span class="overdue">не запущен</span>'}`],
+        ["Автозапуск протокола", r.autorun ? "включён" : "выключен"],
+        ["Последний проход", scanLine(r.last_scan)], ["Последний результативный", scanLine(r.last_useful_scan)]])}</div>`).join("")
+        : '<p class="empty">Проектов нет.</p>';
+    } else if (cur === "voices") {
+      const v = await api("/api/monitoring/voice-base");
+      const dict = (d) => d ? Object.entries(d).map(([k, n]) => `${esc(k)}: ${esc(n)}`).join(" · ") : "—";
+      body = `<div class="card-output">${kv([["Файл базы", v.path ? `<span class="meta">${esc(v.path)}</span>` : 'не задан — <a href="#settings">задать в «Настройках»</a>'],
+        ["Состояние", v.ok ? "доступна, только чтение" : `<span class="overdue">${esc(v.detail || "недоступна")}</span>`],
+        ...(v.ok ? [["Отпечатков голоса", esc(v.samples)], ["Из них привязаны к человеку", esc(v.samples_linked)],
+          ["Людей в базе", esc(v.people)], ["Подтверждены", esc(v.people_confirmed)], ["Ждут подтверждения", esc(v.people_waiting)],
+          ["Модели отпечатка", dict(v.embedding_models)], ["По проектам", dict(v.by_project)],
+          ["Последний отпечаток", v.last_sample_at ? `<span class="meta">${esc(v.last_sample_at)}</span>` : "—"],
+          ["Размер", `${esc(v.size_kb)} КБ · журнал ${esc(v.journal_mode)}`]] : [])])}
+        <p class="sub">База общая для проектов и здесь только читается. Голос не покидает машину.</p></div>`;
+    } else if (cur === "runs") {
+      const days = Number(store.get("runs-days", "7"));
+      const r = await api(`/api/monitoring/runs?days=${days}`);
+      const lim = r.limits || {};
+      const tbl = (d, cap) => `<h2>${cap}</h2>${Object.keys(d).length ? `<table><tr><th>${cap === "По дням" ? "День" : cap === "По моделям" ? "Модель" : "Назначение"}</th><th>Вызовов</th><th>$</th><th>Секунд</th><th>Знаков</th></tr>${Object.entries(d).map(([k, x]) => `<tr><td class="meta">${esc(k)}</td><td>${esc(x.calls)}</td><td>${esc(x.cost_usd)}</td><td>${esc(x.seconds)}</td><td>${esc(x.chars)}</td></tr>`).join("")}</table>` : '<p class="empty">Нет данных.</p>'}`;
+      body = `<div class="row" style="margin-bottom:12px">${[1, 7, 30].map((d) => `<button class="btn ${d === days ? "btn-primary" : ""}" data-days="${d}">${d === 1 ? "Сутки" : d + " дней"}</button>`).join("")}</div>
+        <div class="card-output">${kv([["Вызовов модели", esc(r.calls)], ["Расход", `${esc(r.cost_usd)} $`],
+          ["Прогонов", `${esc(r.runs_total ?? 0)}, из них остановлено по пределу ${esc(r.runs_stopped ?? 0)}`],
+          ["Стоимость успешного прогона", r.cost_per_success_usd != null ? `${esc(r.cost_per_success_usd)} $` : "—"],
+          ["Сбоев вызова", esc(r.errors ?? 0)],
+          ["Потолки на прогон", `вызовов ${esc(lim.max_calls)} (+${esc(lim.verify_reserve)} на проверку), ${esc(lim.max_cost_usd)} $, ${esc(lim.max_chars_per_call)} знаков, ${esc(lim.max_seconds)} с`],
+          ["Битых строк журнала", esc(r.broken_lines)]])}<p class="sub">${esc(r.note)}</p></div>
+        <div class="card-output"><h2 style="margin-top:0">Последние прогоны</h2>${r.runs && r.runs.length ? `<table><tr><th>Когда</th><th>Встреча</th><th>Итог</th><th>Вызовов</th><th>$</th><th>Задач</th><th>На разбор</th><th>Закрыто</th></tr>${r.runs.map((x) => `<tr><td class="meta">${esc(String(x.ts).replace("T", " "))}</td><td>${esc(x.meeting_id)}</td><td>${x.status === "ok" ? "готово" : x.status === "stopped_by_limit" ? '<span class="overdue">остановлено по пределу</span>' : esc(x.status)}</td><td>${esc(x.calls)}</td><td>${esc(x.cost_usd)}</td><td>${esc(x.added ?? "—")}</td><td>${esc(x.held ?? "—")}</td><td>${esc(x.closed ?? "—")}</td></tr>`).join("")}</table>` : '<p class="empty">Прогонов не было.</p>'}</div>
+        <div class="card-output">${tbl(r.by_purpose, "По назначению")}${tbl(r.by_model, "По моделям")}${tbl(r.by_day, "По дням")}</div>`;
+    } else if (cur === "tech") {
+      const m = await api("/api/monitoring");
+      body = `<div class="card-output">${m.technical_messages.length ? m.technical_messages.map((t) => `<div class="note">${esc(t.title)} <span class="sub meta">${esc(String(t.created_at || "").replace("T", " "))}</span></div>`).join("") : '<p class="empty">Технических сообщений нет.</p>'}</div>`;
+    } else {
+      const m = await api("/api/monitoring");
+      body = `<div class="card-output">${m.todo.length ? m.todo.map((t) => `<div class="sub meta">${esc(t)}</div>`).join("") : '<p class="empty">Заглушек нет.</p>'}</div>`;
+    }
+    $("#main").innerHTML = `<h1>Мониторинг</h1>${bar}${body}`;
+    $("#main").querySelectorAll("[data-days]").forEach((b) => b.onclick = () => { store.set("runs-days", b.dataset.days); render(); });
+  },
+
+  async settings() {
+    const st = await api(`/api/projects/${S.project}/settings`);
+    const i = st.intake;
+    $("#main").innerHTML = `<h1>Настройки</h1><p class="page-sub">Только для супер-администратора. Адреса меняются только с компьютера, где работает сервер; каждое изменение записывается в реестр решений.</p>
+      <div class="card stack"><h2 style="margin:0">Папка-приёмник записей</h2>
+        <div class="sub">Сейчас: ${i.folder ? `<span class="meta">${esc(i.folder)}</span>` : "не задана"}</div>
+        <p class="sub">Сюда кладутся записи и расшифровки встреч этого проекта. Нужна одна дата в имени файла. Нельзя: корень диска, домашняя папка, «Документы», «Рабочий стол», «Загрузки», папка приложения. Пустую папку система подпишет сама; непустая принимается только с файлом-меткой.</p>
+        <input id="wf-path" placeholder="Полный адрес, например D:\\Встречи\\Приёмник" value="${esc(i.folder || "")}">
+        <input id="wf-repeat" placeholder="Повторите адрес — защита от опечатки">
+        <div class="row"><button class="btn btn-primary" id="wf-save">Сохранить адрес</button>${i.folder ? '<button class="btn btn-ghost btn-danger" id="wf-off">Отключить папку</button>' : ""}</div>
+      </div>
+      <div class="card stack"><h2 style="margin:0">Опрос папки</h2>
+        <div class="row"><input id="wf-int" type="number" min="${esc(st.min_interval)}" step="30" value="${esc(i.interval)}" style="width:140px"><span class="sub">секунд между проходами (не меньше ${esc(st.min_interval)})</span><button class="btn" id="wf-int-save">Сохранить</button></div>
+      </div>
+      <div class="card stack"><h2 style="margin:0">Автозапуск протокола</h2>
+        <div class="sub">Сейчас: ${i.autorun ? "включён — расшифровка из папки сразу даёт протокол" : "выключен — протокол формирует администратор кнопкой"}</div>
+        <button class="btn" id="ar-toggle">${i.autorun ? "Выключить" : "Включить"}</button>
+      </div>
+      <div class="card stack"><h2 style="margin:0">База голосов</h2>
+        <div class="sub">Сейчас: ${st.voice_base_path ? `<span class="meta">${esc(st.voice_base_path)}</span>` : "не задана"}. Путь к файлу общей базы (например voices.db). База только читается.</div>
+        <input id="vb-path" placeholder="Полный путь к файлу базы" value="${esc(st.voice_base_path || "")}">
+        <input id="vb-repeat" placeholder="Повторите путь">
+        <button class="btn btn-primary" id="vb-save">Сохранить путь</button>
+      </div>`;
+    const post = async (url, json, ok) => { try { await api(url, { method: "POST", json }); toast(ok); render(); } catch (e) { toast(e.message); } };
+    $("#wf-save").onclick = () => post(`/api/projects/${S.project}/settings/watch-folder`, { path: $("#wf-path").value, path_repeat: $("#wf-repeat").value }, "Адрес папки-приёмника сохранён.");
+    const off = $("#wf-off");
+    if (off) off.onclick = () => post(`/api/projects/${S.project}/settings/watch-folder`, { path: "", path_repeat: "" }, "Папка-приёмник отключена.");
+    $("#wf-int-save").onclick = () => post(`/api/projects/${S.project}/settings/watch-interval`, { seconds: Number($("#wf-int").value) }, "Интервал опроса сохранён.");
+    $("#ar-toggle").onclick = () => post(`/api/projects/${S.project}/settings/autorun`, { enabled: !i.autorun }, i.autorun ? "Автозапуск выключен." : "Автозапуск включён.");
+    $("#vb-save").onclick = () => post("/api/settings/voice-base", { path: $("#vb-path").value, path_repeat: $("#vb-repeat").value }, "Путь к базе голосов сохранён.");
+  },
+
+  async design() {
+    const cur = document.documentElement.dataset.palette;
+    $("#main").innerHTML = `<h1>Оформление</h1><div class="card stack"><h2 style="margin:0">Палитра</h2>${[["Проекты-примеры и пресеты", PALETTES], ["Для новых проектов", PALETTES_NEW]].map(([cap, set]) => `<div class="sub">${cap}</div><div class="swatches">${Object.entries(set).map(([k, v]) => `<button class="swatch" style="background:${v}" title="${k}" aria-label="Палитра ${k}" aria-pressed="${k === cur}" data-p="${k}"></button>`).join("")}</div>`).join("")}
+      <h2 style="margin:0">Тема</h2><div class="row">${["auto", "light", "dark"].map((t) => `<button class="btn" data-t="${t}">${{ auto: "Как в системе", light: "Светлая", dark: "Тёмная" }[t]}</button>`).join("")}</div>
+      <h2 style="margin:0">Метки исполнителей</h2><div class="row">${Object.values(ACTOR).map(([c, t]) => `<span class="actor ${c}">${t}</span>`).join("")}<span class="actor actor-local">локальное распознавание</span><span class="actor actor-admin">супер-админ</span></div></div>`;
+    $("#main").querySelectorAll("[data-p]").forEach((b) => b.onclick = () => { document.documentElement.dataset.palette = b.dataset.p; store.set("palette", b.dataset.p); render(); });
+    $("#main").querySelectorAll("[data-t]").forEach((b) => b.onclick = () => { if (b.dataset.t === "auto") delete document.documentElement.dataset.theme; else document.documentElement.dataset.theme = b.dataset.t; store.set("theme", b.dataset.t); });
+  },
+};
+
+function undoable(btn, id, status) { // «Выполнено через 2 с — Отменить»
+  let left = 2; btn.textContent = `Отменить (${left})`;
+  const timer = setInterval(async () => { left -= 1;
+    if (left > 0) { btn.textContent = `Отменить (${left})`; return; }
+    clearInterval(timer);
+    try { await api(`/api/tasks/${id}`, { method: "PATCH", json: { status } }); } catch (e) { toast(e.message); }
+    render(); }, 1000);
+  btn.onclick = () => { clearInterval(timer); render(); };
+}
+
+let renderSeq = 0;
+async function render() {
+  // защита от гонки: медленный ответ прошлого экрана не перерисовывает новый
+  const seq = ++renderSeq;
+  const main = $("#main");
+  const realSet = Object.getOwnPropertyDescriptor(Element.prototype, "innerHTML").set;
+  Object.defineProperty(main, "innerHTML", { configurable: true, set(v) { if (seq === renderSeq) realSet.call(main, v); },
+    get() { return Object.getOwnPropertyDescriptor(Element.prototype, "innerHTML").get.call(main); } });
+  const [route, arg] = (location.hash.slice(1) || "tasks").split("/");
+  document.querySelectorAll(".nav a").forEach((a) => {
+    if (a.dataset.route === (route === "meeting" ? "meetings" : route)) a.setAttribute("aria-current", "page");
+    else a.removeAttribute("aria-current");
+  });
+  document.querySelectorAll("[data-admin]").forEach((el) => (el.hidden = !isAdmin()));
+  document.querySelectorAll("[data-super]").forEach((el) => (el.hidden = S.role !== "super_admin"));
+  if (!S.project && route !== "design") { $("#main").innerHTML = `<h1>Нет проекта</h1><p class="page-sub">Создайте проект: python -m meetflow new-project.</p>`; return; }
+  try { await (routes[route] || routes.tasks)(arg); } catch (e) { $("#main").innerHTML = `<h1>Не получилось открыть раздел</h1><p class="page-sub">${esc(e.message)}</p>`; }
+  // стенд без модели виден на каждом экране (письмо meeting-registry 01/19)
+  if (S.theme && S.theme.stand) $("#main").insertAdjacentHTML("afterbegin",
+    `<p class="stand-banner" role="status">Стенд без модели: протоколы собирает заглушка, а не модель. Для работы нужен MEETFLOW_LLM=ollama.</p>`);
+}
+
+async function boot() {
+  S.theme = await api("/api/theme");
+  const projects = await api("/api/projects");
+  // в шапке — имя текущего проекта из базы и его тематика; название
+  // проекта-примера в тему не зашивается (правка 03.10.26)
+  const showBrand = () => {
+    const p = projects.find((x) => x.id === S.project);
+    const name = p ? p.name : S.theme.vocabulary.app_title;
+    $("#app-title").textContent = name; $("#app-subtitle").textContent = ""; // только имя проекта
+    document.title = name;
+  };
+  document.documentElement.dataset.palette = store.get("palette", S.theme.design.palette);
+  const th = store.get("theme", S.theme.design.dark === "auto" ? "auto" : S.theme.design.dark);
+  if (th !== "auto") document.documentElement.dataset.theme = th;
+  $('[data-route="tasks"]').textContent = S.theme.vocabulary.registry; $('[data-route="meetings"]').textContent = S.theme.vocabulary.meetings;
+  $('[data-route="search"]').textContent = S.theme.vocabulary.search || "Поиск по проекту"; $('[data-route="roadmap"]').textContent = S.theme.vocabulary.roadmap || "Дорожная карта";
+  $('[data-route="cards"]').textContent = S.theme.vocabulary.cards; $('[data-route="team"]').textContent = S.theme.vocabulary.team;
+  S.role = store.get("role", "member"); S.name = store.get("name", "");
+  const roleSel = $("#role"); roleSel.innerHTML = S.theme.roles.map((r) => `<option value="${esc(r)}">${esc(ROLE_RU[r] || r)}</option>`).join("");
+  roleSel.value = S.role; roleSel.onchange = () => { S.role = roleSel.value; store.set("role", S.role); render(); };
+  const nm = $("#username"); nm.value = S.name; nm.onchange = () => { S.name = nm.value.trim(); store.set("name", S.name); render(); };
+  const ps = $("#project"); ps.innerHTML = projects.map((p) => `<option value="${p.id}">${esc(p.name)}</option>`).join("");
+  S.project = Number(store.get("project", projects[0]?.id || 0)) || projects[0]?.id || null;
+  if (S.project) ps.value = S.project;
+  showBrand();
+  ps.onchange = () => { S.project = Number(ps.value); store.set("project", ps.value); showBrand(); render(); };
+  window.onhashchange = render; render();
+}
+document.addEventListener("keydown", (e) => { if (e.key === "Escape") document.querySelectorAll(".toast").forEach((t) => t.remove()); });
+boot().catch((e) => { $("#main").innerHTML = `<h1>Сервер недоступен</h1><p class="page-sub">${esc(e.message)}</p>`; });

@@ -1,0 +1,26 @@
+# Только локальный/самостоятельный раннер GitLab (shell executor на машине контура).
+# GitHub Actions запрещён манифестом. Модели не вызываются: MEETFLOW_LLM=mock.
+variables:
+  PYTHONIOENCODING: "utf-8"
+  MEETFLOW_LLM: "mock"
+  HF_HUB_OFFLINE: "1"
+
+stages: [functional, security, load]
+
+functional:
+  stage: functional
+  tags: [local]
+  script:
+    - python -m pytest tests -q -m "not security and not load and not scale" -p no:cacheprovider
+
+security:
+  stage: security
+  tags: [local]
+  script:
+    - python -m pytest tests -q -m security -p no:cacheprovider
+
+load:
+  stage: load
+  tags: [local]
+  script:
+    - python -m pytest tests -q -m "load or scale" -p no:cacheprovider

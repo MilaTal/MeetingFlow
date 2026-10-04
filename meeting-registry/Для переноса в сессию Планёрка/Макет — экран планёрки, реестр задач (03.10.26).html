@@ -1,0 +1,169 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Экран планёрки — макет</title>
+<style>
+:root{
+  --bg:#fafafa; --surface:#fff; --border:#e4e4e7; --field-bg:#f4f4f8;
+  --text:#18181b; --text-2:#3f3f46; --text-muted:#71717a;
+  --accent:#2f4f41; --accent-fill:#3d4f47; --accent-soft:#e7eeea; --accent-soft-2:#f3f7f5;
+  --warning:#a21caf; --warning-soft:#fdf4ff;
+  --radius:16px; --radius-sm:10px;
+  /* только для экрана планёрки (владелец 03.10.26: чистые зелёный и сливовый смотрятся тревожно) */
+  --live-head:#5f7369; --live-warn:#8e5a92; --live-warn-soft:#f8f2f8; --live-warn-line:#cfb3d1;
+}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--text);font-family:-apple-system,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;font-size:14.5px;line-height:1.5}
+main{max-width:1320px;margin:0 auto;padding:24px 28px 40px}
+a{color:var(--accent)}
+.note{font-size:12.5px;color:var(--text-muted);margin:0 0 16px}
+
+/* 1 Шапка страницы — одна строка, одно действие справа */
+.page-head{display:flex;align-items:center;gap:16px;flex-wrap:wrap;margin-bottom:20px}
+.back{font-size:13px;font-weight:500;color:var(--text-muted);text-decoration:none}
+.back:hover{color:var(--accent)}
+h1{font-size:21px;font-weight:700;margin:0;letter-spacing:-.01em}
+.tabs{display:inline-flex;background:var(--field-bg);border-radius:999px;padding:3px}
+.tab{font-size:13px;font-weight:500;padding:6px 14px;border-radius:999px;color:var(--text-muted);text-decoration:none}
+.tab.on{background:var(--accent-fill);color:#fff}
+.spacer{flex:1}
+.btn-primary{background:var(--accent-fill);color:#fff;text-decoration:none;font-size:13px;font-weight:600;padding:8px 14px;border-radius:var(--radius-sm)}
+
+/* 2 Заголовок списка и показатели — якорь экрана */
+.board{background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);box-shadow:0 1px 2px rgba(0,0,0,.04),0 8px 24px rgba(47,79,65,.06);overflow:hidden}
+.board-head{display:flex;align-items:flex-end;gap:24px;flex-wrap:wrap;padding:20px 24px 16px;border-bottom:1px solid var(--border);
+  background:linear-gradient(180deg,var(--accent-soft-2),var(--surface))}
+.board-title h2{font-size:21px;font-weight:700;margin:0}
+.board-title p{margin:2px 0 0;color:var(--text-muted);font-size:13px}
+.kpis{display:flex;gap:10px;margin-left:auto;flex-wrap:wrap}
+.kpi{min-width:132px;padding:8px 14px;border-radius:var(--radius-sm);background:var(--surface);border:1px solid var(--border);cursor:pointer;text-align:left}
+.kpi b{display:block;font-size:21px;font-weight:700;line-height:1.2;font-variant-numeric:tabular-nums}
+.kpi span{font-size:12.5px;font-weight:600;color:var(--text-muted)}
+.kpi.on{border-color:var(--accent);box-shadow:inset 0 0 0 1px var(--accent)}
+.kpi.warn b{color:var(--live-warn)}
+.kpi.warn{background:var(--live-warn-soft);border-color:#eadcea}
+
+/* 3 Таблица */
+.cols,.row{display:grid;grid-template-columns:44px 52px minmax(0,1fr) 250px 120px 84px;column-gap:16px;align-items:center;padding:0 24px}
+.cols{position:sticky;top:0;background:var(--live-head);color:#fff;font-size:12.5px;font-weight:600;letter-spacing:.02em;height:40px;z-index:1}
+.cols .r{text-align:right}
+.row{min-height:64px;padding-top:10px;padding-bottom:10px;border-bottom:1px solid var(--border);font-size:16px}
+.row:nth-child(even){background:#fcfcfd}
+.row:hover{background:var(--accent-soft-2)}
+.row.over{box-shadow:inset 4px 0 0 var(--live-warn-line)}
+.chk{width:18px;height:18px;accent-color:var(--accent)}
+.num{font-size:13px;color:var(--text-muted);font-variant-numeric:tabular-nums}
+.task{min-width:0}
+.task .t{display:block}  /* формулировку не обрезать — её читают вслух (решение 02.10.26) */
+.proj{display:inline-block;font-size:12.5px;font-weight:600;color:var(--accent);background:var(--accent-soft);border-radius:999px;padding:1px 10px;margin-right:8px;vertical-align:2px}
+.last{display:block;font-size:13px;color:var(--text-muted);margin-top:2px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.who{display:flex;align-items:center;gap:10px;min-width:0;color:var(--text-2)}
+.who .n{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.av{flex:0 0 64px;height:26px;border-radius:999px;background:var(--accent-soft);color:var(--accent);font-size:12.5px;font-weight:700;display:grid;place-items:center;letter-spacing:.02em}
+.av.none{background:var(--field-bg);color:var(--text-muted)}
+.due{font-variant-numeric:tabular-nums;color:var(--text-2)}
+.due.none{color:var(--text-muted);font-size:13px}
+.pill{display:inline-block;font-size:12.5px;font-weight:600;color:var(--live-warn);background:var(--live-warn-soft);border-radius:999px;padding:1px 8px;margin-top:2px}
+.age{text-align:right;font-size:13px;color:var(--text-muted);font-variant-numeric:tabular-nums}
+.foot{display:flex;justify-content:space-between;padding:12px 24px;font-size:13px;color:var(--text-muted);background:var(--accent-soft-2)}
+@media (max-width:1100px){.cols,.row{grid-template-columns:36px minmax(0,1fr) 200px 104px}.cols .c-num,.row .num,.cols .c-age,.row .age{display:none}.kpis{margin-left:0}}
+</style>
+</head>
+<body>
+<main>
+<p class="note">Макет ветки meeting-registry, 03.10.26. Шрифты, цвета и кегли — из styles.css Планёрки и утверждённой лестницы 21/16/14.5/13/12.5. Строки взяты со скриншота владельца; «в работе N дн.», «последнее», номера и отделы у строк — данные примера. Метка слева от имени — отдел из «Команды»; нет отдела — серый прочерк.</p>
+
+<div class="page-head">
+  <a class="back" href="#">← Список планёрок</a>
+  <h1>Планёрка 02.10.26</h1>
+  <nav class="tabs"><a class="tab on" href="#">Реестр задач · 33</a><a class="tab" href="#">Прошлая планёрка · 01.10.26</a></nav>
+  <span class="spacer"></span>
+  <a class="btn-primary" href="#">К протоколу этой планёрки →</a>
+</div>
+
+<section class="board">
+  <div class="board-head">
+    <div class="board-title">
+      <h2>Задачи в работе</h2>
+      <p>на 02.10.26 · из протоколов планёрок · сначала просроченные</p>
+    </div>
+    <div class="kpis">
+      <button class="kpi on"><b>33</b><span>в работе</span></button>
+      <button class="kpi warn"><b>3</b><span>просрочено</span></button>
+      <button class="kpi"><b>5</b><span>срок на неделе</span></button>
+      <button class="kpi"><b>20</b><span>без срока</span></button>
+    </div>
+  </div>
+
+  <div class="cols"><span></span><span class="c-num">№</span><span>Задача</span><span>Ответственный</span><span>Срок</span><span class="r c-age">В работе</span></div>
+
+  <div class="row over">
+    <input type="checkbox" class="chk"><span class="num">212</span>
+    <div class="task"><span class="t"><span class="proj">Бухта-Север</span>Составить график устранения замечаний</span><span class="last">Последнее 01.10: график запрошен у подрядчика</span></div>
+    <div class="who"><span class="av" title="Отдел: ОПР">ОПР</span><span class="n">Панов Е.С., Гаврилов С.С.</span></div>
+    <div><span class="due">01.10.26</span><br><span class="pill">просрочено 1 дн.</span></div>
+    <span class="age">9 дн.</span>
+  </div>
+  <div class="row over">
+    <input type="checkbox" class="chk"><span class="num">205</span>
+    <div class="task"><span class="t"><span class="proj">Новатэк-УЛ Вакуумка</span>Проработать механизм упаковки и маркировки товара</span></div>
+    <div class="who"><span class="av" title="Отдел: СЦ">СЦ</span><span class="n">Илюшин, Глебов</span></div>
+    <div><span class="due">01.10.26</span><br><span class="pill">просрочено 1 дн.</span></div>
+    <span class="age">14 дн.</span>
+  </div>
+  <div class="row">
+    <input type="checkbox" class="chk"><span class="num">219</span>
+    <div class="task"><span class="t">Включить в новое обязательство комплектацию ГСП с посудой и определить срок её проведения</span></div>
+    <div class="who"><span class="av" title="Отдел: ОСН">ОСН</span><span class="n">Медведев Анатолий Юрьевич</span></div>
+    <div><span class="due">02.10.26</span></div>
+    <span class="age">2 дн.</span>
+  </div>
+  <div class="row">
+    <input type="checkbox" class="chk"><span class="num">198</span>
+    <div class="task"><span class="t"><span class="proj">Курск261</span>По итогам анализа спецификации обсудить замену позиций (в т.ч. кабель со сроком поставки конец октября)</span><span class="last">Последнее 30.09: спецификация у поставщика</span></div>
+    <div class="who"><span class="av" title="Отдел: ОЛГ">ОЛГ</span><span class="n">Балашов Д.; Шубин А.</span></div>
+    <div><span class="due none">без срока</span></div>
+    <span class="age">16 дн.</span>
+  </div>
+  <div class="row">
+    <input type="checkbox" class="chk"><span class="num">201</span>
+    <div class="task"><span class="t"><span class="proj">Командиршор</span>Организовать подписание актов</span></div>
+    <div class="who"><span class="av none" title="Отдел не указан в «Команде»">—</span><span class="n">Матвеев</span></div>
+    <div><span class="due none">без срока</span></div>
+    <span class="age">12 дн.</span>
+  </div>
+  <div class="row">
+    <input type="checkbox" class="chk"><span class="num">203</span>
+    <div class="task"><span class="t"><span class="proj">Эль-Дабаа</span>Контролировать проектирование СТЖ-50</span></div>
+    <div class="who"><span class="av" title="Отдел: ЦДУ">ЦДУ</span><span class="n">Баженова Наталья</span></div>
+    <div><span class="due none">без срока</span></div>
+    <span class="age">12 дн.</span>
+  </div>
+  <div class="row">
+    <input type="checkbox" class="chk"><span class="num">207</span>
+    <div class="task"><span class="t"><span class="proj">Субханкулово</span>Направить Тарханову уведомление о расторжении договора в связи со срывом сроков</span></div>
+    <div class="who"><span class="av" title="Отдел: Фин">Фин</span><span class="n">Федосеева В.Е.</span></div>
+    <div><span class="due none">без срока</span></div>
+    <span class="age">7 дн.</span>
+  </div>
+  <div class="row">
+    <input type="checkbox" class="chk"><span class="num">209</span>
+    <div class="task"><span class="t"><span class="proj">ВЧНГХАЛ-СДМ211</span>Устранить замечания по программе ПНР</span></div>
+    <div class="who"><span class="av" title="Отдел: ОПР">ОПР</span><span class="n">Панов Е.С.</span></div>
+    <div><span class="due none">без срока</span></div>
+    <span class="age">7 дн.</span>
+  </div>
+  <div class="row">
+    <input type="checkbox" class="chk"><span class="num">210</span>
+    <div class="task"><span class="t">Оформить заявки на ПНР на Красный холм и Шушнур</span></div>
+    <div class="who"><span class="av" title="Отдел: Прод">Прод</span><span class="n">Абрамов</span></div>
+    <div><span class="due none">без срока</span></div>
+    <span class="age">7 дн.</span>
+  </div>
+  <div class="foot"><span>Показано 9 из 33 · прокрутка внутри списка, шапка таблицы остаётся на месте</span><span>Отметка галочкой — по ходу планёрки, если нужно</span></div>
+</section>
+</main>
+</body>
+</html>

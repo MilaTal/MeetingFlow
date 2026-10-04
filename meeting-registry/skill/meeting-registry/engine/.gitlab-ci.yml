@@ -1,0 +1,20 @@
+# Только для собственного раннера внутри контура (тег local). Данные встреч наружу не уходят:
+# тесты и eval идут на вымышленной «Команде» и вымышленных встречах из tests/data и eval/*.json.
+stages: [test, eval]
+
+test:
+  stage: test
+  tags: [local]
+  script:
+    - python -m pip install -r requirements.txt
+    - python -m pytest tests -q
+
+eval:
+  stage: eval
+  tags: [local]
+  script:
+    - python eval/run_eval.py --label ci --set cases
+    - python eval/run_eval.py --label ci --set cases_blind
+    - python eval/cost_attack.py
+  artifacts:
+    paths: [eval/results/]

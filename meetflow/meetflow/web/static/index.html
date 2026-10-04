@@ -1,0 +1,41 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>MeetFlow</title>
+  <link rel="stylesheet" href="styles.css?v=20261003t">
+</head>
+<body>
+<div class="layout">
+  <aside class="sidebar">
+    <div class="brand"><span id="app-title">MeetFlow</span><small id="app-subtitle"></small></div>
+    <nav class="nav" id="nav-main">
+      <a class="main" href="#tasks" data-route="tasks">Реестр задач</a>
+      <a class="main" href="#meetings" data-route="meetings">Встречи</a>
+      <a class="main" href="#roadmap" data-route="roadmap">Дорожная карта</a>
+      <a class="main" href="#search" data-route="search">Поиск по проекту</a>
+    </nav>
+    <div class="nav-sep"></div>
+    <nav class="nav" id="nav-service">
+      <a href="#team" data-route="team">Команда</a>
+      <a href="#cards" data-route="cards" data-admin>Конфликты</a>
+      <a href="#decisions" data-route="decisions" data-admin>Реестр решений</a>
+    </nav>
+    <div class="nav-sep" data-super></div>
+    <nav class="nav" data-super>
+      <a href="#monitoring" data-route="monitoring">Мониторинг</a>
+      <a href="#settings" data-route="settings">Настройки</a>
+      <a href="#design" data-route="design">Оформление</a>
+    </nav>
+    <div class="whoami">
+      <label>Проект <select id="project"></select></label>
+      <label>Вы работаете как <select id="role"></select></label>
+      <input id="username" placeholder="ФИО (для своих задач)">
+    </div>
+  </aside>
+  <main class="main" id="main" tabindex="-1"></main>
+</div>
+<script src="app.js?v=20261003t"></script>
+</body>
+</html>

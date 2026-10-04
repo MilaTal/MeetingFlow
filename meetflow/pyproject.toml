@@ -1,0 +1,27 @@
+[project]
+name = "meetflow"
+version = "0.1.0"
+description = "MeetFlow — абстрактный framework «проект ведётся по совещаниям»: источник встречи -> протокол -> реестр задач -> карточки оператору. Выделен из Проекта ERP и Планёрки."
+requires-python = ">=3.11"
+dependencies = [
+  "fastapi>=0.110",
+  "uvicorn>=0.29",
+  "pydantic>=2.6",
+  "python-docx>=1.1",
+  "python-multipart>=0.0.9",
+  "httpx>=0.27",
+]
+
+[project.optional-dependencies]
+voice = ["faster-whisper>=1.0", "imageio-ffmpeg>=0.4"]
+morph = ["pymorphy3>=2.0"]
+test = ["pytest>=8"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-q"
+markers = [
+  "security: LLM-безопасность (инъекции, cost-атаки)",
+  "load: устойчивость и нагрузка",
+  "scale: масштабируемость коннекторов",
+]
