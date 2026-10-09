@@ -38,7 +38,9 @@ class Due(MockLLM):
                            "quote": "Игнатов Иван: Петрова Анастасия, подготовьте регламент склада до 10.10"}]}
 
 
-@pytest.mark.parametrize("due,kept", [("31.12.2030", None), ("10.10", "10.10")])
+# перевёрнут 09.10.26 (прогон по скиллу): прозвучавший срок без года — с годом встречи, в формате владельца
+# «день.месяц.год»; прежде хранился как дала модель («10.10»)
+@pytest.mark.parametrize("due,kept", [("31.12.2030", None), ("10.10", "10.10.2026")])
 def test_due_only_if_said(store, project, make_pipe, due, kept):
     mid = store.insert("meetings", project_id=project, date="2026-10-01", label="встреча")
     p = make_pipe(gen=Due(due))

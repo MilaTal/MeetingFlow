@@ -15,7 +15,7 @@ from dataclasses import dataclass, field
 from datetime import date, timedelta
 from difflib import SequenceMatcher
 
-from .text import content_words, same_lexeme, same_word, stems, words
+from .text import _WORD, content_words, same_lexeme, same_word, stems, words
 from .types import Person
 
 SURNAME_AUTOFIX, SURNAME_SUSPECT = 0.85, 0.78
@@ -135,6 +135,54 @@ class Team:
                     and any(same_word(t, words(p.full_name)[0]) for t in toks)]
         partial += [p for p in suspects if p not in partial]
         return Match(None, candidates=partial, via="ambiguous" if partial else "unknown")
+
+    def said(self, mention: str, quote: str) -> str | None:
+        """Как исполнитель назван в самой цитате — с «Командой» сверяется прозвучавшее, а не имя из ответа модели.
+
+        Находка прогона 09.10.26 (тематика «Стройплощадка», D1): прозвучало «Ирина» при двух Иринах — модель
+        вписала «Ковалёва Ирина», и тёзка ушла одной; «Лебеде» без имени — «Лебедева Ольга»; «ПТО» — что-то своё,
+        и отдел остался без руководителя. Возвращает слова упоминания модели, найденные в цитате (то же слово,
+        падеж, уменьшительное, искажение со сходством ≥ 0,78), в форме и порядке цитаты. Ничего из упоминания
+        не прозвучало — отдел, названный в цитате, если он есть; иначе None (исполнитель не прозвучал)."""
+        orig = _WORD.findall(quote or "")
+        qw = [w.lower().replace("ё", "е") for w in orig]
+        mw = [w for w in words(mention or "") if len(w) >= 2]
+        if not qw or not mw:
+            return None
+        hit = []
+        for i, w in enumerate(qw):
+            if not orig[i][:1].isupper():
+                continue        # имена и отделы в записи — с заглавной: «производства» не «производственный отдел»
+            for t in mw:
+                if w == t or same_word(w, t) or t in self._first_names(w) or w in self._first_names(t):
+                    hit.append(i)
+                    break
+                if (len(w) >= 4 and len(t) >= 4 and not self._is_first_name(w) and not self._is_first_name(t)
+                        and SequenceMatcher(None, w, t).ratio() >= SURNAME_SUSPECT):
+                    hit.append(i)
+                    break
+        if hit:
+            return " ".join(orig[i] for i in hit)
+        depts = set(self._heads) | {p.department.lower().replace("ё", "е") for p in self.people if p.department}
+        for w, o in zip(qw, orig):
+            if w in depts:
+                return o
+        return None
+
+    def addressee(self, quote: str) -> str | None:
+        """Кому обращена реплика: слова до первой запятой после подписи говорящего («ПТО, обновите…»,
+        «Лебедева Ольга, подготовьте…»). Нужен, когда модель исполнителя не дала (прогон 09.10.26, D5): адресат,
+        которого знает «Команда» — человек, тёзки или отдел, — берётся из цитаты. «Хорошо, …» — не адресат."""
+        first = (quote or "").splitlines()[0] if quote else ""
+        first = re.sub(r"^\s*\[[^\]]*\]\s*", "", first)
+        if ":" in first[:60]:
+            first = first.split(":", 1)[1]
+        head = first.split(",", 1)[0].strip()
+        if not head or "," not in first or len(head.split()) > 4:
+            return None
+        m = self.find(head)
+        known = m.person is not None or bool(m.candidates) or m.via in ("department_head", "department_without_head")
+        return head if known else None
 
     def find_unconfirmed(self, mention: str) -> Person | None:
         """Уже заведённый «не подтверждён» с тем же ФИО (в любом падеже) — тот же человек, второй

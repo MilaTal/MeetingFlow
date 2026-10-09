@@ -136,7 +136,8 @@ def test_pipeline_end_to_end(store, project, meeting, make_pipe):
     assert store.get("tasks", old)["status"] == "done"
     proto = store.get("meetings", meeting)["protocol_md"]
     assert proto.startswith("# Протокол встречи 01.10.2026") and "Откуда: собран" in proto
-    assert "| 1 | подготовьте регламент склада до 10.10 | Петрова Анастасия | 10.10 |" in proto
+    # перевёрнут 09.10.26: срок без года — с годом встречи, «день.месяц.год» (формат владельца)
+    assert "| 1 | подготовьте регламент склада до 10.10 | Петрова Анастасия | 10.10.2026 |" in proto
     cards = p.cards.list(project)
     assert cards[0]["kind"] == "confirm_person" and cards[0]["payload"]["full_name"] == "Кузнецов Олег"
 

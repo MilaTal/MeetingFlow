@@ -45,15 +45,102 @@ def has_done_form(phrase: str) -> bool | None:
     return False
 
 
+def lemmas(text: str) -> set[str] | None:
+    """Леммы значимых слов («закажите» → «заказать»); без pymorphy3 — None."""
+    if _MORPH is None:
+        return None
+    from .text import STOP_WORDS, words
+    return {_MORPH.parse(w)[0].normal_form.replace("ё", "е") for w in words(text) if w not in STOP_WORDS}
+
+
 _DUE_STOP = {"до", "к", "ко", "срок", "в", "на", "не", "позднее", "позже", "г", "года"}
+_MONTHS = ("январ", "феврал", "март", "апрел", "ма", "июн", "июл", "август", "сентябр", "октябр", "ноябр", "декабр")
+_NUM_DATE = re.compile(r"^\s*(?:(\d{4})-(\d{1,2})-(\d{1,2})|(\d{1,2})\.(\d{1,2})(?:\.(\d{2,4}))?)\s*$")
 
 
-def supported_due(due, window_text: str) -> str | None:
+def _numeric_date_said(due: str, said: str) -> tuple[int, int, int | None] | None:
+    """D2 (прогон 09.10.26): модель вернула «2026-10-07», а прозвучало «до 7 октября». Дата цифрами принимается,
+    если в окне цитаты прозвучали её число и месяц — словом («октября») или цифрами («07.10»)."""
+    m = _NUM_DATE.match(due)
+    if not m:
+        return None
+    day, month = (int(m.group(3)), int(m.group(2))) if m.group(1) else (int(m.group(4)), int(m.group(5)))
+    year = int(m.group(1)) if m.group(1) else (int(m.group(6)) if m.group(6) else None)
+    if year is not None and year < 100:
+        year += 2000
+    if not (1 <= month <= 12 and 1 <= day <= 31):
+        return None
+    toks = re.findall(r"[а-яa-z]+|\d+", said)
+    day_said = any(t.isdigit() and int(t) == day for t in toks)
+    stem = _MONTHS[month - 1]
+    month_said = any(t.startswith(stem) and (stem != "ма" or t in ("мая", "май", "мае")) for t in toks)
+    numeric = re.search(rf"\b0?{day}\.0?{month}\b", said) is not None
+    if not ((day_said and month_said) or numeric):
+        return None
+    year_said = year is not None and str(year) in toks
+    return day, month, (year if year_said else None)
+
+
+def _word_date(due: str) -> tuple[int, int, int | None] | None:
+    """«20 октября», «до 20 октября 2026» — число, месяц словом и, если есть, год (цикл 2 прогона 09.10.26, D6)."""
+    toks = re.findall(r"[а-яa-z]+|\d+", due.lower().replace("ё", "е"))
+    nums = [int(t) for t in toks if t.isdigit()]
+    month = next((i + 1 for t in toks for i, st in enumerate(_MONTHS)
+                  if t.startswith(st) and (st != "ма" or t in ("мая", "май", "мае"))), None)
+    day = next((n for n in nums if 1 <= n <= 31), None)
+    if not month or not day:
+        return None
+    year = next((n for n in nums if n >= 2000), None)
+    return day, month, year
+
+
+def _owner_format(day: int, month: int, year: int | None, meeting_date: str | None, fallback: str) -> str | None:
+    """Формат владельца «день.месяц.год». Год, которого не было в речи, не берётся у модели (прогон 09.10.26:
+    «2023-10-07» при планёрке 2026): ближайшая такая дата не раньше встречи; без даты встречи — как дала модель."""
+    from datetime import date
+    if year is None and meeting_date:
+        try:
+            md = date.fromisoformat(str(meeting_date)[:10])
+            year = md.year if (month, day) >= (md.month, md.day) else md.year + 1
+        except ValueError:
+            year = None
+    if year is None:
+        return fallback
+    try:
+        d = date(year, month, day)
+    except ValueError:
+        return None
+    return f"{d.day:02d}.{d.month:02d}.{d.year}"
+
+
+def supported_due(due, window_text: str, meeting_date: str | None = None) -> str | None:
     """Срок из ответа модели — только если его значимые слова есть в окне цитаты."""
     if not isinstance(due, str) or not due.strip():
         return None
     said = (window_text or "").lower().replace("ё", "е")
+    num = _numeric_date_said(due, said)
+    if num:
+        day, month, year = num
+        if year is None and meeting_date:
+            from datetime import date
+            try:
+                md = date.fromisoformat(str(meeting_date)[:10])
+                year = md.year if (month, day) >= (md.month, md.day) else md.year + 1
+            except ValueError:
+                year = None
+        if year is None:
+            return due.strip()
+        try:
+            from datetime import date
+            d = date(year, month, day)            # формат владельца: день.месяц.год, год четырёхзначный
+            return f"{d.day:02d}.{d.month:02d}.{d.year}"
+        except ValueError:
+            return None
     toks = [w for w in re.split(r"[\s./,\-|]+", due.lower().replace("ё", "е")) if w and w not in _DUE_STOP]
     if toks and all((w if w.isdigit() else w[:5]) in said for w in toks):
+        wd = _word_date(due)
+        if wd:        # D6: прозвучавший срок словами — тоже в формате владельца
+            return _owner_format(wd[0], wd[1], wd[2] if wd[2] and str(wd[2]) in said else None, meeting_date,
+                                 due.strip())
         return due.strip()
     return None

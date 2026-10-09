@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import inspect
 import json
+import re
 import threading
 from dataclasses import dataclass, field, replace
 from datetime import datetime
@@ -39,7 +40,7 @@ from .draft_checks import run_code_checks
 from .morph import supported_due
 from .security import injection_hits, looks_like_injection
 from .store import Store, now
-from .text import jaccard, same_word, stems, words
+from .text import coverage, jaccard, same_word, stems, words
 from .units import UnitsExtractor
 from .units import apply as apply_units
 from .types import Person, SourceDoc, SourceKind, TaskDraft, TaskStatus
@@ -109,6 +110,32 @@ def _dict(out: Any, key: str) -> dict:
 def _int(v: Any) -> int | None:
     return v if isinstance(v, int) and not isinstance(v, bool) else None
 
+
+def noise_duplicate(reasons: list[str], unit_text: str, added_descriptions: list[str]) -> bool:
+    """D4 (прогон 09.10.26): единица встречи отклонена только как дубль задачи, которую завёл этот же прогон, —
+    задача не потеряна, карточка «не заведена» была бы ложной тревогой. Дубль старой задачи — по-прежнему карточка."""
+    if set(reasons or []) != {"duplicate"}:
+        return False
+    # D7 (цикл 2): срок бывает в тексте единицы («паллеты к 20.10») и не бывает в описании задачи, или наоборот
+    # («опалубку до 7 октября») — даты из сравнения убираются; номера («акт номер 0» и «1») обязаны совпасть
+    mine = set(stems(_without_dates(unit_text)))
+
+    def same(d: str) -> bool:
+        theirs = set(stems(_without_dates(d)))
+        if {t for t in theirs if t.isdigit()} != {t for t in mine if t.isdigit()}:
+            return False
+        return max(coverage(mine, theirs), coverage(theirs, mine)) >= 0.7
+    return bool(mine) and any(same(d) for d in added_descriptions if d)
+
+
+_DATE_IN_TEXT = re.compile(
+    r"\b(?:до|к|ко|по|на)?\s*(?:\d{4}-\d{1,2}-\d{1,2}|\d{1,2}\.\d{1,2}(?:\.\d{2,4})?"
+    r"|\d{1,2}\s+(?:январ|феврал|март|апрел|ма[яй]|июн|июл|август|сентябр|октябр|ноябр|декабр)\w*(?:\s+\d{4})?)",
+    re.IGNORECASE)
+
+
+def _without_dates(text: str) -> str:
+    return _DATE_IN_TEXT.sub(" ", text or "")
 
 class MeetingPipeline:
     _locks: dict[tuple[int, int], threading.Lock] = {}
@@ -350,7 +377,7 @@ class MeetingPipeline:
                 if g.quote and already_set(g.quote, who, g.description):
                     continue  # повторный прогон той же встречи: эта задача уже заведена
                 if d.due_date:            # срок — только если прозвучал рядом с цитатой (01/6)
-                    said = supported_due(d.due_date, self._window(source.lines, g.quote or d.quote))
+                    said = supported_due(d.due_date, self._window(source.lines, g.quote or d.quote), meeting.get("date"))
                     if said is None:
                         rep.due_dropped += 1
                     d = replace(d, due_date=said)
@@ -610,6 +637,8 @@ class MeetingPipeline:
                                              "candidates": [{"id": p.id, "name": p.label, "hints": []}
                                                             for p in pend.get("candidates", [])]}, meeting_id)
                     for unit, g in ures["held"]:
+                        if noise_duplicate(g.reasons, unit.text, [getattr(x[2], "description", "") for x in added]):
+                            continue        # D4: та же задача уже заведена этим прогоном — карточка была бы ложной тревогой
                         self.cards.open(project_id, "held_task", f"Задача из записи не заведена: {unit.text[:120]}",
                                         {"description": unit.text, "reasons": g.reasons, "quote": unit.quote,
                                          "from": "единицы встречи"}, meeting_id)

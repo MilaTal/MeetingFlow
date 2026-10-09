@@ -20,7 +20,12 @@ $env:PYANNOTE_METRICS_ENABLED = "false"
 # свой .env.local MeetFlow главнее: зависимость от файла Планёрки — только запасной путь (письмо meeting-registry 22)
 $own = Join-Path (Split-Path $PSScriptRoot -Parent) ".env.local"
 if (-not $PSBoundParameters.ContainsKey("KeyFrom") -and (Test-Path $own)) { $KeyFrom = $own }
-if (($Llm -eq "openrouter" -or $Llm -eq "routes") -and -not $env:OPENROUTER_API_KEY) {   # routes: в цепочках есть точки OpenRouter
+# routes: ключ нужен, только если в маршрутах есть точка OpenRouter — в закрытом контуре с локальными моделями его
+# нет, и запуск не должен падать (прогон по скиллу 09.10.26)
+$routesFile = if ($env:MODEL_ROUTES_PATH) { $env:MODEL_ROUTES_PATH } else { Join-Path (Split-Path $PSScriptRoot -Parent) "data\models.json" }
+$needKey = ($Llm -eq "openrouter") -or ($Llm -eq "routes" -and (Test-Path $routesFile) -and
+           ((Get-Content -LiteralPath $routesFile -Raw -Encoding UTF8) -match '"kind"\s*:\s*"openrouter"'))
+if ($needKey -and -not $env:OPENROUTER_API_KEY) {
     if (-not (Test-Path $KeyFrom)) { Write-Error "Ключ OpenRouter не задан, файла $KeyFrom нет."; exit 2 }
     $line = Get-Content -LiteralPath $KeyFrom -Encoding UTF8 | Where-Object { $_ -match '^\s*OPENROUTER_API_KEY\s*=' } | Select-Object -First 1
     if (-not $line) { Write-Error "В $KeyFrom нет строки OPENROUTER_API_KEY."; exit 2 }

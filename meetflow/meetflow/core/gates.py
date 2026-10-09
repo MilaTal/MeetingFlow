@@ -20,7 +20,8 @@ from dataclasses import dataclass
 from .negation import NegationRule
 from .people import Team
 from .security import looks_like_injection
-from .text import coverage, jaccard, sanitize, stems
+from .morph import lemmas
+from .text import coverage, jaccard, sanitize, stems, words
 from .types import GateResult, SourceDoc, TaskDraft
 
 MAX_DESCRIPTION = 2000
@@ -86,6 +87,23 @@ class TaskGate:
                     break
         return best if best_key[0] >= self.cfg.quote_coverage else None
 
+    def _lemma_quote(self, want: str, source: SourceDoc, line_no: int | None) -> str | None:
+        """Тот же поиск цитаты окном строк, но по леммам: строка с номером модели — первой, затем вся запись."""
+        need = lemmas(want)
+        if not need:
+            return None
+        lines = source.lines
+        order = ([line_no] if line_no is not None and 0 <= line_no < len(lines) else []) + list(range(len(lines)))
+        for i in order:
+            acc: set[str] = set()
+            for w in range(self.cfg.quote_window):
+                if i + w >= len(lines):
+                    break
+                acc |= lemmas(lines[i + w]) or set()
+                if coverage(need, acc) >= self.cfg.quote_coverage:
+                    return " ".join(lines[i:i + w + 1])
+        return None
+
     def check(self, draft: TaskDraft, source: SourceDoc, existing: list[tuple[str, str]] | None = None) -> GateResult:
         reasons: list[str] = []
         desc = sanitize(draft.description).strip()[:MAX_DESCRIPTION]
@@ -109,6 +127,9 @@ class TaskGate:
                     break
         if quote is None and want:
             quote = self.find_quote(want, source)
+        if quote is None and want:
+            # D3 (прогон 09.10.26): «заказать» и «закажите» — разные основы, одна лемма; без морфологии — как раньше
+            quote = self._lemma_quote(want, source, draft.line_no)
         if not quote:
             reasons.append("no_verbatim_quote")
 
@@ -126,26 +147,48 @@ class TaskGate:
 
         # 3. исполнитель назван и есть в Команде
         person, pending = None, None
-        if not draft.assignee:
+        named = draft.assignee
+        if not named and quote:
+            # D5 (прогон 09.10.26): модель исполнителя не дала, а реплика обращена к отделу или человеку из
+            # «Команды» («ПТО, обновите график») — адресат берётся из цитаты
+            named = self.team.addressee(quote)
+        if not named:
             if self.cfg.require_assignee:
                 reasons.append("no_assignee")
         else:
-            # фраза поручения и описание — для признаков несовпадения («подрядчик Игнатов из ТМК»)
-            m = self.team.find(draft.assignee, context=quote or draft.quote or "", description=desc)
-            person = m.person
-            if person is None and self.cfg.task_first and m.via in ("same_or_new", "ambiguous") and m.candidates:
+            # D1 (прогон 09.10.26): сверяется прозвучавшее в цитате, а не имя из ответа модели
+            said = self.team.said(named, quote or draft.quote or "")
+            m = None
+            if said is None:
+                # имя модели в цитате не прозвучало — не подставлять молча: задача без исполнителя и карточка
+                guess = self.team.find(named).person
+                if self.cfg.task_first:
+                    pending = {"reason": "not_said", "candidates": [guess] if guess else [], "marks": []}
+                else:
+                    reasons.append("assignee_not_said")
+            else:
+                # фраза поручения и описание — для признаков несовпадения («подрядчик Игнатов из ТМК»)
+                m = self.team.find(said, context=quote or draft.quote or "", description=desc)
+                person = m.person
+            if m is None:
+                pass
+            elif person is None and self.cfg.task_first and m.via in ("same_or_new", "ambiguous") and m.candidates:
                 pending = {"reason": m.via, "candidates": m.candidates, "marks": m.marks}
             elif person is None and self.cfg.task_first and m.via == "department_without_head":
                 # отдел без руководителя: задача сразу, исполнитель — отдел, рядом карточка «назначить
                 # ответственного в отделе» (решение владельца 03.10.26, письмо 36)
-                pending = {"reason": "department", "name": draft.assignee.strip(), "candidates": m.candidates,
+                pending = {"reason": "department", "name": named.strip(), "candidates": m.candidates,
                            "marks": []}
             elif person is None and self.cfg.task_first and m.via == "unknown":
                 # документ 14 (владелец 03.10.26): уже заведённый «не подтверждён» — это он; фамилия и имя без
                 # похожих — новая запись «не подтверждён»; одно слово или внешний без роли — без исполнителя + карточка
-                person = self.team.find_unconfirmed(draft.assignee)
+                # упоминание модели прозвучало дословно («Сидоров Олег из ТМК») — берём его целиком: служебное
+                # «из» несёт признак внешнего человека; иначе — только прозвучавшее
+                q_words = set(words(quote or draft.quote or ""))
+                as_said = named if all(w in q_words for w in words(named)) else said
+                person = self.team.find_unconfirmed(as_said)
                 if person is None:
-                    name = self.team.new_person_name(draft.assignee)
+                    name = self.team.new_person_name(as_said)
                     pending = ({"reason": "new_person", "name": name, "candidates": [], "marks": []} if name
                                else {"reason": "unknown", "candidates": [], "marks": []})
             elif person is None:
