@@ -10,6 +10,8 @@ import pytest
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 os.environ["MEETFLOW_LLM"] = "mock"
+# Рабочий data/models.json тестам не виден: маршруты задают сами тесты (09.10.26)
+os.environ["MODEL_ROUTES_PATH"] = str(ROOT / "tests" / "_нет_маршрутов.json")
 
 from meetflow.connectors.llm_mock import MockLLM  # noqa: E402
 from meetflow.connectors.registry import default_registry  # noqa: E402

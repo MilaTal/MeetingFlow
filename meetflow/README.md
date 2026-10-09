@@ -15,7 +15,7 @@
 | `docs/TEST_LOG.md` | журнал тестов и правок — по каждому письму и решению |
 | `docs/METHODOLOGY_10_STEPS.md`, `docs/ERP_DECOMPOSITION.md` | методика курса и разбор исходного проекта |
 | `eval/README.md` | наборы проверки ветки meeting-registry |
-| `skill/meetflow-project/SKILL.md` | скилл для создания проекта на framework (копия; источник — `~/.claude/skills`) |
+| `skill/meetflow/` | скилл meetflow: правила разбора встречи, тематика, модели и маршруты, движок `engine/` с тестами и eval (копия; источник — `~/.claude/skills`) |
 
 ## Быстрый старт
 

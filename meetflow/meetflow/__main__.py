@@ -5,6 +5,7 @@
   python -m meetflow new-project "Имя" --theme daily_ops --db data/x.db
   python -m meetflow demo --theme it_product --db data/demo.db
   python -m meetflow serve --theme erp_rollout --port 8002
+  python -m meetflow routes show | use generate <точка> | check   — маршруты моделей (models.json)
 """
 from __future__ import annotations
 
@@ -34,6 +35,8 @@ def main(argv: list[str] | None = None) -> int:
     d = sub.add_parser("demo"); d.add_argument("--theme", default="_default"); d.add_argument("--db", default="data/demo.db")
     s = sub.add_parser("serve"); s.add_argument("--theme", default="_default"); s.add_argument("--db", default="data/meetflow.db")
     s.add_argument("--port", type=int, default=8002); s.add_argument("--host", default="127.0.0.1")
+    r = sub.add_parser("routes"); r.add_argument("action", choices=("show", "use", "check"))
+    r.add_argument("role", nargs="?"); r.add_argument("point", nargs="?")
     a = ap.parse_args(argv)
 
     if a.cmd == "themes":
@@ -59,6 +62,22 @@ def main(argv: list[str] | None = None) -> int:
         p.reg.add(pid, "Отправить отчёт по тестам", "Белов Сергей")
         p.ingest(pid, mid, "Расшифровка 01.10.2026.txt", DEMO_TEXT.encode("utf-8"))
         print(p.run(pid, mid))
+    elif a.cmd == "routes":
+        import json
+        from .connectors.llm_routes import RoutedLLM, routes_path, use, validate
+        if a.action == "use":
+            print(json.dumps(use(a.role, a.point), ensure_ascii=False, indent=2))
+        elif a.action == "show":
+            print(json.dumps(validate(json.loads(routes_path().read_text(encoding="utf-8"))), ensure_ascii=False, indent=2))
+        else:
+            for side in ("generator", "verifier"):
+                llm = RoutedLLM(side)
+                for name in llm.chain():
+                    try:
+                        res = llm.connector(name).complete("Отвечай одним словом.", "Ответь: да", json_mode=False)
+                        print(f"ок   {llm.role:<9} {name:<16} {res.model} — {res.text.strip()[:30]!r}, {res.seconds:.1f} с")
+                    except Exception as e:  # noqa: BLE001 — для проверки достаточно текста ошибки
+                        print(f"НЕТ  {llm.role:<9} {name:<16} — {e}")
     elif a.cmd == "serve":
         import uvicorn
         os.environ["MEETFLOW_THEME"], os.environ["MEETFLOW_DB"] = a.theme, a.db

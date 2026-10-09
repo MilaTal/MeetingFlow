@@ -7,3 +7,5 @@ data/
 .env
 .env.local
 .venv/
+# вымышленная «Команда» для тестов движка скилла meetflow — не рабочие данные (09.10.26)
+!skill/meetflow/engine/tests/data/

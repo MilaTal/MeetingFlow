@@ -11,6 +11,9 @@
 - Подсказка распознаванию (initial_prompt/hotwords) по умолчанию выключена:
   замеры ERP и Планёрки показали потерю 6-14 % объёма и искажения.
 - После успешного распознавания запись удаляется (keep_media=False).
+- Маршруты (09.10.26): если в models.json есть роль asr, точки идут по её цепочке — faster-whisper с моделью
+  и устройством точки или свой код «модуль:функция»; сбой точки — следующая, точка выводится на охлаждение.
+  Без роли — модель темы, как раньше. Супер-администратор выбирает точку на вкладке «Модели».
 """
 from __future__ import annotations
 
@@ -19,6 +22,7 @@ from pathlib import Path
 
 from ..core.types import SourceDoc, SourceKind
 from .base import ASRConnector, ConnectorError
+from . import llm_routes
 
 os.environ.setdefault("HF_HUB_OFFLINE", "1")
 os.environ.setdefault("PYANNOTE_METRICS_ENABLED", "false")
@@ -42,6 +46,8 @@ class WhisperLocalASR(ASRConnector):
         self.duration_min = duration_min
         self.duration_max = duration_max
         self._model = None
+        self._models: dict[tuple, object] = {}
+        self.last_route = ""
 
     def available(self) -> bool:
         try:
@@ -67,18 +73,135 @@ class WhisperLocalASR(ASRConnector):
                                            local_files_only=True)
         return self._model
 
+    def _load_point(self, model: str, device: str = "auto"):
+        """Модель точки маршрута; «auto» — видеокарта с откатом на процессор, «cuda» — без отката: откат даёт
+        следующая точка цепочки."""
+        key = (model, device)
+        if key not in self._models:
+            if not self.available():
+                raise ConnectorError("waiting_tools: инструменты распознавания не установлены, запись ждёт.")
+            from faster_whisper import WhisperModel
+            if device == "cpu":
+                m = WhisperModel(model, device="cpu", compute_type="int8", local_files_only=True)
+            else:
+                try:
+                    m = WhisperModel(model, device="cuda", compute_type="int8_float16", local_files_only=True)
+                except Exception:
+                    if device == "cuda":
+                        raise
+                    m = WhisperModel(model, device="cpu", compute_type="int8", local_files_only=True)
+            self._models[key] = m
+        return self._models[key]
+
+    def _run(self, model, path: Path):
+        segments, info = model.transcribe(str(path), language=self.language, vad_filter=True, beam_size=5)
+        lines = [f"[{_fmt(s.start)}] Говорящий: {s.text.strip()}" for s in segments if s.text.strip()]
+        return lines, getattr(info, "duration", 0) or 0
+
+    def _run_code(self, ref: str, path: Path, folder: str = ""):
+        """Свой движок: функция(путь, language=…) возвращает текст или (текст, сведения с duration в секундах).
+        `folder` — папка с кодом, если он не установлен пакетом."""
+        import importlib
+        import sys
+        if folder:
+            if not Path(folder).is_dir():
+                raise ConnectorError(f"папки с кодом нет: {folder}")
+            if folder not in sys.path:
+                sys.path.insert(0, folder)
+        mod, fn = ref.split(":", 1)
+        res = getattr(importlib.import_module(mod), fn)(str(path), language=self.language)
+        text, meta = res if isinstance(res, tuple) else (res, {})
+        return [x for x in str(text).splitlines() if x.strip()], float((meta or {}).get("duration") or 0)
+
+    def _run_service(self, url: str, path: Path):
+        """Сервис распознавания во внутренней сети: POST wav (audio/wav), язык в строке запроса, ответ JSON
+        {"text": …, "meta": {"duration": …}}. Адрес вне внутренней сети не принимается."""
+        import json
+        import urllib.parse
+        import urllib.request
+        if not llm_routes.internal_url(url):
+            raise ConnectorError("сервис распознавания — только во внутренней сети")
+        full = url + ("&" if "?" in url else "?") + urllib.parse.urlencode({"language": self.language})
+        req = urllib.request.Request(full, data=Path(path).read_bytes(), headers={"Content-Type": "audio/wav"}, method="POST")
+        with urllib.request.urlopen(req, timeout=4 * 3600) as resp:
+            raw = json.loads(resp.read().decode("utf-8"))
+        meta = raw.get("meta") or {}
+        return [x for x in str(raw.get("text") or "").splitlines() if x.strip()], float(meta.get("duration") or 0)
+
     def transcribe(self, path: Path) -> SourceDoc:
         path = Path(path)
         if not path.exists():
             raise ConnectorError(f"Запись «{path.name}» не найдена.")
-        model = self._load()
-        segments, info = model.transcribe(str(path), language=self.language, vad_filter=True, beam_size=5)
-        dur_min = (getattr(info, "duration", 0) or 0) / 60
+        routes = llm_routes.asr_chain()
+        self.last_route = ""
+        if routes is None:
+            lines, duration = self._run(self._load(), path)
+        else:
+            points, cooldown = routes
+            errors = []
+            for name, ep in points:
+                try:
+                    if ep["kind"] == "python":
+                        lines, duration = self._run_code(ep["callable"], path, ep.get("path", ""))
+                    elif ep["kind"] == "asr-service":
+                        lines, duration = self._run_service(ep["url"], path)
+                    else:
+                        lines, duration = self._run(self._load_point(ep["model"], ep.get("device", "auto")), path)
+                except Exception as e:  # noqa: BLE001 — любой сбой точки ведёт на следующую
+                    llm_routes.mark_down(name, cooldown)
+                    errors.append(f"{name}: {str(e)[:150]}")
+                    continue
+                llm_routes.mark_up(name)
+                self.last_route = name
+                break
+            else:
+                raise ConnectorError("waiting_tools: ни одна точка распознавания не сработала, запись ждёт — "
+                                     + "; ".join(errors))
+        dur_min = duration / 60
         if self.duration_min and dur_min < self.duration_min or self.duration_max and dur_min > self.duration_max:
             raise ConnectorError(f"held_recording: длительность {dur_min:.0f} мин вне окна темы.")
-        lines = [f"[{_fmt(s.start)}] Говорящий: {s.text.strip()}" for s in segments if s.text.strip()]
         # запись удаляет конвейер ПОСЛЕ сохранения расшифровки (находка ревью:
         # удаление до записи в БД теряло встречу при сбое) — см. Pipeline.ingest
         return SourceDoc(f"{path.stem} (распознано локально).txt", SourceKind.TRANSCRIPT, "\n".join(lines),
-                         {"connector": self.name, "media_seconds": getattr(info, "duration", None),
+                         {"connector": self.name, "media_seconds": duration or None, "route": self.last_route,
                           "local": True, "media_path": str(path), "keep_media": self.keep_media})
+
+
+def asr_ping(ep: dict) -> tuple[bool, str]:
+    """Проверка точки распознавания без записи: движок установлен, модель на диске, код находится."""
+    if ep.get("kind") == "asr-service":
+        import urllib.error
+        import urllib.request
+        url = str(ep.get("url", ""))
+        if not llm_routes.internal_url(url):
+            return False, "адрес не во внутренней сети — голос туда не уйдёт"
+        try:
+            with urllib.request.urlopen(urllib.request.Request(url, method="GET"), timeout=10) as r:
+                return True, f"сервис отвечает (HTTP {r.status})"
+        except urllib.error.HTTPError as e:
+            return True, f"сервис отвечает (HTTP {e.code} на проверочный GET)"
+        except Exception as e:  # noqa: BLE001
+            return False, f"сервис не отвечает: {str(e)[:150]}"
+    if ep.get("kind") == "python":
+        import importlib
+        import sys
+        folder = str(ep.get("path") or "")
+        if folder:
+            if not Path(folder).is_dir():
+                return False, f"папки с кодом нет: {folder}"
+            if folder not in sys.path:
+                sys.path.insert(0, folder)
+        mod, fn = str(ep.get("callable", "")).split(":", 1)
+        try:
+            ok = callable(getattr(importlib.import_module(mod), fn, None))
+        except Exception as e:  # noqa: BLE001
+            return False, f"код не загрузился: {str(e)[:150]}"
+        return ok, "код найден" if ok else f"в модуле {mod} нет функции {fn}"
+    if not WhisperLocalASR().available():
+        return False, "faster-whisper не установлен"
+    model = str(ep.get("model", ""))
+    if Path(model).exists():
+        return True, f"модель на диске, устройство {ep.get('device', 'auto')}"
+    if "/" in model or "\\" in model:
+        return False, "папки модели нет"
+    return True, f"модель «{model}» берётся из локального кэша, устройство {ep.get('device', 'auto')}"

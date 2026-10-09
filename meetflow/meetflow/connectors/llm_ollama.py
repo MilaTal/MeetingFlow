@@ -19,7 +19,7 @@ from urllib.parse import urlparse
 import httpx
 
 from ..core.types import LLMResult
-from .base import AnswerTruncated, ConnectorError, LLMConnector
+from .base import AnswerTruncated, ConnectorError, ConnectorUnavailable, LLMConnector
 
 LOCAL_HOSTS = {"localhost", "127.0.0.1", "::1"}
 
@@ -88,6 +88,8 @@ class OllamaLLM(LLMConnector):
                         break                     # пауза съела бы остаток прогона — не ждём
                     time.sleep(pause)
                     continue
+                if r.status_code == 404:          # модели нет на сервере — недоступна точка, а не запрос
+                    raise ConnectorUnavailable(f"Модель {self.model} не найдена на {self.url}: HTTP 404")
                 if 400 <= r.status_code < 500:    # ошибка запроса: повтор даст то же самое
                     raise ConnectorError(f"Модель отказала: HTTP {r.status_code} — {r.text[:300]}")
                 r.raise_for_status()
@@ -103,4 +105,4 @@ class OllamaLLM(LLMConnector):
                                  int(data.get("eval_count") or 0), 0.0, time.monotonic() - t0, data)
             except httpx.HTTPError as e:
                 last = type(e).__name__
-        raise ConnectorError(f"Модель не ответила после {self.attempts} попыток ({last}).")
+        raise ConnectorUnavailable(f"Модель не ответила после {self.attempts} попыток ({last}).")

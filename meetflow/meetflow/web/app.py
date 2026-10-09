@@ -85,6 +85,23 @@ class IntervalIn(BaseModel):
     seconds: int = Field(ge=MIN_INTERVAL, le=86400)
 
 
+class RouteUseIn(BaseModel):
+    role: str = Field(max_length=40)
+    point: str = Field(max_length=100)
+
+
+class RoutePointIn(BaseModel):
+    name: str = Field(max_length=100)
+    old_name: str = Field("", max_length=100)
+    fields: dict
+
+
+class RouteRoleIn(BaseModel):
+    role: str = Field(max_length=40)
+    point: str = Field(max_length=100)
+    action: str = Field(max_length=10)   # add — запасной в конец цепочки, remove — убрать из роли
+
+
 class ToggleIn(BaseModel):
     enabled: bool
 
@@ -100,20 +117,24 @@ class ResolveIn(BaseModel):
     new_role: str = Field("", max_length=200)
 
 
-LLM_TOOLS = ("mock", "ollama", "openrouter")
+LLM_TOOLS = ("mock", "ollama", "openrouter", "routes")
 
 
 def _llm(theme: Theme, side: str):
     """Инструмент подключения модели выбирается при развёртывании (решение владельца 03.10.26):
     MEETFLOW_LLM=mock — стенд без модели с плашкой; ollama — локальная модель (модели в теме
     llm.generator / llm.verifier, пока заглушки); openrouter — модели из llm.openrouter.*, ключ —
-    переменная OPENROUTER_API_KEY. Потолок ответа — llm.max_answer_tokens (4096)."""
+    переменная OPENROUTER_API_KEY; routes — цепочки точек по ролям из models.json с переходом на запасную
+    при недоступности (решение владельца 09.10.26, connectors/llm_routes.py). Потолок ответа — llm.max_answer_tokens."""
     mode = os.environ.get("MEETFLOW_LLM", "mock").strip().lower()
     if mode not in LLM_TOOLS:
         raise ValueError(f"MEETFLOW_LLM={mode}: допустимы {', '.join(LLM_TOOLS)}")
     if mode == "mock":
         return MockLLM()
     cap = int(theme.get("llm.max_answer_tokens", 4096))
+    if mode == "routes":
+        from ..connectors.llm_routes import RoutedLLM
+        return RoutedLLM(side, max_answer_tokens=cap)
     if mode == "openrouter":
         cfg = theme.get(f"llm.openrouter.{side}", {})
         return OpenRouterLLM(model=cfg.get("model", ""), profile=cfg.get("profile", "generic"), max_answer_tokens=cap)
@@ -553,6 +574,71 @@ def create_app(theme_name: str | None = None, db_path: str | None = None, journa
     @app.get("/api/monitoring/runs")
     def mon_runs(days: int = 7, u: dict = Depends(super_admin)):
         return runs_report(pipe.journal.path, max(1, min(days, 90)), theme.get("budget", {}))
+
+    # Переключение моделей (решение владельца 09.10.26): роли, точки по порядку, «Сделать основной»,
+    # «Проверить связь». Только супер-администратору; при MEETFLOW_LLM=routes действует сразу, без перезапуска.
+    @app.get("/api/monitoring/models")
+    def mon_models(u: dict = Depends(super_admin)):
+        from ..connectors.llm_routes import panel
+        return panel()
+
+    @app.post("/api/monitoring/models/use")
+    def mon_models_use(body: RouteUseIn, u: dict = Depends(super_admin)):
+        from ..connectors.llm_routes import panel, use
+        try:
+            use(body.role, body.point, by=u.get("name") or u["role"])
+        except (ConnectorError, FileNotFoundError) as e:
+            raise HTTPException(400, str(e))
+        return panel()
+
+    # Справочник подключений (09.10.26): завести, изменить, удалить, проверить до сохранения; запасная, убрать из
+    # роли; откат к прежней версии файла. Только супер-администратору, каждое изменение — в журнал с именем.
+    def _routes(fn, *a, **kw):
+        try:
+            return fn(*a, **kw)
+        except (ConnectorError, FileNotFoundError) as e:
+            raise HTTPException(400, str(e))
+
+    @app.post("/api/monitoring/models/endpoint")
+    def mon_models_save(body: RoutePointIn, u: dict = Depends(super_admin)):
+        from ..connectors import llm_routes as lr
+        _routes(lr.save_point, body.name, body.fields, by=u.get("name") or u["role"], old_name=body.old_name)
+        return lr.panel()
+
+    @app.post("/api/monitoring/models/endpoint/delete")
+    def mon_models_delete(body: RoutePointIn, u: dict = Depends(super_admin)):
+        from ..connectors import llm_routes as lr
+        _routes(lr.delete_point, body.name, by=u.get("name") or u["role"])
+        return lr.panel()
+
+    @app.post("/api/monitoring/models/endpoint/test")
+    def mon_models_test(body: RoutePointIn, u: dict = Depends(super_admin)):
+        from ..connectors import llm_routes as lr
+        ok, detail = _routes(lr.test_point, body.fields)
+        return {"ok": ok, "detail": detail}
+
+    @app.post("/api/monitoring/models/role")
+    def mon_models_role(body: RouteRoleIn, u: dict = Depends(super_admin)):
+        from ..connectors import llm_routes as lr
+        fn = {"add": lr.add_to_role, "remove": lr.remove_from_role}.get(body.action)
+        if fn is None:
+            raise HTTPException(400, "action — add или remove")
+        _routes(fn, body.role, body.point, by=u.get("name") or u["role"])
+        return lr.panel()
+
+    @app.post("/api/monitoring/models/rollback")
+    def mon_models_rollback(u: dict = Depends(super_admin)):
+        from ..connectors import llm_routes as lr
+        _routes(lr.rollback, by=u.get("name") or u["role"])
+        return lr.panel()
+
+    @app.post("/api/monitoring/models/check")
+    def mon_models_check(u: dict = Depends(super_admin)):
+        from ..connectors.llm_routes import check_all
+        try:
+            return {"results": check_all()}
+        except ConnectorError as e:
+            raise HTTPException(400, str(e))
 
     @app.get("/api/monitoring")
     def monitoring(u: dict = Depends(super_admin)):

@@ -1,0 +1,72 @@
+{
+  "_пояснение": "Образец маршрутов для закрытого контура (локальная машина). Скопировать в data/models.json и поправить адреса. Ключи не пишутся — только имя переменной в key_env. Первая точка роли — основная, остальные — запасные по порядку. Переключение без перезапуска: поменять порядок или python -m meetflow routes use generate <точка> (MEETFLOW_LLM=routes). Роль asr — распознавание речи: faster-whisper (model — имя или путь к папке модели; device — auto, cuda или cpu), свой код python («модуль:функция», path — папка с кодом) или asr-service — сервис распознавания во внутренней сети. Облачных точек у asr нет: голос не покидает периметр. Нет роли asr — распознавание на модели темы. Заготовки с пустым адресом (deepseek-flash, свой-движок, сервис-распознавания) заполняет оператор на вкладке «Модели» — до этого в роли они не попадают.",
+  "endpoints": {
+    "lmstudio-27b": {
+      "kind": "openai",
+      "url": "http://192.168.100.59:1234",
+      "model": "qwen3.8-27b"
+    },
+    "lmstudio-7b": {
+      "kind": "openai",
+      "url": "http://192.168.100.59:1234",
+      "model": "qwen/qwen2.5-vl-7b"
+    },
+    "ollama-muse": {
+      "kind": "openai",
+      "url": "http://172.21.21.30:11434",
+      "model": "muse-glimmer"
+    },
+    "or-qwen-plus": {
+      "kind": "openrouter",
+      "model": "qwen/qwen-plus",
+      "key_env": "OPENROUTER_API_KEY"
+    },
+    "whisper-large": {
+      "kind": "faster-whisper",
+      "model": "large-v3",
+      "device": "auto"
+    },
+    "whisper-large-cpu": {
+      "kind": "faster-whisper",
+      "model": "large-v3",
+      "device": "cpu"
+    },
+    "whisper-medium": {
+      "kind": "faster-whisper",
+      "model": "medium",
+      "device": "auto",
+      "note": "другая модель Whisper — легче и быстрее large-v3"
+    },
+    "deepseek-flash": {
+      "kind": "openai",
+      "url": "",
+      "model": "deepseek-flash",
+      "note": "запасная модель для текста; адрес сервера задаёт оператор"
+    },
+    "свой-движок": {
+      "kind": "python",
+      "callable": "",
+      "note": "свой код распознавания: функция «модуль:функция» и папка с кодом — задаёт оператор"
+    },
+    "сервис-распознавания": {
+      "kind": "asr-service",
+      "url": "",
+      "note": "сервис распознавания во внутренней сети; адрес задаёт оператор"
+    }
+  },
+  "roles": {
+    "generate": [
+      "lmstudio-27b",
+      "lmstudio-7b"
+    ],
+    "verify": [
+      "ollama-muse",
+      "lmstudio-7b"
+    ],
+    "asr": [
+      "whisper-large",
+      "whisper-large-cpu"
+    ]
+  },
+  "cooldown_sec": 300
+}

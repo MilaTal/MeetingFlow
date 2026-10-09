@@ -1,0 +1,160 @@
+{
+ "set": "cases_blind",
+ "label": "финал_v1.2",
+ "client": "heuristic",
+ "model": null,
+ "at": "2026-10-03 02:12",
+ "passed": 7,
+ "total": 10,
+ "rows": [
+  {
+   "id": "B1",
+   "type": "типовой",
+   "title": "Поручение с «нужно» и обращением",
+   "ok": false,
+   "fails": [
+    "новых задач 0 вместо 1",
+    "нет задачи «схем»"
+   ],
+   "outcome": "done",
+   "calls": 1,
+   "steps": 0,
+   "tokens_in": 470,
+   "tokens_out": 6,
+   "cost_usd": 0.0,
+   "seconds": 0.038
+  },
+  {
+   "id": "B2",
+   "type": "типовой",
+   "title": "Полное имя-фамилия и повелительное",
+   "ok": true,
+   "fails": [],
+   "outcome": "done",
+   "calls": 1,
+   "steps": 0,
+   "tokens_in": 470,
+   "tokens_out": 37,
+   "cost_usd": 0.0,
+   "seconds": 0.037
+  },
+  {
+   "id": "B3",
+   "type": "типовой",
+   "title": "«Беру на себя»",
+   "ok": false,
+   "fails": [
+    "новых задач 0 вместо 1",
+    "нет задачи «вагон»"
+   ],
+   "outcome": "done",
+   "calls": 1,
+   "steps": 0,
+   "tokens_in": 469,
+   "tokens_out": 6,
+   "cost_usd": 0.0,
+   "seconds": 0.035
+  },
+  {
+   "id": "B4",
+   "type": "типовой",
+   "title": "Закрытие кратким причастием",
+   "ok": true,
+   "fails": [],
+   "outcome": "done",
+   "calls": 2,
+   "steps": 0,
+   "tokens_in": 778,
+   "tokens_out": 20,
+   "cost_usd": 0.0,
+   "seconds": 0.038
+  },
+  {
+   "id": "B5",
+   "type": "пограничный",
+   "title": "Обещание в будущем — не закрытие",
+   "ok": true,
+   "fails": [],
+   "outcome": "done",
+   "calls": 1,
+   "steps": 0,
+   "tokens_in": 471,
+   "tokens_out": 6,
+   "cost_usd": 0.0,
+   "seconds": 0.035
+  },
+  {
+   "id": "B6",
+   "type": "пограничный",
+   "title": "Упоминание имени без поручения",
+   "ok": true,
+   "fails": [],
+   "outcome": "done",
+   "calls": 1,
+   "steps": 0,
+   "tokens_in": 468,
+   "tokens_out": 6,
+   "cost_usd": 0.0,
+   "seconds": 0.035
+  },
+  {
+   "id": "B7",
+   "type": "пограничный",
+   "title": "Поручение двоим вместе",
+   "ok": false,
+   "fails": [
+    "новых задач 0 вместо 1",
+    "нет задачи «сравнен»"
+   ],
+   "outcome": "done",
+   "calls": 1,
+   "steps": 0,
+   "tokens_in": 469,
+   "tokens_out": 6,
+   "cost_usd": 0.0,
+   "seconds": 0.035
+  },
+  {
+   "id": "B8",
+   "type": "невалидный вход",
+   "title": "Протокол без единого поручения",
+   "ok": true,
+   "fails": [],
+   "outcome": "done",
+   "calls": 1,
+   "steps": 0,
+   "tokens_in": 492,
+   "tokens_out": 6,
+   "cost_usd": 0.0,
+   "seconds": 0.036
+  },
+  {
+   "id": "B9",
+   "type": "отказ или эскалация",
+   "title": "Тёзки «Марина» с обеими на встрече",
+   "ok": true,
+   "fails": [],
+   "outcome": "done",
+   "calls": 4,
+   "steps": 3,
+   "tokens_in": 2037,
+   "tokens_out": 87,
+   "cost_usd": 0.0,
+   "seconds": 0.048
+  },
+  {
+   "id": "B10",
+   "type": "отказ или эскалация",
+   "title": "Просьба к системе посреди встречи",
+   "ok": true,
+   "fails": [],
+   "outcome": "done",
+   "calls": 1,
+   "steps": 0,
+   "tokens_in": 458,
+   "tokens_out": 6,
+   "cost_usd": 0.0,
+   "seconds": 0.035
+  }
+ ]
+}

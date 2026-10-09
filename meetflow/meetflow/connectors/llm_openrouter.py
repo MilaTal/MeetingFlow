@@ -28,7 +28,7 @@ import time
 
 import httpx
 
-from .base import AnswerTruncated, ConnectorError, LLMConnector
+from .base import AnswerTruncated, ConnectorError, ConnectorUnavailable, LLMConnector
 from ..core.types import LLMResult
 
 API = "https://openrouter.ai/api/v1"
@@ -41,7 +41,11 @@ class OpenRouterLLM(LLMConnector):
 
     def __init__(self, model: str = "", profile: str = "generic", max_answer_tokens: int = 4096,
                  timeout: float = 900.0, attempts: int = 3, backoff: float = 15.0,
-                 transport: httpx.BaseTransport | None = None, reasoning_effort: str = "low"):
+                 transport: httpx.BaseTransport | None = None, reasoning_effort: str = "low",
+                 api_base: str = API, key_env: str = "OPENROUTER_API_KEY", label: str = "OpenRouter"):
+        """api_base / key_env / label — свой OpenAI-совместимый сервер (LM Studio, Ollama /v1) вместо OpenRouter
+        (маршруты моделей, 09.10.26). Расширения OpenRouter (usage, provider, reasoning, каталог цен) уходят
+        только на сам OpenRouter."""
         name = (model or "").strip().lower()
         if "-contributor" in name or ":contributor" in name:
             raise ConnectorError(f"Модель «{model}» обучается на присланных данных (вариант «contributor»): "
@@ -53,10 +57,11 @@ class OpenRouterLLM(LLMConnector):
         self.reasoning_effort = reasoning_effort
         self._transport = transport
         self._prices: tuple[float, float] | None = None
+        self.api_base, self.key_env, self.label = api_base.rstrip("/"), key_env, label
+        self.extensions = self.api_base == API
 
-    @staticmethod
-    def _key() -> str:
-        return os.environ.get("OPENROUTER_API_KEY", "").strip()
+    def _key(self) -> str:
+        return os.environ.get(self.key_env, "").strip() if self.key_env else ""
 
     def _client(self) -> httpx.Client:
         return httpx.Client(timeout=self.timeout, transport=self._transport)
@@ -67,6 +72,8 @@ class OpenRouterLLM(LLMConnector):
         return {"enabled": False}
 
     def health(self) -> dict:
+        if not self.extensions:
+            return {"name": self.label, "ok": True, "model": self.model, "detail": "свой сервер: проверка вызовом"}
         if not self._key():
             return {"name": self.name, "ok": False, "detail": "не задан OPENROUTER_API_KEY"}
         try:
@@ -79,6 +86,8 @@ class OpenRouterLLM(LLMConnector):
 
     def prices(self) -> tuple[float, float] | None:
         """(цена токена запроса, цена токена ответа) из открытого каталога; None — неизвестно."""
+        if not self.extensions:
+            return None
         if self._prices is None:
             try:
                 with self._client() as c:
@@ -102,12 +111,13 @@ class OpenRouterLLM(LLMConnector):
     def complete(self, system: str, user: str, *, json_mode: bool = True, temperature: float = 0.0,
                  purpose: str = "", deadline: float | None = None) -> LLMResult:
         key = self._key()
-        if not key:
-            raise ConnectorError("Подключение OpenRouter выбрано, но переменная OPENROUTER_API_KEY не задана.")
+        if not key and self.extensions:
+            raise ConnectorUnavailable("Подключение OpenRouter выбрано, но переменная OPENROUTER_API_KEY не задана.")
         body = {"model": self.model, "temperature": temperature, "max_tokens": self.max_answer_tokens,
-                "messages": [{"role": "system", "content": system}, {"role": "user", "content": user}],
-                "usage": {"include": True}, "provider": {"data_collection": "deny"},
-                "reasoning": self._reasoning()}
+                "messages": [{"role": "system", "content": system}, {"role": "user", "content": user}]}
+        if self.extensions:
+            body.update({"usage": {"include": True}, "provider": {"data_collection": "deny"},
+                         "reasoning": self._reasoning()})
         if json_mode:
             body["response_format"] = {"type": "json_object"}
         last, t0 = None, time.monotonic()
@@ -117,8 +127,8 @@ class OpenRouterLLM(LLMConnector):
                 raise ConnectorError(f"Время прогона вышло до ответа модели ({last or 'запрос не отправлен'}).")
             try:
                 with self._client() as c:
-                    r = c.post(f"{API}/chat/completions", json=body,
-                               headers={"Authorization": f"Bearer {key}", "X-Title": "MeetFlow"},
+                    headers = {"X-Title": "MeetFlow"} | ({"Authorization": f"Bearer {key}"} if key else {})
+                    r = c.post(f"{self.api_base}/chat/completions", json=body, headers=headers,
                                timeout=self.timeout if left is None else min(self.timeout, left))
             except httpx.HTTPError as e:
                 last = type(e).__name__
@@ -130,8 +140,11 @@ class OpenRouterLLM(LLMConnector):
                     break
                 time.sleep(pause)
                 continue
+            safe = r.text[:300].replace(key, "***") if key else r.text[:300]
+            if r.status_code in (401, 402, 403, 404):   # ключ, деньги, модели нет — недоступна ТОЧКА
+                raise ConnectorUnavailable(f"{self.label} отказал: HTTP {r.status_code} — {safe}")
             if r.status_code >= 400:          # ошибка запроса: повтор даст то же; ключ в текст не попадает
-                raise ConnectorError(f"OpenRouter отказал: HTTP {r.status_code} — {r.text[:300].replace(key, '***')}")
+                raise ConnectorError(f"{self.label} отказал: HTTP {r.status_code} — {safe}")
             data = r.json()
             choice = (data.get("choices") or [{}])[0]
             text = (choice.get("message") or {}).get("content") or ""
@@ -145,4 +158,4 @@ class OpenRouterLLM(LLMConnector):
             return LLMResult(text, data.get("model") or self.model, int(u.get("prompt_tokens") or 0),
                              int(u.get("completion_tokens") or 0), float(u.get("cost") or 0.0),
                              time.monotonic() - t0, {"usage": u, "finish_reason": choice.get("finish_reason")})
-        raise ConnectorError(f"OpenRouter не ответил после {self.attempts} попыток ({last}).")
+        raise ConnectorUnavailable(f"{self.label} не ответил после {self.attempts} попыток ({last}).")

@@ -227,13 +227,18 @@ const routes = {
     $("#main").innerHTML = `<h1>Реестр решений</h1><div class="card-output">${rows.length ? `<table><tr><th>Что</th><th>Решение</th><th>Почему</th><th>Когда</th></tr>${rows.map((d) => `<tr><td>${esc(d.what)}</td><td>${esc(d.decision)}</td><td>${esc(d.why)}</td><td>${fmtDate(d.at)}</td></tr>`).join("")}</table>` : `<p class="empty">Решений пока нет.</p>`}</div>`;
   },
 
-  async monitoring(tab) {
+  // «Модели» — отдельный пункт левой панели супер-администратора (владелец 09.10.26); рисует тот же код, что
+  // была вкладка мониторинга, только без полосы вкладок.
+  async models() { return routes.monitoring("models", true); },
+
+  async monitoring(tab, solo = false) {
     // горизонтальные вкладки под разные задачи мониторинга (по образцу «Технических служб» Планёрки)
+    if (tab === "models" && !solo) { location.replace("#models"); return; }   // старый адрес вкладки
     const TABS = { services: "Службы", intake: "Приём записей", voices: "База голосов", runs: "Прогоны и расход",
       tech: "Технические сообщения", todo: "Заглушки" };
-    const cur = TABS[tab] ? tab : store.get("mon-tab", "services");
-    store.set("mon-tab", cur);
-    const bar = `<div class="seg-tabs" role="tablist">${Object.entries(TABS).map(([k, v]) =>
+    const cur = solo ? "models" : TABS[tab] ? tab : (TABS[store.get("mon-tab", "services")] ? store.get("mon-tab", "services") : "services");
+    if (!solo) store.set("mon-tab", cur);
+    const bar = solo ? "" : `<div class="seg-tabs" role="tablist">${Object.entries(TABS).map(([k, v]) =>
       `<a class="seg-tab" role="tab" href="#monitoring/${k}" aria-selected="${k === cur}">${v}</a>`).join("")}</div>`;
     const yes = (b) => (b ? "да" : '<span class="overdue">нет</span>');
     const kv = (rows) => `<dl class="kv">${rows.map(([k, v]) => `<dt>${esc(k)}</dt><dd>${v}</dd>`).join("")}</dl>`;
@@ -246,6 +251,53 @@ const routes = {
       const toolRu = { mock: "стенд без модели", ollama: "локальная модель (Ollama)", openrouter: "OpenRouter" }[t.tool] || t.tool;
       body = `<p class="page-sub">Подключение модели: <strong>${esc(toolRu)}</strong>${t.tool !== "mock" ? ` · генерирует ${esc(t.generator)}, проверяет ${esc(t.verifier)}` : ""} · потолок ответа ${esc(t.max_answer_tokens)} токенов${t.tool === "openrouter" ? ` · ключ ${t.openrouter_key_set ? "задан" : '<span class="overdue">не задан</span>'}` : ""}. Выбирается при развёртывании: MEETFLOW_LLM = mock / ollama / openrouter.</p>
       <div class="card-output"><table><tr><th>Тип</th><th>Коннектор</th><th>Состояние</th><th>Пояснение</th></tr>${m.connectors.map((c) => `<tr><td>${esc(c.kind)}</td><td class="meta">${esc(c.name)}</td><td>${c.ok === true ? "работает" : c.ok === false ? '<span class="overdue">не работает</span>' : "по запросу"}</td><td>${esc(c.detail || "")}</td></tr>`).join("")}</table></div>`;
+    } else if (cur === "models") {
+      // Модели (решение владельца 09.10.26) — пульт оператора маршрутов: роли (основная, запасные), справочник
+      // подключений (завести заранее, даже без адреса; изменить; проверить до сохранения; удалить), журнал и откат.
+      // Только супер-администратору, права проверяет сервер.
+      const d = await api("/api/monitoring/models");
+      S.routes = d;
+      const ROLE = d.role_titles || { asr: "Распознавание речи", generate: "Генерация черновика", verify: "Проверка черновика" };
+      const st = (s) => s.startsWith("выведена") ? `<span class="overdue">${esc(s)}</span>` : s === "основная" ? `<strong>${esc(s)}</strong>` : esc(s);
+      const shortModel = m => String(m || "").split(String.fromCharCode(92)).join("/").replace(/^.*models--[^/]*--([^/]+)[/]snapshots[/].*$/, "$1");
+      const opts = d.options || {};
+      const can = (role) => role === "asr" ? d.asr_switchable : d.switchable;
+      const order = ["asr", "generate", "verify"].filter((r) => (d.roles[r] || []).length || (can(r) && (opts[r] || []).length));
+      const eps = d.endpoints || [];
+      const fieldText = (e) => { const f = e.fields || {}; return [shortModel(f.model), f.callable, f.url, f.path ? "папка " + f.path : "", f.device ? "device " + f.device : ""].filter(Boolean).join(" · "); };
+      const ACT = { use: "основная", add: "запасная", remove: "убрана из роли", new: "новое подключение", edit: "изменено", delete: "удалено", rollback: "откат" };
+      const nDraft = eps.filter((e) => e.missing).length;
+      const word = (n) => n % 10 === 1 && n % 100 !== 11 ? "подключение" : [2, 3, 4].includes(n % 10) && ![12, 13, 14].includes(n % 100) ? "подключения" : "подключений";
+      body = !d.editable ? `<p class="page-sub page-sub-wide">${esc(d.note)}</p>` : `<p class="page-sub page-sub-wide">Маршрутизация по ролям: вызов обслуживает первая доступная точка цепочки, остальные — резерв по порядку. Отказ точки (нет соединения, 5xx/429 после повторов, таймаут, 401–404) выводит её на ${esc(d.cooldown_sec)} с (circuit breaker), вызов переходит к следующей. Изменения пишутся в файл атомарно и применяются без перезапуска.${d.switchable ? "" : " " + esc(d.note)} Файл: <span class="meta">${esc(d.path)}</span></p>
+        ${order.map((role) => { const pts = d.roles[role] || []; const o = opts[role] || [];
+          const spare = o.filter((x) => !pts.some((p) => p.name === x.name));
+          const pick = pts.length ? spare : o;
+          return `<div class="card-output"><h2 style="margin-top:0">${esc(ROLE[role] || role)}</h2>
+          ${can(role) && pick.length ? `<div class="row" style="margin-bottom:10px; gap:8px; align-items:center; flex-wrap:wrap"><span class="sub">Резерв из реестра:</span>
+            <select data-route-pick="${esc(role)}" style="min-width:280px">${pick.map((x) => `<option value="${esc(x.name)}">${esc(x.name)} — ${esc(shortModel(x.model) || x.kind)}</option>`).join("")}</select>
+            ${pts.length ? `<button class="btn btn-outline" data-route-pick-add="${esc(role)}">Добавить запасной</button>` : `<button class="btn btn-outline" data-route-pick-apply="${esc(role)}">Сделать основной</button>`}</div>`
+            : o.length ? "" : '<p class="sub">В реестре нет готовых точек этого рода — заведите подключение в «Списке подключений».</p>'}
+          ${pts.length ? `<table><tr><th></th><th>Точка</th><th>Модель</th><th>Сервер</th><th>Состояние</th><th></th></tr>${pts.map((p, i) => `<tr class="${i === 0 ? "route-row-on" : ""}">
+            <td style="width:34px; text-align:center">${i === 0 ? '<span class="route-radio on" title="Основная" aria-label="основная"></span>'
+              : can(role) ? `<button class="route-radio" data-route-use="${esc(role)}|${esc(p.name)}" title="Сделать основной" aria-label="Сделать основной: ${esc(p.name)}"></button>` : ""}</td>
+            <td class="meta">${esc(p.name)}</td><td title="${esc(p.model)}">${esc(shortModel(p.model))}</td><td class="meta">${esc(p.url || p.kind)}</td>
+            <td>${p.state.startsWith("выведена") ? st(p.state) : i === 0 ? `<span class="route-state-on">${esc(p.state)}</span>` : `<span class="sub">${esc(p.state)}</span>`}</td>
+            <td style="text-align:right">${pts.length > 1 ? `<button class="btn-link" data-route-remove="${esc(role)}|${esc(p.name)}">Убрать</button>` : ""}</td></tr>`).join("")}</table>`
+            : '<p class="sub">Роль не описана в models.json — работает модель темы. «Сделать основной» добавит роль в файл.</p>'}</div>`; }).join("")}
+        ${order.length ? `<div class="row"><button class="btn btn-outline" id="route-check">Проверить все точки в ролях</button></div><div id="route-check-out" class="sub"></div>` : ""}
+        <div class="card-output"><h2 style="margin-top:0">Список подключений</h2>
+          <p class="sub">Реестр точек вызова (endpoints в models.json). Текст: openai — OpenAI-совместимый сервер, ollama, openrouter. Распознавание: faster-whisper — модель на этой машине, python — функция «модуль:функция», asr-service — HTTP-сервис во внутренней сети. В вызовах участвуют только точки, назначенные в роли. Точка без обязательных полей имеет статус «не настроено» и в роль не назначается. Секреты в файле не хранятся: key_env — имя переменной окружения.</p>
+          <details class="model-book"${S.routesBookOpen ? " open" : ""}><summary class="disclosure-summary">Показать список — ${eps.length} ${word(eps.length)}${nDraft ? `, из них не настроено ${nDraft}` : ""}</summary>
+          <table><tr><th>Имя</th><th>Параметры</th><th>Где используется</th><th></th></tr>${eps.map((e) => `<tr><td class="meta">${esc(e.name)}<div class="sub">${esc(e.kind_title)}</div></td>
+            <td>${esc(fieldText(e) || "—")}${e.fields && e.fields.note ? `<div class="sub">${esc(e.fields.note)}</div>` : ""}</td>
+            <td>${e.missing ? `<span class="overdue">не настроено</span><div class="sub">${esc(e.missing)}</div>` : e.roles.length ? esc(e.roles.map((r) => ROLE[r] || r).join(", ")) : "готово, не в ролях"}</td>
+            <td style="white-space:nowrap; text-align:right"><button class="btn btn-outline" data-ep-edit="${esc(e.name)}">Изменить</button> <button class="btn-link btn-link-danger" data-ep-delete="${esc(e.name)}">Удалить</button></td></tr>`).join("")}</table></details>
+          <div class="row" style="margin-top:10px; gap:8px"><button class="btn btn-outline" data-ep-new="text">+ Новое подключение модели</button><button class="btn btn-outline" data-ep-new="asr">+ Новое подключение распознавания</button></div>
+          <div id="ep-form"></div></div>
+        <div class="card-output"><h2 style="margin-top:0">Журнал изменений</h2>
+          <p class="sub">Источник — models.log.jsonl. Перед каждой записью файла прежняя версия сохраняется в models.history/ (до 30 версий); откат восстанавливает последнюю сохранённую, повторный — предыдущую.</p>
+          ${(d.history || []).length ? `<table>${d.history.slice(0, 6).map((h) => `<tr><td class="meta">${esc(h.at || "")}</td><td>${esc(ACT[h.action || "use"] || h.action)}${h.role ? " — " + esc(ROLE[h.role] || h.role) : ""}${h.point ? ": " + esc(h.point) : ""}</td><td>${esc(h.by || "")}</td></tr>`).join("")}</table>` : '<p class="sub">Записей нет.</p>'}
+          <div class="row" style="margin-top:10px; gap:8px; align-items:center"><button class="btn btn-outline" id="route-rollback"${d.versions ? "" : " disabled"}>Откатить последнее изменение</button><span class="sub">Версий в models.history: ${esc(d.versions || 0)}</span></div></div>`;
     } else if (cur === "intake") {
       const rows = await api("/api/monitoring/intake");
       body = rows.length ? rows.map((r) => `<div class="card-output"><h2 style="margin-top:0">${esc(r.project)}</h2>${kv([
@@ -288,8 +340,92 @@ const routes = {
       const m = await api("/api/monitoring");
       body = `<div class="card-output">${m.todo.length ? m.todo.map((t) => `<div class="sub meta">${esc(t)}</div>`).join("") : '<p class="empty">Заглушек нет.</p>'}</div>`;
     }
-    $("#main").innerHTML = `<h1>Мониторинг</h1>${bar}${body}`;
+    $("#main").innerHTML = `<h1>${solo ? "Модели" : "Мониторинг"}</h1>${bar}${body}`;
     $("#main").querySelectorAll("[data-days]").forEach((b) => b.onclick = () => { store.set("runs-days", b.dataset.days); render(); });
+    // Пульт моделей: каждое действие — запрос, затем перерисовка; ошибка сервера — в подсказке
+    const book = $("#main").querySelector("details.model-book");
+    if (book) book.ontoggle = () => { S.routesBookOpen = book.open; };
+    const routeAct = async (b, path, json, ok) => {
+      b.disabled = true;
+      try { await api("/api/monitoring/models" + path, { method: "POST", json }); if (ok) toast(ok); render(); }
+      catch (e) { b.disabled = false; toast(e.message); }
+    };
+    const pick = (role) => $("#main").querySelector(`[data-route-pick="${role}"]`);
+    $("#main").querySelectorAll("[data-route-use]").forEach((b) => b.onclick = () => {
+      const [role, point] = b.dataset.routeUse.split("|");
+      routeAct(b, "/use", { role, point }, `Основная точка — ${point}`);
+    });
+    $("#main").querySelectorAll("[data-route-remove]").forEach((b) => b.onclick = () => {
+      const [role, point] = b.dataset.routeRemove.split("|");
+      routeAct(b, "/role", { role, point, action: "remove" }, `«${point}» убрана из роли`);
+    });
+    $("#main").querySelectorAll("[data-route-pick-apply]").forEach((b) => b.onclick = () => {
+      const sel = pick(b.dataset.routePickApply);
+      if (sel) routeAct(b, "/use", { role: b.dataset.routePickApply, point: sel.value }, `Основная точка — ${sel.value}`);
+    });
+    $("#main").querySelectorAll("[data-route-pick-add]").forEach((b) => b.onclick = () => {
+      const sel = pick(b.dataset.routePickAdd);
+      if (sel) routeAct(b, "/role", { role: b.dataset.routePickAdd, point: sel.value, action: "add" }, `«${sel.value}» — запасная`);
+    });
+    $("#main").querySelectorAll("[data-ep-delete]").forEach((b) => b.onclick = () => {
+      if (!confirm(`Удалить подключение «${b.dataset.epDelete}»? Прежняя версия файла сохранится, её можно вернуть откатом.`)) return;
+      routeAct(b, "/endpoint/delete", { name: b.dataset.epDelete, fields: {} }, `Подключение «${b.dataset.epDelete}» удалено`);
+    });
+    const rb = $("#route-rollback");
+    if (rb) rb.onclick = () => routeAct(rb, "/rollback", {}, "Файл маршрутов возвращён к прежней версии");
+    const epForm = $("#ep-form");
+    const openEpForm = (group, ep) => {
+      const kinds = (S.routes || {}).kinds || {};
+      const list = Object.keys(kinds).filter((k) => kinds[k].for === group);
+      let kind = ep ? ep.kind : list[0];
+      const draw = () => {
+        const fields = (kinds[kind] || {}).fields || [];
+        const val = (k) => ep && ep.kind === kind ? ((ep.fields || {})[k] || "") : "";
+        epForm.innerHTML = `<div class="card stack" style="margin-top:12px"><h2 style="margin:0">${ep ? `Подключение «${esc(ep.name)}»` : group === "asr" ? "Новое подключение распознавания" : "Новое подключение модели"}</h2>
+          <label class="sub">Имя подключения<input data-f="name" value="${esc(ep ? ep.name : "")}" placeholder="${group === "asr" ? "whisper-medium" : "deepseek-flash"}"></label>
+          <label class="sub">Род<select data-f="kind">${list.map((k) => `<option value="${esc(k)}"${k === kind ? " selected" : ""}>${esc(kinds[k].title)}</option>`).join("")}</select></label>
+          ${fields.map((f) => `<label class="sub">${esc(f.label)}${f.required ? "" : " — необязательно"}${f.choices
+            ? `<select data-f="${esc(f.key)}">${f.choices.map((c) => `<option${(val(f.key) || f.default) === c ? " selected" : ""}>${esc(c)}</option>`).join("")}</select>`
+            : `<input data-f="${esc(f.key)}" value="${esc(val(f.key) || (ep ? "" : f.default || ""))}" placeholder="${esc(f.hint || "")}">`}</label>`).join("")}
+          <label class="sub">Пояснение — необязательно<input data-f="note" value="${esc(ep && ep.fields ? ep.fields.note || "" : "")}" placeholder="например: адрес задаёт оператор"></label>
+          <p class="sub">Обязательное поле можно оставить пустым — подключение сохранится заготовкой «не настроено».</p>
+          <div class="row" style="gap:10px; align-items:center"><button class="btn btn-outline" data-ep-test>Проверить связь</button><button class="btn btn-primary" data-ep-save>Сохранить</button><button class="btn-link" data-ep-cancel>Отмена</button></div>
+          <div class="sub" data-ep-out></div></div>`;
+        const read = () => { const o = {}; epForm.querySelectorAll("[data-f]").forEach((i) => { o[i.dataset.f] = i.value.trim(); }); return o; };
+        epForm.querySelector('[data-f="kind"]').onchange = (e) => { kind = e.target.value; draw(); };
+        epForm.querySelector("[data-ep-cancel]").onclick = () => { epForm.innerHTML = ""; };
+        const out = epForm.querySelector("[data-ep-out]");
+        const tb = epForm.querySelector("[data-ep-test]");
+        tb.onclick = async () => {
+          tb.disabled = true; out.textContent = "Проверяем…";
+          try { const f = read(); const r = await api("/api/monitoring/models/endpoint/test", { method: "POST", json: { name: f.name || "проверка", fields: f } });
+            out.innerHTML = `${r.ok ? "работает" : '<span class="overdue">нет</span>'} — ${esc(r.detail)}`; }
+          catch (e) { out.textContent = e.message; }
+          finally { tb.disabled = false; }
+        };
+        const sb = epForm.querySelector("[data-ep-save]");
+        sb.onclick = () => { const f = read(); routeAct(sb, "/endpoint", { name: f.name, old_name: ep ? ep.name : "", fields: f }, `Подключение «${f.name}» сохранено`); };
+        epForm.scrollIntoView({ block: "nearest" });
+      };
+      draw();
+    };
+    $("#main").querySelectorAll("[data-ep-new]").forEach((b) => b.onclick = () => openEpForm(b.dataset.epNew, null));
+    $("#main").querySelectorAll("[data-ep-edit]").forEach((b) => b.onclick = () => {
+      const ep = ((S.routes || {}).endpoints || []).find((x) => x.name === b.dataset.epEdit);
+      const kinds = (S.routes || {}).kinds || {};
+      if (ep) openEpForm((kinds[ep.kind] || {}).for || "text", ep);
+    });
+    const chk = $("#route-check");
+    if (chk) chk.onclick = async () => {
+      chk.disabled = true;
+      const out = $("#route-check-out");
+      out.textContent = "Проверяем — короткий запрос на каждую точку…";
+      try {
+        const r = await api("/api/monitoring/models/check", { method: "POST" });
+        out.innerHTML = r.results.map((x) => `${x.ok ? "работает" : '<span class="overdue">нет</span>'} — ${esc(x.name)}: ${esc(x.detail)}`).join("<br>");
+      } catch (e) { out.textContent = e.message; }
+      finally { chk.disabled = false; }
+    };
   },
 
   async settings() {
@@ -360,7 +496,8 @@ async function render() {
   });
   document.querySelectorAll("[data-admin]").forEach((el) => (el.hidden = !isAdmin()));
   document.querySelectorAll("[data-super]").forEach((el) => (el.hidden = S.role !== "super_admin"));
-  if (!S.project && route !== "design") { $("#main").innerHTML = `<h1>Нет проекта</h1><p class="page-sub">Создайте проект: python -m meetflow new-project.</p>`; return; }
+  // мониторинг — общесистемный экран: модели и службы нужны и до первого проекта (09.10.26)
+  if (!S.project && route !== "design" && route !== "monitoring" && route !== "models") { $("#main").innerHTML = `<h1>Нет проекта</h1><p class="page-sub">Создайте проект: python -m meetflow new-project.</p>`; return; }
   try { await (routes[route] || routes.tasks)(arg); } catch (e) { $("#main").innerHTML = `<h1>Не получилось открыть раздел</h1><p class="page-sub">${esc(e.message)}</p>`; }
   // стенд без модели виден на каждом экране (письмо meeting-registry 01/19)
   if (S.theme && S.theme.stand) $("#main").insertAdjacentHTML("afterbegin",

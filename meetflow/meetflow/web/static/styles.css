@@ -250,3 +250,24 @@ td.no small, .sub { display: block; font-size: var(--fs-small); color: var(--tex
 /* атрибут hidden всегда прячет: display на элементе его перебивал — блок супер-админа был виден участнику
    (находка Планёрки, письмо meeting-registry 46; у нас подтверждено на демо) */
 [hidden] { display: none !important; }
+
+/* Пульт «Модели», вариант Б (владелец 09.10.26): три уровня кнопок — заливка одна на экран («Сохранить» в форме),
+   обводка — обычное действие, ссылка — «Убрать», «Удалить», «Отмена». Основная точка — отметка в строке. */
+.btn-outline { background: var(--surface); color: var(--accent); border: 1px solid var(--accent); box-shadow: none; }
+.btn-outline:hover { background: var(--accent-soft); color: var(--accent-hover); border-color: var(--accent-hover); }
+.btn-link { background: none; border: 0; padding: 2px; font: 400 var(--fs-ui) var(--font); color: var(--text-muted);
+  text-decoration: underline; text-underline-offset: 3px; cursor: pointer; }
+.btn-link:hover { color: var(--text); }
+.btn-link.btn-link-danger:hover { color: var(--danger); }
+.route-row-on > td { background: var(--accent-soft); }
+.route-row-on > td:first-child { box-shadow: inset 3px 0 0 var(--accent); }
+.route-radio { display: inline-block; width: 18px; height: 18px; padding: 0; border-radius: 50%; border: 1.5px solid var(--text-muted);
+  background: var(--surface); cursor: pointer; vertical-align: middle; }
+.route-radio:hover { border-color: var(--accent); background: var(--accent-soft); }
+.route-radio.on { border-color: var(--accent); background: var(--accent); box-shadow: inset 0 0 0 3px var(--surface); cursor: default; }
+.route-state-on { color: var(--accent); font-weight: 500; }
+.model-book { margin-top: 8px; }
+.model-book > summary { margin-bottom: 6px; cursor: pointer; }
+
+/* Страница «Модели»: подсказки идут по ширине карточки, как таблицы под ними (владелец 09.10.26) */
+.page-sub-wide { max-width: none; }

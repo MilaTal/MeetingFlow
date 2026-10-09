@@ -40,4 +40,4 @@ MeetFlow превращает материалы совещания в прот�
 
 Для боевого запуска главное — вход по паролю. Пока его нет, сервер работает только на этой машине. Этот и остальные открытые вопросы собраны для оператора отдельно, в OPERATOR_TODO.md.
 
-Всё лежит в папке «ITMO_project lead\meetflow-framework». Как развернуть и что нужно от машины — docs/DEPLOYMENT.md. Полный отчёт — FRAMEWORK_REPORT.md. Инструкция для следующих проектов — в скилле meetflow-project.
+Всё лежит в папке «ITMO_project lead\meetflow-framework». Как развернуть и что нужно от машины — docs/DEPLOYMENT.md. Полный отчёт — FRAMEWORK_REPORT.md. Инструкция для следующих проектов — в скилле meetflow (с 09.10.26 — один скилл вместо meetflow-project и meeting-registry).

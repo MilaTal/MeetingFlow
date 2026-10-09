@@ -103,7 +103,7 @@
 5. `scripts\run_tests.ps1`, затем `scripts\run_dev.ps1 -Theme <id> -Port 8002 -Llm ollama`.
 6. Пять прогонов на реальных встречах и запись стоимости успешного результата (KPI: доля закрытий из протокола, время до протокола, доля протоколов без правки — те же, что в Планёрке).
 
-Скилл для этой работы — `skill/meetflow-project/SKILL.md`. Новый коннектор — `docs/PLUGIN_GUIDE.md`.
+Скилл для этой работы — `skill/meetflow/SKILL.md` (с 09.10.26 один скилл вместо meetflow-project и meeting-registry). Новый коннектор — `docs/PLUGIN_GUIDE.md`.
 
 ## 7. Lessons Learned
 
