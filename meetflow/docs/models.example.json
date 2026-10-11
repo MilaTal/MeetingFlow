@@ -66,6 +66,9 @@
     "asr": [
       "whisper-large",
       "whisper-large-cpu"
+    ],
+    "guard": [
+      "lmstudio-7b"
     ]
   },
   "cooldown_sec": 300

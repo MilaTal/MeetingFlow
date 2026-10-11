@@ -3,7 +3,7 @@
    сообщения не в рабочих вкладках; кнопок, на которые нет прав, нет вовсе;
    пользователю — понятные фразы; всё экранируется (урок XSS через #search). */
 "use strict";
-const S = { theme: null, project: null, role: "member", name: "" };
+const S = { theme: null, project: null, role: "member", name: "", auth: false };
 const ROLE_RU = { member: "Участник", director: "Директор", project_admin: "Админ проекта", super_admin: "Супер-админ" };
 // заняты проектами-примерами и пресетами: индиго и зелёные; для новых проектов — нижний ряд
 const PALETTES = { emerald: "#1f845a", indigo: "#6863bf", forest: "#2f4f41", polaris: "#008060", sage: "#4b6358", meadow: "#257e52" };
@@ -17,11 +17,12 @@ const store = { get(k, d) { try { return localStorage.getItem(k) ?? d; } catch {
   set(k, v) { try { localStorage.setItem(k, v); } catch { /* приватное окно */ } } };
 
 async function api(path, opts = {}) {
-  const headers = { "X-User-Role": S.role, "X-User-Name": encodeURIComponent(S.name), ...(opts.headers || {}) };
+  const headers = { "X-User-Role": S.role, "X-User-Name": encodeURIComponent(S.name), "X-Requested-With": "MeetFlow", ...(opts.headers || {}) };
   if (opts.json !== undefined) { headers["Content-Type"] = "application/json"; opts.body = JSON.stringify(opts.json); }
   const r = await fetch(path, { ...opts, headers });
   const ct = r.headers.get("content-type") || "";
   const data = ct.includes("json") ? await r.json() : await r.text();
+  if (r.status === 401 && S.auth && !path.startsWith("/api/auth/")) { showLogin(); }
   if (!r.ok) throw new Error((data && data.detail && (typeof data.detail === "string" ? data.detail : "Проверьте введённые данные.")) || "Не получилось.");
   return data;
 }
@@ -62,17 +63,38 @@ const routes = {
     const rows = await api(`/api/projects/${S.project}/tasks?status=${view}`);
     const tabs = ["active", "done", "dropped"].map((v) => `<button class="btn ${v === view ? "btn-primary" : ""}" data-view="${v}">${
       { active: "В работе", done: "Выполненные", dropped: "Снятые" }[v]}</button>`).join("");
-    const body = rows.length ? `<div class="table-wrap"><table><tr><th>№</th><th>Задача</th><th>Ответственный</th><th>Срок</th><th>Комментарий</th><th></th></tr>${
+    const body = rows.length ? `<div class="table-wrap" id="tasks-frame"><table><tr><th>№</th><th>Задача</th><th>Ответственный</th><th>Срок</th><th>Комментарий</th><th></th></tr>${
       rows.map((t) => {
         const mine = S.name && S.name === t.assignee;
         const can = isAdmin() || S.role === "director" || mine;
         return `<tr><td class="no" title="Внутренний номер: ${esc(t.id)}">${esc(t.no)}<small>${fmtDate(t.date_set)}</small></td>
           <td>${esc(t.description)}${t.source_quote ? `<span class="sub">«${esc(t.source_quote.slice(0, 160))}»</span>` : ""}</td>
-          <td>${esc(t.assignee || "Не назначен")}</td><td>${esc(t.due_date || "—")}</td><td>${esc(t.last_comment || "")}</td>
+          <td>${esc(t.assignee || "Не назначен")}</td><td${t.overdue ? ' class="overdue" title="Просрочено: порог в «Параметры системы → Пороги»"' : ""}>${esc(t.due_date || "—")}</td><td>${esc(t.last_comment || "")}</td>
           <td>${can && view === "active" ? `<button class="btn" data-done="${t.id}">Выполнено</button>` : ""}
               ${can && view !== "active" ? `<button class="btn btn-ghost" data-back="${t.id}">Вернуть</button>` : ""}</td></tr>`;
       }).join("")}</table></div>` : `<p class="empty">Задач нет.</p>`;
-    $("#main").innerHTML = `<h1>${esc(S.theme.vocabulary.registry)}</h1><div class="row" style="margin-bottom:16px">${tabs}</div><div class="card-output">${body}</div>`;
+    // поиск по реестру — прямо на экране реестра, как в Проекте ERP и Планёрке (локальная машина, 09.10.26)
+    const hints = ["задачи с ответственным (ФИО)", "в этой задаче есть о ...", "было ли упомянуто", "протокол встречи от", "информация о"];
+    $("#main").innerHTML = `<h1>${esc(S.theme.vocabulary.nav_tasks || S.theme.vocabulary.registry)}</h1><div class="row" style="margin-bottom:16px">${tabs}</div><div class="card-output">${body}</div>
+      <div class="card stack" id="reg-search"><div class="row"><input id="rq" style="flex:1;min-width:240px" placeholder="Поиск по реестру: слово, ФИО или дата встречи">
+      <button class="btn btn-primary" id="rgo">Найти</button></div>
+      <div class="row">${hints.map((h) => `<button class="btn btn-ghost" data-rhint="${esc(h.replace(/\s*\(.*\)|\.{2,}/g, ""))}">${esc(h)}</button>`).join("")}</div><div id="rres"></div></div>`;
+    // в таблице — до 7 строк: высота рамки считается от низа окна минус блок поиска, а не фиксированная
+    const fitRows = () => { const fr = $("#tasks-frame"); if (!fr) return;
+      const trs = [...fr.querySelectorAll("tr")]; if (trs.length < 2) return;
+      const head = trs[0].offsetHeight, rowsH = trs.slice(1, 8).reduce((a, r) => a + r.offsetHeight, 0);
+      const room = window.innerHeight - fr.getBoundingClientRect().top - ($("#reg-search").offsetHeight + 36);
+      const minH = head + trs.slice(1, 5).reduce((a, r) => a + r.offsetHeight, 0);
+      fr.style.maxHeight = Math.max(minH, Math.min(head + rowsH, room)) + "px"; fr.style.overflowY = "auto"; };
+    fitRows(); window.onresize = fitRows;
+    const rrun = async () => { const v = $("#rq").value.trim(); if (!v) { $("#rres").innerHTML = ""; return; }
+      const r = await api(`/api/projects/${S.project}/search?q=${encodeURIComponent(v)}`);
+      const kind = { protocol: "протокол", source: "источник", task: "задача", unit: "из записи" };
+      $("#rres").innerHTML = r.problem ? `<p class="empty">${esc(r.problem)}</p>` : !r.results.length ? '<p class="empty">Ничего не найдено. Проверьте написание или попробуйте другое слово.</p>'
+        : `<p class="sub">Найдено: ${esc(r.total)}</p>${r.results.map((x) => `<div class="note"><span class="badge">${esc(kind[x.type] || x.type)}</span> <span class="meta">${fmtDate(x.meeting_date)}</span> ${x.type !== "task" ? `<a href="#meeting/${esc(x.id)}">открыть встречу</a>` : ""}<q>${esc(x.snippet)}</q></div>`).join("")}`;
+      fitRows(); };
+    $("#rgo").onclick = rrun; $("#rq").onkeydown = (e) => { if (e.key === "Enter") rrun(); };
+    $("#main").querySelectorAll("[data-rhint]").forEach((b) => b.onclick = () => { $("#rq").value = b.dataset.rhint + " "; $("#rq").focus(); });
     $("#main").querySelectorAll("[data-view]").forEach((b) => b.onclick = () => { store.set("tasks-view", b.dataset.view); render(); });
     $("#main").querySelectorAll("[data-done]").forEach((b) => b.onclick = () => undoable(b, b.dataset.done, "done"));
     $("#main").querySelectorAll("[data-back]").forEach((b) => b.onclick = async () => { await api(`/api/tasks/${b.dataset.back}`, { method: "PATCH", json: { status: "active" } }); render(); });
@@ -229,29 +251,26 @@ const routes = {
 
   // «Модели» — отдельный пункт левой панели супер-администратора (владелец 09.10.26); рисует тот же код, что
   // была вкладка мониторинга, только без полосы вкладок.
-  async models() { return routes.monitoring("models", true); },
+  async models() { return routes.monitoring("models", true, "Модели"); },
 
-  async monitoring(tab, solo = false) {
+  async voices() { // «База голосов» — отдельный пункт меню, как в ERP; путь к базе — здесь же, по паролю
+    await routes.monitoring("voices", true, "База голосов");
+    const st = await api("/api/monitoring/voice-base");
+    $("#main").insertAdjacentHTML("beforeend", `<div class="card stack"><h2 style="margin:0">Файл базы голосов</h2>
+      <div class="sub">Путь к файлу общей базы (например voices.db). База только читается. Смена — по паролю супер-администратора.</div>
+      <input id="vb-path" placeholder="Полный путь к файлу базы" value="${esc(st.path || "")}"><input id="vb-repeat" placeholder="Повторите путь">
+      ${S.auth ? "" : '<input id="vb-login" placeholder="Логин супер-администратора">'}<input id="vb-pass" type="password" placeholder="Пароль супер-администратора" autocomplete="current-password">
+      <button class="btn btn-primary" id="vb-save">Сохранить путь</button></div>`);
+    $("#vb-save").onclick = async () => { try { await api("/api/settings/voice-base", { method: "POST", json: { path: $("#vb-path").value, path_repeat: $("#vb-repeat").value, login: ($("#vb-login") || {}).value || "", current_password: $("#vb-pass").value } }); toast("Путь к базе голосов сохранён."); render(); } catch (e) { toast(e.message); } };
+  },
+
+  async monitoring(tab, solo = false, title = "", prefix = "") {
     // горизонтальные вкладки под разные задачи мониторинга (по образцу «Технических служб» Планёрки)
-    if (tab === "models" && !solo) { location.replace("#models"); return; }   // старый адрес вкладки
-    const TABS = { services: "Службы", intake: "Приём записей", voices: "База голосов", runs: "Прогоны и расход",
-      tech: "Технические сообщения", todo: "Заглушки" };
-    const cur = solo ? "models" : TABS[tab] ? tab : (TABS[store.get("mon-tab", "services")] ? store.get("mon-tab", "services") : "services");
-    if (!solo) store.set("mon-tab", cur);
-    const bar = solo ? "" : `<div class="seg-tabs" role="tablist">${Object.entries(TABS).map(([k, v]) =>
-      `<a class="seg-tab" role="tab" href="#monitoring/${k}" aria-selected="${k === cur}">${v}</a>`).join("")}</div>`;
-    const yes = (b) => (b ? "да" : '<span class="overdue">нет</span>');
+    if (!solo) { location.replace(tab === "models" ? "#models" : "#live"); return; }   // прежний «Мониторинг» — теперь «Мониторинг RealTime» и «Параметры системы»
+    const cur = ["models", "voices", "runs", "cost", "todo"].includes(tab) ? tab : "models";
     const kv = (rows) => `<dl class="kv">${rows.map(([k, v]) => `<dt>${esc(k)}</dt><dd>${v}</dd>`).join("")}</dl>`;
-    const scanLine = (s) => !s ? "проходов ещё не было" : s.status === "unavailable" ? `<span class="overdue">папка недоступна</span> · <span class="meta">${esc(String(s.at).replace("T", " "))}</span>`
-      : `<span class="meta">${esc(String(s.at).replace("T", " "))}</span> · принято ${s.ingested.length}, ждут записи ${s.held.length}, не принято ${s.rejected.length}, повторы ${s.duplicates.length}, без даты ${s.no_date.length}, ещё пишутся ${s.waiting.length}`;
     let body = "";
-    if (cur === "services") {
-      const m = await api("/api/monitoring");
-      const t = m.llm_tool || {};
-      const toolRu = { mock: "стенд без модели", ollama: "локальная модель (Ollama)", openrouter: "OpenRouter" }[t.tool] || t.tool;
-      body = `<p class="page-sub">Подключение модели: <strong>${esc(toolRu)}</strong>${t.tool !== "mock" ? ` · генерирует ${esc(t.generator)}, проверяет ${esc(t.verifier)}` : ""} · потолок ответа ${esc(t.max_answer_tokens)} токенов${t.tool === "openrouter" ? ` · ключ ${t.openrouter_key_set ? "задан" : '<span class="overdue">не задан</span>'}` : ""}. Выбирается при развёртывании: MEETFLOW_LLM = mock / ollama / openrouter.</p>
-      <div class="card-output"><table><tr><th>Тип</th><th>Коннектор</th><th>Состояние</th><th>Пояснение</th></tr>${m.connectors.map((c) => `<tr><td>${esc(c.kind)}</td><td class="meta">${esc(c.name)}</td><td>${c.ok === true ? "работает" : c.ok === false ? '<span class="overdue">не работает</span>' : "по запросу"}</td><td>${esc(c.detail || "")}</td></tr>`).join("")}</table></div>`;
-    } else if (cur === "models") {
+    if (cur === "models") {
       // Модели (решение владельца 09.10.26) — пульт оператора маршрутов: роли (основная, запасные), справочник
       // подключений (завести заранее, даже без адреса; изменить; проверить до сохранения; удалить), журнал и откат.
       // Только супер-администратору, права проверяет сервер.
@@ -262,7 +281,7 @@ const routes = {
       const shortModel = m => String(m || "").split(String.fromCharCode(92)).join("/").replace(/^.*models--[^/]*--([^/]+)[/]snapshots[/].*$/, "$1");
       const opts = d.options || {};
       const can = (role) => role === "asr" ? d.asr_switchable : d.switchable;
-      const order = ["asr", "generate", "verify"].filter((r) => (d.roles[r] || []).length || (can(r) && (opts[r] || []).length));
+      const order = ["asr", "generate", "verify", "guard"].filter((r) => (d.roles[r] || []).length || (can(r) && (opts[r] || []).length));
       const eps = d.endpoints || [];
       const fieldText = (e) => { const f = e.fields || {}; return [shortModel(f.model), f.callable, f.url, f.path ? "папка " + f.path : "", f.device ? "device " + f.device : ""].filter(Boolean).join(" · "); };
       const ACT = { use: "основная", add: "запасная", remove: "убрана из роли", new: "новое подключение", edit: "изменено", delete: "удалено", rollback: "откат" };
@@ -298,20 +317,10 @@ const routes = {
           <p class="sub">Источник — models.log.jsonl. Перед каждой записью файла прежняя версия сохраняется в models.history/ (до 30 версий); откат восстанавливает последнюю сохранённую, повторный — предыдущую.</p>
           ${(d.history || []).length ? `<table>${d.history.slice(0, 6).map((h) => `<tr><td class="meta">${esc(h.at || "")}</td><td>${esc(ACT[h.action || "use"] || h.action)}${h.role ? " — " + esc(ROLE[h.role] || h.role) : ""}${h.point ? ": " + esc(h.point) : ""}</td><td>${esc(h.by || "")}</td></tr>`).join("")}</table>` : '<p class="sub">Записей нет.</p>'}
           <div class="row" style="margin-top:10px; gap:8px; align-items:center"><button class="btn btn-outline" id="route-rollback"${d.versions ? "" : " disabled"}>Откатить последнее изменение</button><span class="sub">Версий в models.history: ${esc(d.versions || 0)}</span></div></div>`;
-    } else if (cur === "intake") {
-      const rows = await api("/api/monitoring/intake");
-      body = rows.length ? rows.map((r) => `<div class="card-output"><h2 style="margin-top:0">${esc(r.project)}</h2>${kv([
-        ["Папка-приёмник", r.folder ? `<span class="meta">${esc(r.folder)}</span>` : 'не задана — <a href="#settings">задать в «Настройках»</a>'],
-        ["Папка доступна", r.folder ? yes(r.exists) : "—"], ["Файл-метка", r.folder ? yes(r.marker) : "—"],
-        ["Файлов ждёт в папке", r.folder && r.exists ? esc(r.files_waiting) : "—"],
-        ["Опрос", `раз в ${esc(r.interval)} с · фоновый забор ${r.worker ? "работает" : '<span class="overdue">не запущен</span>'}`],
-        ["Автозапуск протокола", r.autorun ? "включён" : "выключен"],
-        ["Последний проход", scanLine(r.last_scan)], ["Последний результативный", scanLine(r.last_useful_scan)]])}</div>`).join("")
-        : '<p class="empty">Проектов нет.</p>';
     } else if (cur === "voices") {
       const v = await api("/api/monitoring/voice-base");
       const dict = (d) => d ? Object.entries(d).map(([k, n]) => `${esc(k)}: ${esc(n)}`).join(" · ") : "—";
-      body = `<div class="card-output">${kv([["Файл базы", v.path ? `<span class="meta">${esc(v.path)}</span>` : 'не задан — <a href="#settings">задать в «Настройках»</a>'],
+      body = `<div class="card-output">${kv([["Файл базы", v.path ? `<span class="meta">${esc(v.path)}</span>` : "не задан — укажите ниже"],
         ["Состояние", v.ok ? "доступна, только чтение" : `<span class="overdue">${esc(v.detail || "недоступна")}</span>`],
         ...(v.ok ? [["Отпечатков голоса", esc(v.samples)], ["Из них привязаны к человеку", esc(v.samples_linked)],
           ["Людей в базе", esc(v.people)], ["Подтверждены", esc(v.people_confirmed)], ["Ждут подтверждения", esc(v.people_waiting)],
@@ -319,28 +328,25 @@ const routes = {
           ["Последний отпечаток", v.last_sample_at ? `<span class="meta">${esc(v.last_sample_at)}</span>` : "—"],
           ["Размер", `${esc(v.size_kb)} КБ · журнал ${esc(v.journal_mode)}`]] : [])])}
         <p class="sub">База общая для проектов и здесь только читается. Голос не покидает машину.</p></div>`;
-    } else if (cur === "runs") {
+    } else if (cur === "runs" || cur === "cost") {
       const days = Number(store.get("runs-days", "7"));
       const r = await api(`/api/monitoring/runs?days=${days}`);
       const lim = r.limits || {};
       const tbl = (d, cap) => `<h2>${cap}</h2>${Object.keys(d).length ? `<table><tr><th>${cap === "По дням" ? "День" : cap === "По моделям" ? "Модель" : "Назначение"}</th><th>Вызовов</th><th>$</th><th>Секунд</th><th>Знаков</th></tr>${Object.entries(d).map(([k, x]) => `<tr><td class="meta">${esc(k)}</td><td>${esc(x.calls)}</td><td>${esc(x.cost_usd)}</td><td>${esc(x.seconds)}</td><td>${esc(x.chars)}</td></tr>`).join("")}</table>` : '<p class="empty">Нет данных.</p>'}`;
       body = `<div class="row" style="margin-bottom:12px">${[1, 7, 30].map((d) => `<button class="btn ${d === days ? "btn-primary" : ""}" data-days="${d}">${d === 1 ? "Сутки" : d + " дней"}</button>`).join("")}</div>
-        <div class="card-output">${kv([["Вызовов модели", esc(r.calls)], ["Расход", `${esc(r.cost_usd)} $`],
-          ["Прогонов", `${esc(r.runs_total ?? 0)}, из них остановлено по пределу ${esc(r.runs_stopped ?? 0)}`],
+        ${cur === "cost" ? `<div class="card-output">${kv([["Вызовов модели", esc(r.calls)], ["Расход", `${esc(r.cost_usd)} $`],
           ["Стоимость успешного прогона", r.cost_per_success_usd != null ? `${esc(r.cost_per_success_usd)} $` : "—"],
-          ["Сбоев вызова", esc(r.errors ?? 0)],
-          ["Потолки на прогон", `вызовов ${esc(lim.max_calls)} (+${esc(lim.verify_reserve)} на проверку), ${esc(lim.max_cost_usd)} $, ${esc(lim.max_chars_per_call)} знаков, ${esc(lim.max_seconds)} с`],
           ["Битых строк журнала", esc(r.broken_lines)]])}<p class="sub">${esc(r.note)}</p></div>
-        <div class="card-output"><h2 style="margin-top:0">Последние прогоны</h2>${r.runs && r.runs.length ? `<table><tr><th>Когда</th><th>Встреча</th><th>Итог</th><th>Вызовов</th><th>$</th><th>Задач</th><th>На разбор</th><th>Закрыто</th></tr>${r.runs.map((x) => `<tr><td class="meta">${esc(String(x.ts).replace("T", " "))}</td><td>${esc(x.meeting_id)}</td><td>${x.status === "ok" ? "готово" : x.status === "stopped_by_limit" ? '<span class="overdue">остановлено по пределу</span>' : esc(x.status)}</td><td>${esc(x.calls)}</td><td>${esc(x.cost_usd)}</td><td>${esc(x.added ?? "—")}</td><td>${esc(x.held ?? "—")}</td><td>${esc(x.closed ?? "—")}</td></tr>`).join("")}</table>` : '<p class="empty">Прогонов не было.</p>'}</div>
-        <div class="card-output">${tbl(r.by_purpose, "По назначению")}${tbl(r.by_model, "По моделям")}${tbl(r.by_day, "По дням")}</div>`;
-    } else if (cur === "tech") {
-      const m = await api("/api/monitoring");
-      body = `<div class="card-output">${m.technical_messages.length ? m.technical_messages.map((t) => `<div class="note">${esc(t.title)} <span class="sub meta">${esc(String(t.created_at || "").replace("T", " "))}</span></div>`).join("") : '<p class="empty">Технических сообщений нет.</p>'}</div>`;
+        <div class="card-output">${tbl(r.by_purpose, "По назначению")}${tbl(r.by_model, "По моделям")}${tbl(r.by_day, "По дням")}</div>` : `<div class="card-output">${kv([
+          ["Прогонов", `${esc(r.runs_total ?? 0)}, из них остановлено по пределу ${esc(r.runs_stopped ?? 0)}`],
+          ["Сбоев вызова", esc(r.errors ?? 0)],
+          ["Потолки на прогон", `вызовов ${esc(lim.max_calls)} (+${esc(lim.verify_reserve)} на проверку), ${esc(lim.max_cost_usd)} $, ${esc(lim.max_chars_per_call)} знаков, ${esc(lim.max_seconds)} с`]])}</div>
+        <div class="card-output"><h2 style="margin-top:0">Последние прогоны</h2>${r.runs && r.runs.length ? `<table><tr><th>Когда</th><th>Встреча</th><th>Итог</th><th>Вызовов</th><th>$</th><th>Задач</th><th>На разбор</th><th>Закрыто</th></tr>${r.runs.map((x) => `<tr><td class="meta">${esc(String(x.ts).replace("T", " "))}</td><td>${esc(x.meeting_id)}</td><td>${x.status === "ok" ? "готово" : x.status === "stopped_by_limit" ? '<span class="overdue">остановлено по пределу</span>' : esc(x.status)}</td><td>${esc(x.calls)}</td><td>${esc(x.cost_usd)}</td><td>${esc(x.added ?? "—")}</td><td>${esc(x.held ?? "—")}</td><td>${esc(x.closed ?? "—")}</td></tr>`).join("")}</table>` : '<p class="empty">Прогонов не было.</p>'}</div>`}`;
     } else {
       const m = await api("/api/monitoring");
       body = `<div class="card-output">${m.todo.length ? m.todo.map((t) => `<div class="sub meta">${esc(t)}</div>`).join("") : '<p class="empty">Заглушек нет.</p>'}</div>`;
     }
-    $("#main").innerHTML = `<h1>${solo ? "Модели" : "Мониторинг"}</h1>${bar}${body}`;
+    $("#main").innerHTML = `<h1>${esc(title || "Модели")}</h1>${prefix}${body}`;
     $("#main").querySelectorAll("[data-days]").forEach((b) => b.onclick = () => { store.set("runs-days", b.dataset.days); render(); });
     // Пульт моделей: каждое действие — запрос, затем перерисовка; ошибка сервера — в подсказке
     const book = $("#main").querySelector("details.model-book");
@@ -428,38 +434,100 @@ const routes = {
     };
   },
 
-  async settings() {
-    const st = await api(`/api/projects/${S.project}/settings`);
-    const i = st.intake;
-    $("#main").innerHTML = `<h1>Настройки</h1><p class="page-sub">Только для супер-администратора. Адреса меняются только с компьютера, где работает сервер; каждое изменение записывается в реестр решений.</p>
-      <div class="card stack"><h2 style="margin:0">Папка-приёмник записей</h2>
-        <div class="sub">Сейчас: ${i.folder ? `<span class="meta">${esc(i.folder)}</span>` : "не задана"}</div>
-        <p class="sub">Сюда кладутся записи и расшифровки встреч этого проекта. Нужна одна дата в имени файла. Нельзя: корень диска, домашняя папка, «Документы», «Рабочий стол», «Загрузки», папка приложения. Пустую папку система подпишет сама; непустая принимается только с файлом-меткой.</p>
-        <input id="wf-path" placeholder="Полный адрес, например D:\\Встречи\\Приёмник" value="${esc(i.folder || "")}">
-        <input id="wf-repeat" placeholder="Повторите адрес — защита от опечатки">
-        <div class="row"><button class="btn btn-primary" id="wf-save">Сохранить адрес</button>${i.folder ? '<button class="btn btn-ghost btn-danger" id="wf-off">Отключить папку</button>' : ""}</div>
-      </div>
-      <div class="card stack"><h2 style="margin:0">Опрос папки</h2>
-        <div class="row"><input id="wf-int" type="number" min="${esc(st.min_interval)}" step="30" value="${esc(i.interval)}" style="width:140px"><span class="sub">секунд между проходами (не меньше ${esc(st.min_interval)})</span><button class="btn" id="wf-int-save">Сохранить</button></div>
-      </div>
-      <div class="card stack"><h2 style="margin:0">Автозапуск протокола</h2>
-        <div class="sub">Сейчас: ${i.autorun ? "включён — расшифровка из папки сразу даёт протокол" : "выключен — протокол формирует администратор кнопкой"}</div>
-        <button class="btn" id="ar-toggle">${i.autorun ? "Выключить" : "Включить"}</button>
-      </div>
-      <div class="card stack"><h2 style="margin:0">База голосов</h2>
-        <div class="sub">Сейчас: ${st.voice_base_path ? `<span class="meta">${esc(st.voice_base_path)}</span>` : "не задана"}. Путь к файлу общей базы (например voices.db). База только читается.</div>
-        <input id="vb-path" placeholder="Полный путь к файлу базы" value="${esc(st.voice_base_path || "")}">
-        <input id="vb-repeat" placeholder="Повторите путь">
-        <button class="btn btn-primary" id="vb-save">Сохранить путь</button>
-      </div>`;
-    const post = async (url, json, ok) => { try { await api(url, { method: "POST", json }); toast(ok); render(); } catch (e) { toast(e.message); } };
-    $("#wf-save").onclick = () => post(`/api/projects/${S.project}/settings/watch-folder`, { path: $("#wf-path").value, path_repeat: $("#wf-repeat").value }, "Адрес папки-приёмника сохранён.");
-    const off = $("#wf-off");
-    if (off) off.onclick = () => post(`/api/projects/${S.project}/settings/watch-folder`, { path: "", path_repeat: "" }, "Папка-приёмник отключена.");
-    $("#wf-int-save").onclick = () => post(`/api/projects/${S.project}/settings/watch-interval`, { seconds: Number($("#wf-int").value) }, "Интервал опроса сохранён.");
+  async live() { // «Мониторинг RealTime» — как в Проекте ERP: службы, папка-приёмник, автозапуск; обновление раз в 30 с
+    const d = await api(`/api/monitoring/live${S.project ? `?pid=${S.project}` : ""}`);
+    const stc = (x) => x === "живо" ? `<span class="route-state-on">${x}</span>` : x === "нет" ? `<span class="overdue">${x}</span>` : `<span class="sub">${x}</span>`;
+    const i = d.intake; const pname = esc(($("#project").selectedOptions[0] || {}).textContent || "");
+    const q = d.queue;
+    $("#main").innerHTML = `<h1>Мониторинг RealTime</h1>
+      <p class="page-sub">${d.awaiting_total ? `<a href="#system/awaiting">Ждёт ввода от оператора: ${esc(d.awaiting_total)}</a>` : "Ввода от оператора ничего не ждёт."} · <span class="meta" id="live-clock"></span></p>
+      <div class="card-output"><h2 style="margin-top:0">Службы</h2><table><tr><th>Служба</th><th>Состояние</th><th>Подробно</th></tr>${d.services.map((r) => `<tr><td>${esc(r.name)}</td><td>${stc(r.state)}</td><td class="sub">${esc(r.detail)}</td></tr>`).join("")}</table>
+      ${i ? `<h2>Папка-приёмник проекта «${pname}»</h2>
+        <div class="sub">Сейчас: ${i.folder ? `<span class="meta">${esc(i.folder)}</span>` : "не задана"}. Меняется в два шага: адрес и его повтор — система покажет, что заберёт первый проход, — затем пароль супер-администратора. Пустое поле — выключить папку. Нельзя: корень диска, домашняя папка, «Документы», «Рабочий стол», «Загрузки», папка приложения; непустая папка — только с файлом-меткой.</div>
+        <div class="row"><input id="wf-path" style="flex:1;min-width:280px" placeholder="Полный адрес, например D:\\Встречи\\Приёмник" value="${esc(i.folder || "")}"><input id="wf-repeat" style="flex:1;min-width:220px" placeholder="Повторите адрес"><button class="btn btn-primary" id="wf-save">Сменить папку</button></div>
+        <div id="wf-confirm"></div>
+        <div class="row" style="margin-top:10px"><span class="sub">Обход папки, секунд:</span><input id="wf-int" type="number" min="${esc(d.min_interval)}" max="86400" step="10" value="${esc(i.interval)}" style="width:120px"><button class="btn" id="wf-int-save">Сохранить интервал</button><span class="sub">сейчас ${esc(i.interval)} с — ${esc(i.interval_source)}</span></div>` : '<p class="sub">Выберите проект внизу левой панели — у каждого проекта своя папка-приёмник.</p>'}</div>
+      ${i ? `<div class="card-output"><h2 style="margin-top:0">Автозапуск Протокола</h2><div class="sub">Сейчас: ${i.autorun ? "включён — расшифровка из папки сразу даёт протокол" : "выключен — протокол формирует администратор кнопкой"}.</div><div class="row" style="margin-top:8px"><button class="btn" id="ar-toggle">${i.autorun ? "Выключить" : "Включить"}</button></div></div>` : ""}
+      <div class="card-output"><h2 style="margin-top:0">Распознавание записей</h2>${d.recognition.length ? `<table><tr><th>Запись</th><th>Встреча</th><th>Когда</th></tr>${d.recognition.map((x) => `<tr><td class="meta">${esc(x.name)}</td><td>${fmtDate(x.date)}</td><td class="meta">${esc(String(x.created_at).replace("T", " "))}</td></tr>`).join("")}</table>` : '<p class="empty">Записей ещё не распознавали.</p>'}</div>
+      <div class="card-output"><h2 style="margin-top:0">Очередь</h2><dl class="kv"><dt>Карточки «Конфликтов»</dt><dd>ждут ${esc(q.cards_open)} · решено за сутки ${esc(q.cards_resolved_day)} · <a href="#cards">разобрать</a></dd>
+        <dt>Системные сообщения</dt><dd>${esc(q.tech_open)} · <a href="#system/messages">открыть</a></dd></dl></div>`;
+    const clock = () => { const c = $("#live-clock"); if (c) c.textContent = "обновлено " + new Date().toLocaleTimeString("ru-RU"); }; clock();
+    clearInterval(S.liveTimer);
+    S.liveTimer = setInterval(() => { if (!location.hash.startsWith("#live")) { clearInterval(S.liveTimer); return; }
+      const a = document.activeElement; if (a && /INPUT|SELECT|TEXTAREA/.test(a.tagName)) return; render(); }, 30000);
+    if (!i) return;
+    const post = async (url, json, ok) => { try { const r = await api(url, { method: "POST", json }); if (ok) { toast(ok); render(); } return r; } catch (e) { toast(e.message); return null; } };
+    $("#wf-save").onclick = async () => {
+      const json = { path: $("#wf-path").value, path_repeat: $("#wf-repeat").value };
+      const r = await post(`/api/projects/${S.project}/settings/watch-folder`, json);
+      if (!r || !r.confirm_needed) return;
+      const pv = r.preview;
+      $("#wf-confirm").innerHTML = `<div class="card stack" style="margin-top:10px"><strong>${esc(r.question)}</strong>
+        ${pv && pv.examples.length ? `<div class="sub">Например: ${pv.examples.map(esc).join(", ")}</div>` : ""}${pv && pv.no_date.length ? `<div class="sub">Без одной даты в имени — не заберёт: ${pv.no_date.map(esc).join(", ")}</div>` : ""}
+        <div class="sub">Смена папки-приёмника выполняется по паролю супер-администратора.</div>
+        <div class="row">${S.auth ? "" : '<input id="wf-login" placeholder="Логин супер-администратора">'}<input id="wf-pass" type="password" placeholder="Ваш пароль" autocomplete="current-password">
+        <button class="btn btn-primary" id="wf-ok">${json.path.trim() ? "Сделать папкой-приёмником" : "Выключить"}</button><button class="btn-link" id="wf-cancel">Отмена</button></div></div>`;
+      $("#wf-cancel").onclick = () => { $("#wf-confirm").innerHTML = ""; };
+      $("#wf-ok").onclick = () => post(`/api/projects/${S.project}/settings/watch-folder`, { ...json, confirm: true, login: ($("#wf-login") || {}).value || "", current_password: $("#wf-pass").value },
+        json.path.trim() ? "Папка-приёмник сменена." : "Папка-приёмник выключена.");
+    };
+    $("#wf-int-save").onclick = () => post(`/api/projects/${S.project}/settings/watch-interval`, { seconds: Number($("#wf-int").value) }, "Интервал обхода сохранён.");
     $("#ar-toggle").onclick = () => post(`/api/projects/${S.project}/settings/autorun`, { enabled: !i.autorun }, i.autorun ? "Автозапуск выключен." : "Автозапуск включён.");
-    $("#vb-save").onclick = () => post("/api/settings/voice-base", { path: $("#vb-path").value, path_repeat: $("#vb-repeat").value }, "Путь к базе голосов сохранён.");
   },
+
+  async system(tab) { // «Параметры системы» — вкладки как в Проекте ERP; «Пороги» — как в Планёрке
+    const TABS = { runs: "Прогоны", cost: "Расход", decisions: "Реестр решений", data: "Состояние базы", static: "Диск и доступы",
+      messages: "Системные сообщения", awaiting: "Ожидает ввода от оператора", thresholds: "Пороги", todo: "Заглушки" };
+    const cur = TABS[tab] ? tab : (TABS[store.get("sys-tab", "runs")] ? store.get("sys-tab", "runs") : "runs");
+    store.set("sys-tab", cur);
+    const bar = `<div class="seg-tabs" role="tablist">${Object.entries(TABS).map(([k, v]) => `<a class="seg-tab" role="tab" href="#system/${k}" aria-selected="${k === cur}">${v}</a>`).join("")}</div>`;
+    if (cur === "runs" || cur === "cost" || cur === "todo") return routes.monitoring(cur, true, "Параметры системы", bar);
+    const kv = (rows) => `<dl class="kv">${rows.map(([k, v]) => `<dt>${esc(k)}</dt><dd>${v}</dd>`).join("")}</dl>`;
+    const post = async (url, json, ok) => { try { await api(url, { method: "POST", json }); toast(ok); render(); } catch (e) { toast(e.message); } };
+    let body = "";
+    if (cur === "decisions") {
+      const [dec, rules] = await Promise.all([api("/api/monitoring/decisions"), api("/api/monitoring/rules")]);
+      const more = S.decAll ? dec : dec.slice(0, 3);
+      body = `<div class="card-output"><h2 style="margin-top:0">Реестр решений</h2>${dec.length ? `<table><tr><th>Проект</th><th>Что</th><th>Решение</th><th>Почему</th><th>Когда</th></tr>${more.map((x) => `<tr><td>${esc(x.project || "общее")}</td><td>${esc(x.what)}</td><td>${esc(x.decision)}</td><td>${esc(x.why)}</td><td>${fmtDate(x.at)}</td></tr>`).join("")}</table>${dec.length > 3 ? `<button class="btn-link" id="dec-more">${S.decAll ? "Свернуть" : `Показать все (${dec.length})`}</button>` : ""}` : '<p class="empty">Решений пока нет.</p>'}</div>
+        <div class="card-output"><h2 style="margin-top:0">Правила из решений оператора</h2><p class="sub">Правило появляется после двух одинаковых ответов, только для «это не задача». Отменённое можно вернуть.</p>${rules.length ? `<table><tr><th>Проект</th><th>Вид</th><th>Ключ</th><th>Состояние</th><th>Применено</th><th></th></tr>${rules.map((x) => `<tr><td>${esc(x.project || "")}</td><td>${esc(x.kind)}</td><td class="meta">${esc(x.key)}</td><td>${x.revoked_at ? "отменено" : x.active ? "действует" : "копит ответы"}</td><td>${esc(x.applied_count)}</td><td>${x.revoked_at ? `<button class="btn-link" data-rule="${x.id}" data-act="restore">Вернуть</button>` : `<button class="btn-link btn-link-danger" data-rule="${x.id}" data-act="revoke">Отменить</button>`}</td></tr>`).join("")}</table>` : '<p class="empty">Правил нет.</p>'}</div>`;
+    } else if (cur === "data") {
+      const rows = await api("/api/monitoring/data-state");
+      const dict = (d) => Object.keys(d).length ? Object.entries(d).map(([k, n]) => `${esc({ active: "в работе", done: "выполнено", dropped: "снято", transcript: "расшифровки", notes: "заметки", other: "материалы", meeting: "по встрече", web_form: "вручную", operator: "оператором" }[k] || k)}: ${esc(n)}`).join(" · ") : "—";
+      body = rows.length ? rows.map((r) => `<div class="card-output"><h2 style="margin-top:0">${esc(r.project)}</h2>${kv([["Встречи", `${esc(r.meetings)}, с протоколом ${esc(r.with_protocol)}`], ["Источники", dict(r.sources)], ["Задачи", dict(r.tasks)], ["Закрытия — откуда", dict(r.closed_by)], ["Люди", `${esc(r.people)}, не подтверждены ${esc(r.people_unconfirmed)}, внешние ${esc(r.people_external)}`], ["Единицы встреч", esc(r.units)]])}</div>`).join("") : '<p class="empty">Проектов нет.</p>';
+    } else if (cur === "static") {
+      const d = await api("/api/monitoring/static");
+      const b = d.backup, a = d.access;
+      body = `<div class="card-output"><h2 style="margin-top:0">Диск</h2>${kv([["База", `<span class="meta">${esc(d.disk.db)}</span> · ${esc(d.disk.db_kb)} КБ`], ["Журнал вызовов модели", d.disk.journal ? `<span class="meta">${esc(d.disk.journal)}</span> · ${esc(d.disk.journal_kb)} КБ` : "—"], ["Копии базы", `<span class="meta">${esc(d.disk.backups_dir)}</span> · ${esc(d.disk.backups_kb)} КБ`]])}</div>
+        <div class="card-output"><h2 style="margin-top:0">Автобэкап</h2>${kv([["Состояние", !b.enabled ? "выключен (MEETFLOW_BACKUP=off)" : b.running ? "работает" : '<span class="overdue">поток не запущен</span>'], ["Правило", `раз в ${esc(b.hours)} ч, хранить ${esc(b.keep)} автокопий; ручные копии ротация не трогает`], ["Последние копии", b.files.length ? b.files.slice(0, 5).map((f) => `<span class="meta">${esc(f.name)}</span> ${esc(f.size_kb)} КБ`).join("<br>") : "копий нет"]])}<div class="row"><button class="btn" id="bk-now">Снять копию сейчас</button></div></div>
+        <div class="card-output"><h2 style="margin-top:0">Доступ и роли</h2>${kv([["Вход по паролю", a.auth_required ? "включён — рабочий режим" : "выключен — тестовый режим, роль выбирается на экране"], ["Адрес сервера", `<span class="meta">${esc(a.host)}</span>`], ["Роли темы", a.roles.map((r) => esc(ROLE_RU[r] || r)).join(", ")]])}
+          ${a.accounts.length ? `<table><tr><th>Логин</th><th>ФИО</th><th>Роль</th><th>Последний вход</th><th>Блокировка</th></tr>${a.accounts.map((x) => `<tr><td class="meta">${esc(x.login)}</td><td>${esc(x.full_name)}</td><td>${esc(ROLE_RU[x.role] || x.role)}</td><td class="meta">${esc(String(x.last_login_at || "—").replace("T", " "))}</td><td>${x.locked_until ? `<span class="overdue">до ${esc(String(x.locked_until).replace("T", " "))}</span>` : "—"}</td></tr>`).join("")}</table>` : '<p class="sub">Учётных записей нет. Без записи супер-администратора с паролем нельзя включить вход и сменить папку-приёмник.</p>'}
+          <h2>Выдать доступ или сменить пароль</h2><div class="row"><input id="ac-login" placeholder="Логин"><input id="ac-name" placeholder="ФИО"><select id="ac-role">${a.roles.map((r) => `<option value="${esc(r)}">${esc(ROLE_RU[r] || r)}</option>`).join("")}</select><input id="ac-pass" type="password" placeholder="Пароль, не короче 8 знаков" autocomplete="new-password"><button class="btn btn-primary" id="ac-save">Сохранить</button></div></div>
+        <div class="card-output"><h2 style="margin-top:0">Модели и пределы</h2>${kv([["Инструмент", esc(d.models.tool)], ["Генерирует", esc(d.models.generator || "по маршрутам")], ["Проверяет", esc(d.models.verifier || "по маршрутам")], ["Потолок ответа", `${esc(d.models.max_answer_tokens)} токенов`], ["Потолки прогона (тема)", Object.entries(d.models.budget || {}).map(([k, v]) => `${esc(k)}: ${esc(v)}`).join(" · ") || "—"]])}</div>`;
+    } else if (cur === "messages") {
+      const rows = await api("/api/monitoring/system-messages");
+      body = `<div class="card-output">${rows.length ? `<div class="row" style="justify-content:flex-end"><button class="btn" id="msg-all">Закрыть все</button></div>${rows.map((t) => `<div class="note">${esc(t.title)} <span class="sub meta">${esc(String(t.created_at || "").replace("T", " "))}</span>${Object.keys(t.payload || {}).length ? `<span class="sub">${Object.entries(t.payload).map(([k, v]) => `${esc(k)}: ${esc(typeof v === "object" ? JSON.stringify(v) : v)}`).join(" · ")}</span>` : ""} <button class="btn-link" data-msg="${t.id}">Закрыть</button></div>`).join("")}` : '<p class="empty">Системных сообщений нет.</p>'}<p class="sub">Неразобранные закрываются сами через срок хранения (MEETFLOW_SYSTEM_MESSAGES_KEEP_DAYS, по умолчанию 2 дня).</p></div>`;
+    } else if (cur === "awaiting") {
+      const r = await api("/api/monitoring/awaiting-input");
+      body = `<div class="row" style="justify-content:flex-end"><button class="btn" id="aw-refresh">Обновить список</button></div>${r.groups.map((g) => `<div class="card-output"><h2 style="margin-top:0">${esc(g.title)} · ${esc(g.count)}</h2>${kv([["Что нужно", esc(g.need)], ["Если не ответить", esc(g.if_not)]])}${g.items && g.items.length ? `<div class="sub">${g.items.map(esc).join("<br>")}</div>` : ""}${g.count ? `<a href="${esc(g.link)}">перейти</a>` : ""}</div>`).join("")}`;
+    } else if (cur === "thresholds") {
+      const t = await api("/api/settings/thresholds");
+      body = `<div class="card stack"><h2 style="margin:0">Пороги</h2><p class="sub">Меняются без перезапуска; каждое изменение — в системных сообщениях.</p>
+        <label class="sub">Подсветка просрочки — через сколько РАБОЧИХ дней после срока задача считается просроченной<input id="th-overdue" type="number" min="1" max="60" value="${esc(t.overdue_highlight_working_days)}" style="width:120px"></label>
+        <label class="sub">Удаление нерешённой карточки «Конфликтов» — через сколько дней (0 — не снимать; сейчас ${esc(t.card_cleanup_source)})<input id="th-drop" type="number" min="0" max="365" value="${esc(t.card_cleanup_days)}" style="width:120px"></label>
+        <div class="row"><button class="btn btn-primary" id="th-save">Сохранить</button></div></div>`;
+    }
+    $("#main").innerHTML = `<h1>Параметры системы</h1>${bar}${body}`;
+    const more = $("#dec-more"); if (more) more.onclick = () => { S.decAll = !S.decAll; render(); };
+    $("#main").querySelectorAll("[data-rule]").forEach((b) => b.onclick = () => post(`/api/monitoring/rules/${b.dataset.rule}/${b.dataset.act}`, {}, b.dataset.act === "revoke" ? "Правило отменено." : "Правило возвращено."));
+    const bk = $("#bk-now"); if (bk) bk.onclick = () => post("/api/monitoring/backup-now", {}, "Копия базы снята.");
+    const ac = $("#ac-save"); if (ac) ac.onclick = () => post("/api/monitoring/accounts", { login: $("#ac-login").value, full_name: $("#ac-name").value, role: $("#ac-role").value, password: $("#ac-pass").value }, "Доступ сохранён.");
+    $("#main").querySelectorAll("[data-msg]").forEach((b) => b.onclick = () => post(`/api/monitoring/system-messages/${b.dataset.msg}/close`, {}, "Сообщение закрыто."));
+    const all = $("#msg-all"); if (all) all.onclick = () => post("/api/monitoring/system-messages/close-all", {}, "Все сообщения закрыты.");
+    const aw = $("#aw-refresh"); if (aw) aw.onclick = () => render();
+    const th = $("#th-save"); if (th) th.onclick = () => post("/api/settings/thresholds", { overdue_highlight_working_days: Number($("#th-overdue").value), card_cleanup_days: Number($("#th-drop").value) }, "Пороги сохранены.");
+  },
+
+  async settings() { location.replace("#live"); },   // прежний экран «Настройки»: папка, обход и автозапуск — на «Мониторинге RealTime»
 
   async design() {
     const cur = document.documentElement.dataset.palette;
@@ -497,14 +565,57 @@ async function render() {
   document.querySelectorAll("[data-admin]").forEach((el) => (el.hidden = !isAdmin()));
   document.querySelectorAll("[data-super]").forEach((el) => (el.hidden = S.role !== "super_admin"));
   // мониторинг — общесистемный экран: модели и службы нужны и до первого проекта (09.10.26)
-  if (!S.project && route !== "design" && route !== "monitoring" && route !== "models") { $("#main").innerHTML = `<h1>Нет проекта</h1><p class="page-sub">Создайте проект: python -m meetflow new-project.</p>`; return; }
+  if (!S.project && !["design", "monitoring", "models", "live", "system", "voices"].includes(route)) { $("#main").innerHTML = `<h1>Нет проекта</h1><p class="page-sub">Создайте проект: python -m meetflow new-project "Имя" --theme it_product --db &lt;та же база, что у сервера&gt;.</p>`; return; }
   try { await (routes[route] || routes.tasks)(arg); } catch (e) { $("#main").innerHTML = `<h1>Не получилось открыть раздел</h1><p class="page-sub">${esc(e.message)}</p>`; }
   // стенд без модели виден на каждом экране (письмо meeting-registry 01/19)
   if (S.theme && S.theme.stand) $("#main").insertAdjacentHTML("afterbegin",
-    `<p class="stand-banner" role="status">Стенд без модели: протоколы собирает заглушка, а не модель. Для работы нужен MEETFLOW_LLM=ollama.</p>`);
+    `<p class="stand-banner" role="status">Стенд без модели: протоколы собирает заглушка, а не модель. Для работы нужен MEETFLOW_LLM=routes, ollama или openrouter.</p>`);
+}
+
+function showLogin() {
+  const scr = $("#login-screen"); scr.hidden = false;
+  $("#login-form").onsubmit = async (e) => { e.preventDefault();
+    try { await api("/api/auth/login", { method: "POST", json: { login: $("#login-name").value, password: $("#login-password").value } });
+      scr.hidden = true; $("#login-password").value = ""; boot(); }
+    catch (err) { const el = $("#login-error"); el.hidden = false; el.textContent = err.message; } };
+}
+
+async function updateAwaitingBadge() {
+  const b = $("#awaiting-badge"); if (!b) return;
+  if (S.role !== "super_admin") { b.textContent = ""; return; }
+  try { const r = await api("/api/monitoring/awaiting-input"); b.textContent = r.total ? ` · ${r.total}` : ""; } catch { b.textContent = ""; }
+}
+
+function bindModeSwitch() { // как в ERP: «Включить рабочий режим (вход по логину)» / «Переключить на тестовый режим»
+  const btn = $("#mode-switch"); if (!btn) return;
+  btn.hidden = S.role !== "super_admin";
+  btn.textContent = S.auth ? "Переключить на тестовый режим" : "Включить рабочий режим (вход по логину)";
+  btn.onclick = async () => {
+    const turnOn = !S.auth;
+    if (!window.confirm(turnOn ? "Включить вход по логину и паролю? Потребуется логин и пароль супер-администратора." : "Выключить вход по паролю? Роль снова будет выбираться на экране.")) return;
+    const login = turnOn ? window.prompt("Логин супер-администратора") || "" : "";
+    const pass = await askPassword(); if (pass === null) return;
+    try { await api("/api/auth/mode", { method: "POST", json: { auth_required: turnOn, login, password: pass } }); toast(turnOn ? "Вход по паролю включён." : "Тестовый режим."); boot(); }
+    catch (e) { toast(e.message); } };
+}
+
+function askPassword() { // пароль — в поле со скрытием, а не в window.prompt
+  return new Promise((resolve) => {
+    const box = document.createElement("div"); box.className = "login-screen";
+    box.innerHTML = `<form class="card stack login-card"><strong>Пароль супер-администратора</strong><input type="password" autocomplete="current-password"><div class="row"><button class="btn btn-primary" type="submit">Подтвердить</button><button class="btn-link" type="button">Отмена</button></div></form>`;
+    document.body.appendChild(box); const inp = box.querySelector("input"); inp.focus();
+    box.querySelector("form").onsubmit = (e) => { e.preventDefault(); const v = inp.value; box.remove(); resolve(v); };
+    box.querySelector("button[type=button]").onclick = () => { box.remove(); resolve(null); };
+  });
 }
 
 async function boot() {
+  const mode = await api("/api/auth/mode");
+  S.auth = !!mode.auth_required;
+  if (S.auth) {
+    try { const me = await api("/api/auth/me"); S.role = me.role; S.name = me.name; }
+    catch { showLogin(); return; }
+  }
   S.theme = await api("/api/theme");
   const projects = await api("/api/projects");
   // в шапке — имя текущего проекта из базы и его тематика; название
@@ -518,18 +629,26 @@ async function boot() {
   document.documentElement.dataset.palette = store.get("palette", S.theme.design.palette);
   const th = store.get("theme", S.theme.design.dark === "auto" ? "auto" : S.theme.design.dark);
   if (th !== "auto") document.documentElement.dataset.theme = th;
-  $('[data-route="tasks"]').textContent = S.theme.vocabulary.registry; $('[data-route="meetings"]').textContent = S.theme.vocabulary.meetings;
-  $('[data-route="search"]').textContent = S.theme.vocabulary.search || "Поиск по проекту"; $('[data-route="roadmap"]').textContent = S.theme.vocabulary.roadmap || "Дорожная карта";
+  // подписи левой панели — отдельные слова темы nav_*, как в Проекте ERP и Планёрке (владелец 11.10.26); заголовки
+  // страниц и протокола по-прежнему берут registry / meetings / roadmap / search
+  const V = S.theme.vocabulary;
+  $('[data-route="tasks"]').textContent = V.nav_tasks || V.registry; $('[data-route="meetings"]').textContent = V.nav_meetings || V.meetings;
+  $('[data-route="search"]').textContent = V.nav_search || V.search || "Поиск по проекту";
+  $('[data-route="roadmap"]').textContent = V.nav_roadmap || V.roadmap || "Дорожная карта";
   $('[data-route="cards"]').textContent = S.theme.vocabulary.cards; $('[data-route="team"]').textContent = S.theme.vocabulary.team;
-  S.role = store.get("role", "member"); S.name = store.get("name", "");
+  if (!S.auth) { S.role = store.get("role", "member"); S.name = store.get("name", ""); }
+  $("#test-identity").hidden = S.auth; $("#auth-identity").hidden = !S.auth;
+  if (S.auth) { $("#auth-identity").innerHTML = `Вы вошли: ${esc(S.name)} · ${esc(ROLE_RU[S.role] || S.role)} · <button class="btn-link" id="logout">Выйти</button>`;
+    $("#logout").onclick = async () => { await api("/api/auth/logout", { method: "POST" }); location.reload(); }; }
   const roleSel = $("#role"); roleSel.innerHTML = S.theme.roles.map((r) => `<option value="${esc(r)}">${esc(ROLE_RU[r] || r)}</option>`).join("");
-  roleSel.value = S.role; roleSel.onchange = () => { S.role = roleSel.value; store.set("role", S.role); render(); };
+  roleSel.value = S.role; roleSel.onchange = () => { S.role = roleSel.value; store.set("role", S.role); bindModeSwitch(); updateAwaitingBadge(); render(); };
   const nm = $("#username"); nm.value = S.name; nm.onchange = () => { S.name = nm.value.trim(); store.set("name", S.name); render(); };
   const ps = $("#project"); ps.innerHTML = projects.map((p) => `<option value="${p.id}">${esc(p.name)}</option>`).join("");
   S.project = Number(store.get("project", projects[0]?.id || 0)) || projects[0]?.id || null;
   if (S.project) ps.value = S.project;
   showBrand();
   ps.onchange = () => { S.project = Number(ps.value); store.set("project", ps.value); showBrand(); render(); };
+  bindModeSwitch(); updateAwaitingBadge();
   window.onhashchange = render; render();
 }
 document.addEventListener("keydown", (e) => { if (e.key === "Escape") document.querySelectorAll(".toast").forEach((t) => t.remove()); });

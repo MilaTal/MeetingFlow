@@ -13,7 +13,7 @@ eval:
 	$(PY) eval/run_eval.py --label текущий --set cases_blind
 
 regress:
-	$(PY) eval/compare.py cases_live до_v1.0 после_v1.2
+	$(PY) eval/compare.py cases_live $(BEFORE) $(AFTER)   # make regress BEFORE=<метка> AFTER=<метка>
 
 attack:
 	$(PY) eval/cost_attack.py

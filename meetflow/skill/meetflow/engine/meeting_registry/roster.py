@@ -41,7 +41,7 @@ def _first_name(token: str) -> str:
     return SHORT_FORMS.get(t, t)
 
 
-# Падежные окончания имён — тот же список, что у MeetFlow (core/text._NAME_TAILS)
+# Падежные окончания имён — тот же список, что в ядре MeetFlow (core/text._NAME_TAILS)
 _NAME_TAILS = frozenset("""
  а я ы и е у ю ь й о ой ей ою ею ом ем ым им ах ях ам ям ами ями ов ев
  ого его ому ему ая яя ую юю ий ый ие ые их ых

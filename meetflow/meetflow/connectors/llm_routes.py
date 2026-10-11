@@ -47,8 +47,11 @@ from ..core.types import LLMResult
 
 KINDS = ("openrouter", "openai", "ollama")
 ASR_KINDS = ("faster-whisper", "python", "asr-service")
-ROLES = ("generate", "verify", "asr")
-ROLE_TITLES = {"asr": "Распознавание речи", "generate": "Генерация черновика", "verify": "Проверка черновика"}
+# guard — досмотр реплик, обращённых к системе, по которым правило не уверено (письмо ветки «AI агентные скилы»
+# 10.10.26): ответ ДА/НЕТ, потолок ответа 5 токенов. Роль необязательна: без точек досмотра нет, решает правило.
+ROLES = ("generate", "verify", "asr", "guard")
+ROLE_TITLES = {"asr": "Распознавание речи", "generate": "Генерация черновика", "verify": "Проверка черновика",
+               "guard": "Досмотр реплик к системе"}
 HISTORY_KEEP = 30
 _ENV_NAME = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
 

@@ -7,7 +7,7 @@
 
 import time
 
-from . import agent, intake, negation, protocol
+from . import agent, guard, intake, negation, protocol
 from .control import Limits, RunBudget
 from .errors import BadModelAnswer, BudgetExceeded, ProviderUnavailable, SetupError, SourceRejected
 from .heuristic import HeuristicClient
@@ -251,8 +251,11 @@ def process(text: str, source_name: str, meeting_date: str, registry, team, clie
         open_after = [t for t in active if t["id"] not in closed_ids] + [{**t} for t in new_tasks]
         # протокол не пишет «не прозвучало», если часть записи не разобрана (ревью 03.10.26)
         notes = {"failed_chunks": failed_chunks, "closing_unfinished": closing_failed or any(c["kind"] == "mass_closure" for c in cards),
-                 "duplicates": duplicates}
+                 "duplicates": duplicates, "addressed": [l["n"] for l in injected]}
         md = protocol.render(meeting_date, title, new_tasks, closures, len(held), open_after, people, run.degraded, notes)
+        md, filtered = guard.filter_text(md)
+        if filtered:   # модель пересказала служебное — заменено, оператор знает
+            cards.append(_card("suspicious_text", "В протоколе скрыт служебный текст системы"))
         if run.degraded:
             cards.append(_card("degraded", "Протокол собран без модели: локальная модель была недоступна"))
         result = registry.apply_meeting_result(meeting_id, meeting_date, new_tasks, closures, cards + held, md)

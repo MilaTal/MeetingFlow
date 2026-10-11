@@ -4,9 +4,19 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>MeetFlow</title>
-  <link rel="stylesheet" href="styles.css?v=20261009wide">
+  <link rel="stylesheet" href="styles.css?v=20261011system">
 </head>
 <body>
+<!-- вход по логину и паролю — как в Проекте ERP; показывается, только когда вход включён -->
+<div id="login-screen" class="login-screen" hidden>
+  <form class="card stack login-card" id="login-form">
+    <h1 style="margin:0">Вход</h1>
+    <label class="sub">Логин<input type="text" id="login-name" autocomplete="username" autocapitalize="none" spellcheck="false"></label>
+    <label class="sub">Пароль<input type="password" id="login-password" autocomplete="current-password"></label>
+    <div id="login-error" class="overdue" role="alert" hidden></div>
+    <button class="btn btn-primary" type="submit">Войти</button>
+  </form>
+</div>
 <div class="layout">
   <aside class="sidebar">
     <div class="brand"><span id="app-title">MeetFlow</span><small id="app-subtitle"></small></div>
@@ -20,23 +30,28 @@
     <nav class="nav" id="nav-service">
       <a href="#team" data-route="team">Команда</a>
       <a href="#cards" data-route="cards" data-admin>Конфликты</a>
-      <a href="#decisions" data-route="decisions" data-admin>Реестр решений</a>
     </nav>
+    <!-- служебные разделы супер-администратора — как в Проекте ERP (владелец 11.10.26) -->
     <div class="nav-sep" data-super></div>
     <nav class="nav" data-super>
-      <a href="#monitoring" data-route="monitoring">Мониторинг</a>
+      <a href="#system" data-route="system">Параметры системы<span id="awaiting-badge"></span></a>
+      <a href="#live" data-route="live">Мониторинг RealTime</a>
       <a href="#models" data-route="models">Модели</a>
-      <a href="#settings" data-route="settings">Настройки</a>
+      <a href="#voices" data-route="voices">База голосов</a>
       <a href="#design" data-route="design">Оформление</a>
     </nav>
     <div class="whoami">
       <label>Проект <select id="project"></select></label>
-      <label>Вы работаете как <select id="role"></select></label>
-      <input id="username" placeholder="ФИО (для своих задач)">
+      <div id="test-identity">
+        <label>Вы работаете как <select id="role"></select></label>
+        <input id="username" placeholder="ФИО (для своих задач)">
+      </div>
+      <div id="auth-identity" class="sub" hidden></div>
+      <button class="btn btn-ghost" id="mode-switch" type="button" data-super hidden></button>
     </div>
   </aside>
   <main class="main" id="main" tabindex="-1"></main>
 </div>
-<script src="app.js?v=20261009wide"></script>
+<script src="app.js?v=20261011system"></script>
 </body>
 </html>

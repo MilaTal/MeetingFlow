@@ -2,6 +2,10 @@
   "id": "default",
   "title": "Проект по совещаниям",
   "vocabulary": {
+    "nav_tasks": "Реестр задач по проекту",
+    "nav_meetings": "Встречи по проекту",
+    "nav_roadmap": "Статус проекта",
+    "nav_search": "Поиск по проекту",
     "app_title": "MeetFlow",
     "app_subtitle": "Проект по совещаниям",
     "meeting": "встреча",
@@ -124,7 +128,7 @@
     "document_size_pt": 12
   },
   "llm": {
-    "tool_choice": "MEETFLOW_LLM при развёртывании: mock — стенд без модели; ollama — локальная модель (llm.generator / llm.verifier); openrouter — llm.openrouter.*, ключ OPENROUTER_API_KEY. Решение владельца 03.10.26",
+    "tool_choice": "MEETFLOW_LLM при развёртывании: mock — стенд без модели; ollama — локальная модель (llm.generator / llm.verifier); openrouter — llm.openrouter.*, ключ OPENROUTER_API_KEY; routes — цепочки точек по ролям из data/models.json, образец docs/models.example.json. Решение владельца 03.10.26",
     "max_answer_tokens": 4096,
     "max_answer_tokens_source": "Решение владельца 03.10.26: потолок ответа 4096 токенов на вызов — гарантирует денежный предел прогона и защищает от зависания на длинном ответе. Планёрка ставит 32000 из-за обрывов на больших таблицах (16.09.26); у MeetFlow вызовы узкие, обрыв видно сообщением",
     "openrouter": {

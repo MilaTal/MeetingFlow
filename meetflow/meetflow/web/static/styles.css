@@ -271,3 +271,10 @@ td.no small, .sub { display: block; font-size: var(--fs-small); color: var(--tex
 
 /* Страница «Модели»: подсказки идут по ширине карточки, как таблицы под ними (владелец 09.10.26) */
 .page-sub-wide { max-width: none; }
+
+/* вход по паролю (11.10.26) — окно поверх экрана на тех же токенах, без новых цветов и размеров шрифта */
+.login-screen { position: fixed; inset: 0; z-index: 50; display: grid; place-items: center;
+  background: color-mix(in srgb, var(--bg) 88%, transparent); }
+.login-screen[hidden] { display: none; }
+.login-card { width: min(380px, calc(100vw - 32px)); }
+.login-card input { width: 100%; }

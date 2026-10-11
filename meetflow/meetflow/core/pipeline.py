@@ -38,6 +38,7 @@ from .registry import CardQueue, OperatorMemory, TaskRegistry
 from .dates import lenient_date
 from .draft_checks import run_code_checks
 from .morph import supported_due
+from .guard import classify, filter_text, line_verdict
 from .security import injection_hits, looks_like_injection
 from .store import Store, now
 from .text import coverage, jaccard, same_word, stems, words
@@ -146,6 +147,7 @@ class MeetingPipeline:
                  journal_path: str | Path | None = None):
         self.theme, self.s, self.plugins = theme, store, plugins
         self.gen, self.ver = generator, verifier or generator
+        self.guard_llm: LLMConnector | None = None    # досмотр реплик к системе, если у маршрутов есть роль guard
         self.neg = NegationRule(theme.get("lexicon"), theme.get("lexicon_done"))
         self.reg = TaskRegistry(store, self.neg)
         self.cards = CardQueue(store)
@@ -264,7 +266,8 @@ class MeetingPipeline:
                                cost_usd=res.cost_usd, seconds=round(res.seconds, 2), chars=len(system) + len(user))
             try:
                 return parse_json(res.text, self.prof.strip_think)
-            except (ValueError, json.JSONDecodeError):
+            except (ValueError, json.JSONDecodeError) as e:
+                self.journal.bad_answer(purpose, meeting_id, res.model, res.text, f"{type(e).__name__}: {e}")
                 if attempt:
                     raise
                 user = user + "\n\nНапоминание: только JSON по схеме."
@@ -283,7 +286,9 @@ class MeetingPipeline:
     def _run(self, project_id: int, meeting_id: int, limits: BudgetLimits | None) -> RunReport:
         rep = RunReport(meeting_id)
         # чистка нерешённых карточек по сроку (operator.card_cleanup_days): была написана, но не вызывалась (письмо 47)
-        self.cards.cleanup(project_id, int(self.theme.get("operator.card_cleanup_days", 0) or 0))
+        # порог с экрана «Параметры системы → Пороги» важнее темы (владелец 11.10.26, как в Планёрке)
+        days = self.s.get_setting("card_cleanup_days")
+        self.cards.cleanup(project_id, int(days if days is not None else self.theme.get("operator.card_cleanup_days", 0) or 0))
         budget = RunBudget(limits or BudgetLimits(**self.theme.get("budget", {})))
         meeting = self.s.get("meetings", meeting_id) or {}
         if meeting.get("date"):          # дата не в ISO не ломает сравнения и единицы (01/24)
@@ -390,9 +395,26 @@ class MeetingPipeline:
 
             # строки, похожие на внедрённую инструкцию, не становятся основанием закрытия (01/12)
             inj_lines = {i for i, ln in enumerate(source.lines) if looks_like_injection(ln)}
+            if self.guard_llm:   # обращение к системе без явной темы — досмотр моделью, не больше 10 строк за прогон
+                unsure = [i for i, ln in enumerate(source.lines) if i not in inj_lines and line_verdict(ln)["unsure"]]
+                for i in unsure[:10]:
+                    said = classify(self.guard_llm, source.lines[i])
+                    if said:
+                        inj_lines.add(i)
+                    elif said is None:
+                        self.cards.open(project_id, "suspicious_source", "Досмотр не ответил: реплика обращена к "
+                                        "системе, решите, деловая ли она", {"line": i + 1, "quote": source.lines[i][:200]},
+                                        meeting_id)
+                if any(i in inj_lines for i in unsure[:10]):
+                    self.cards.open(project_id, "suspicious_source", "Досмотр пометил реплики, обращённые к системе",
+                                    {"lines": sorted(i + 1 for i in unsure[:10] if i in inj_lines)}, meeting_id)
             # и не идут в протокол, единицы и проверку: строка заменяется пометкой, нумерация та же
             safe_text = "\n".join(HIDDEN if i in inj_lines else ln for i, ln in enumerate(source.lines))
             safe_source = SourceDoc(source.name, source.kind, safe_text) if inj_lines else source
+            if inj_lines:   # протокол не отказываем: обращение к системе — факт встречи, видный в шапке (письмо 10.10)
+                nums = ", ".join(str(i + 1) for i in sorted(inj_lines)[:10]) + ("…" if len(inj_lines) > 10 else "")
+                protocol_notes.append(f"В записи {len(inj_lines)} реплик(и) обращены к самой системе, а не к "
+                                      f"участникам (строки {nums}); в разбор не взяты, переданы оператору.")
             try:
                 if stopped is None:
                     # 2. закрытия — код отбирает фразы-кандидаты, модель называет номер
@@ -452,7 +474,8 @@ class MeetingPipeline:
                                     if k in self.theme["protocol_skeleton"]}
                     except AnswerTruncated:
                         # разделы не поместились в потолок ответа — протокол и задачи сохраняются без них
-                        sections = {s: "Не собрано: ответ модели длиннее потолка 4096 токенов." for s in
+                        cap = int(self.theme.get("llm.max_answer_tokens", 4096))
+                        sections = {s: f"Не собрано: ответ модели длиннее потолка {cap} токенов." for s in
                                     self.theme["protocol_skeleton"]}
                         limited = True
 
@@ -465,7 +488,7 @@ class MeetingPipeline:
                                 rep.detail = (f"Единицы встречи: не разобрано кусков {len(ures['failed_ranges'])} "
                                               f"из {ures['chunks']}.")
                         except BudgetExceeded as e:
-                            # единицы — дополнение: протокол сохраняется и без них (правило «сразу, ничего не ждёт»)
+                            # единицы — дополнение: протокол сохраняется и без них
                             rep.detail, limited = f"Единицы встречи не собраны: {e}", True
             except BudgetExceeded as e:
                 stopped = e
@@ -505,8 +528,8 @@ class MeetingPipeline:
                 for d, g in planned:
                     who = g.assignee.label if g.assignee else None
                     pend = g.pending or {}
-                    if pend.get("reason") == "department":
-                        who = pend["name"]                   # в графе исполнителя — отдел (письмо 36)
+                    # отдел без руководителя: исполнитель пустой, отдел — в карточке (владелец 10.10.26 при сверке
+                    # скиллов: так в скилле meetflow и движке; отменяет «в графе исполнителя — отдел», письмо 36)
                     if pend.get("reason") == "new_person":
                         # документ 14: фамилия и имя, похожих нет — сразу в «Команду» «не подтверждён», задача на
                         # него, оператору карточка на подтверждение; в одном прогоне — одна запись на человека
@@ -644,6 +667,11 @@ class MeetingPipeline:
                                          "from": "единицы встречи"}, meeting_id)
                 protocol_md = self._render_protocol(meeting, sections, added, closings, srcs, removals,
                                                     str(stopped) if stopped else "", protocol_notes)
+                role = self.theme.get("prompts.domain_role")
+                protocol_md, filtered = filter_text(protocol_md, (role,) if isinstance(role, str) else ())
+                if filtered:   # модель пересказала служебное — заменено, оператор знает (письмо 10.10, строки 15–20)
+                    self.cards.open(project_id, "suspicious_source", "В протоколе скрыт служебный текст системы",
+                                    {"filter": "output"}, meeting_id)
                 self.s.update("meetings", meeting_id, protocol_md=protocol_md, protocol_built_at=now(),
                               built_from=[s["name"] for s in srcs])
         except Exception as e:  # всё откатилось — реестр не наполовину

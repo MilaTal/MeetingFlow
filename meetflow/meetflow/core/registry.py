@@ -28,6 +28,9 @@ class TaskRegistry:
 
     def add(self, project_id: int, description: str, assignee: str | None, meeting_id: int | None = None,
             quote: str = "", due_date: str | None = None, date_set: str | None = None) -> int:
+        if meeting_id:   # формулировка от модели — через фильтр выхода; набранное человеком не трогаем
+            from .guard import filter_text
+            description = filter_text(description)[0]
         tid = self.s.insert("tasks", project_id=project_id, description=description, assignee=assignee,
                             status=TaskStatus.ACTIVE.value, due_date=due_date, date_set=date_set or now()[:10],
                             source_meeting_id=meeting_id, source_quote=quote)

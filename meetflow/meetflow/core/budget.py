@@ -94,6 +94,20 @@ class CallJournal:
         self.path = Path(path) if path else None
         self._lock = threading.Lock()
         self.records: list[dict] = []
+        self.bad: list[dict] = []
+
+    def bad_answer(self, purpose: str, meeting_id: int | None, model: str, raw: str, error: str) -> None:
+        """Сырой ответ модели при сбое формата — в bad_answers.jsonl рядом с журналом, только локально и обрезанным
+        до 4000 знаков (письмо ветки «AI агентные скилы», строка 10: сначала журнал сырого ответа, потом починка)."""
+        rec = {"ts": time.strftime("%Y-%m-%dT%H:%M:%S"), "purpose": purpose, "meeting_id": meeting_id, "model": model,
+               "error": str(error)[:300], "raw": str(raw or "")[:4000]}
+        with self._lock:
+            self.bad.append(rec)
+            if self.path:
+                p = self.path.with_name("bad_answers.jsonl")
+                p.parent.mkdir(parents=True, exist_ok=True)
+                with p.open("a", encoding="utf-8") as f:
+                    f.write(json.dumps(rec, ensure_ascii=False) + "\n")
 
     def write(self, **rec) -> None:
         rec.setdefault("ts", time.strftime("%Y-%m-%dT%H:%M:%S"))

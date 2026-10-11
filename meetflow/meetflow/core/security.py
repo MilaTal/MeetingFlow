@@ -43,13 +43,24 @@ _INJ_CASE = [re.compile(r"\bDAN\b")]       # только заглавными: 
 
 
 def looks_like_injection(text: str) -> bool:
+    """Прежние шаблоны плюс guard: обращение к самой системе, в том числе латиницей, разрядкой, base64
+    (письмо ветки «AI агентные скилы» 10.10.26). guard проверяет построчно — обращение стоит в начале реплики."""
+    from .guard import line_verdict
     t = sanitize(text or "")
-    return any(r.search(t) for r in _INJ) or any(r.search(t) for r in _INJ_CASE)
+    if any(r.search(t) for r in _INJ) or any(r.search(t) for r in _INJ_CASE):
+        return True
+    return any(line_verdict(ln)["suspicious"] for ln in (text or "").splitlines() if ln.strip())
 
 
 def injection_hits(text: str) -> list[str]:
+    from .guard import line_verdict
     t = sanitize(text or "")
-    return [r.pattern for r in _INJ + _INJ_CASE if r.search(t)]
+    hits = [r.pattern for r in _INJ + _INJ_CASE if r.search(t)]
+    for ln in (text or "").splitlines():
+        v = line_verdict(ln) if ln.strip() else {"suspicious": False}
+        if v["suspicious"] and f"guard:{v['kind']}" not in hits:
+            hits.append(f"guard:{v['kind']}")
+    return hits
 
 
 def fence(text: str, label: str) -> tuple[str, str]:

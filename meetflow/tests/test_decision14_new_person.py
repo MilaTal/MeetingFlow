@@ -109,11 +109,12 @@ def test_one_word_unknown_task_without_assignee_and_card(env):
     assert cards(env, "assign_person")
 
 
-# 5 — отдел без руководителя: перевёрнут решением владельца (письмо 36) — задача сразу, исполнитель — отдел
+# 5 — отдел без руководителя: перевёрнут решением владельца (письмо 36) — задача сразу; ещё раз 10.10.26 —
+# исполнитель пустой, отдел только в карточке
 def test_department_without_head_task_first(env):
     line = "Гаврилов Павел: ОТН, проверьте пломбы на цистернах"
     r = run(env, line, "ОТН", desc="Проверить пломбы на цистернах")
-    assert r["tasks_added"] == 1 and tasks(env)[0]["assignee"] == "ОТН"
+    assert r["tasks_added"] == 1 and tasks(env)[0]["assignee"] is None
     card = cards(env, "assign_person")[0]
     assert card["payload"]["reason"] == "department" and not cards(env, "held_task")
 

@@ -61,6 +61,12 @@ SCHEMA: dict[str, dict[str, str]] = {
     # настройки: project_id = NULL — общие для машины (база голосов)
     "settings": {"id": "INTEGER PRIMARY KEY", "project_id": "INTEGER", "key": "TEXT", "value": "TEXT",
                  "updated_at": "TEXT", "updated_by": "TEXT DEFAULT ''"},
+    # вход по паролю (как в ERP и Планёрке): пароль — только scrypt-хэш, сессия — только sha256 токена
+    "accounts": {"id": "INTEGER PRIMARY KEY", "login": "TEXT", "full_name": "TEXT", "role": "TEXT",
+                 "password_hash": "TEXT DEFAULT ''", "active": "INTEGER DEFAULT 1", "failed_attempts": "INTEGER DEFAULT 0",
+                 "locked_until": "TEXT", "last_login_at": "TEXT", "created_at": "TEXT"},
+    "sessions": {"id": "INTEGER PRIMARY KEY", "token_hash": "TEXT", "account_id": "INTEGER", "created_at": "TEXT",
+                 "expires_at": "TEXT"},
 }
 
 

@@ -2,7 +2,7 @@
 
   python eval/run_eval.py --label до --client heuristic
   python eval/run_eval.py --label после --client ollama --model glm-4.7-flash
-Результат: eval/results/<label>.json и строка-итог; сравнение двух прогонов — eval/compare.py.
+Результат: eval/results/<набор>__<label>.json и строка-итог; сравнение двух прогонов — eval/compare.py.
 """
 
 import argparse
@@ -73,7 +73,7 @@ def main():
     ap.add_argument("--label", required=True)
     ap.add_argument("--client", default="heuristic", choices=["heuristic", "ollama"])
     ap.add_argument("--model", default=None)
-    ap.add_argument("--set", default="cases", help="cases (основной) или cases_live (отложенный)")
+    ap.add_argument("--set", default="cases", help="cases (основной), cases_live (живая речь) или cases_blind (слепой)")
     args = ap.parse_args()
     if hasattr(sys.stdout, "reconfigure"):
         sys.stdout.reconfigure(encoding="utf-8")

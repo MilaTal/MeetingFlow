@@ -1,0 +1,10 @@
+__pycache__/
+*.pyc
+.pytest_cache/
+data/
+*.db
+*.jsonl
+.env
+.env.local
+.venv/
+!skills/meetflow/engine/tests/data/

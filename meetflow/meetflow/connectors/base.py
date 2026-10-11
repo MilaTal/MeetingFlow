@@ -1,10 +1,10 @@
 """Абстрактные интерфейсы коннекторов. Ядро знает только эти классы.
 
-Пять типов (CONNECTOR_SPEC.md):
+Пять типов:
   SourceConnector  — файл/байты -> SourceDoc (txt, md, docx, ...)
   ASRConnector     — аудио/видео -> SourceDoc(transcript), только локально
   VisionConnector  — изображение -> SourceDoc(other), описание для модели
-  LLMConnector     — сообщения -> LLMResult (Ollama: GLM / DeepSeek / Qwen)
+  LLMConnector     — сообщения -> LLMResult (Ollama, свой OpenAI-совместимый сервер, OpenRouter; маршруты — llm_routes)
   OutputConnector  — markdown -> файл (docx, md)
 
 Новый коннектор = подкласс + регистрация в PluginRegistry; ядро не меняется.

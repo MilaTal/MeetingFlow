@@ -11,8 +11,9 @@ from __future__ import annotations
 
 import json
 import os
+import socket
 from contextlib import asynccontextmanager
-from datetime import date as date_cls
+from datetime import date as date_cls, datetime, timedelta
 from pathlib import Path
 from typing import Literal
 from urllib.parse import quote, unquote
@@ -30,7 +31,10 @@ from ..connectors.llm_openrouter import OpenRouterLLM
 from ..connectors.registry import default_registry
 from ..connectors.voice_base import voice_base_state
 from ..core.config import Theme, list_themes, load_theme
-from ..core.intake import MIN_INTERVAL, IntakeError, IntakeService, validate_folder
+from ..core.accounts import Accounts, AuthError
+from ..core.backup import Backups
+from ..core.dates import lenient_date
+from ..core.intake import MIN_INTERVAL, IntakeError, IntakeService, preview_folder, sign_folder, validate_folder
 from ..core.runs_report import runs_report
 from ..core import roadmap as roadmap_mod
 from ..core import search as search_mod
@@ -79,6 +83,33 @@ class CommentIn(BaseModel):
 class FolderIn(BaseModel):
     path: str = Field("", max_length=500)
     path_repeat: str = Field("", max_length=500)
+    # смена папки — в два шага, второй по паролю супер-администратора (как в Планёрке и ERP с 07.10.26)
+    confirm: bool = False
+    login: str = Field("", max_length=100)            # в тестовом режиме — чья учётная запись подтверждает
+    current_password: str = Field("", max_length=200)
+
+
+class LoginIn(BaseModel):
+    login: str = Field(min_length=1, max_length=100)
+    password: str = Field(min_length=1, max_length=200)
+
+
+class ModeIn(BaseModel):
+    auth_required: bool
+    login: str = Field("", max_length=100)
+    password: str = Field("", max_length=200)
+
+
+class AccountIn(BaseModel):
+    login: str = Field(min_length=1, max_length=100)
+    full_name: str = Field("", max_length=200)
+    role: str = Field(max_length=40)
+    password: str = Field(min_length=1, max_length=200)
+
+
+class ThresholdsIn(BaseModel):
+    overdue_highlight_working_days: int | None = Field(None, ge=1, le=60)
+    card_cleanup_days: int | None = Field(None, ge=0, le=365)
 
 
 class IntervalIn(BaseModel):
@@ -150,23 +181,72 @@ def create_app(theme_name: str | None = None, db_path: str | None = None, journa
     plugins = default_registry()
     pipe = MeetingPipeline(theme, store, plugins, _llm(theme, "generator"), _llm(theme, "verifier"),
                            journal or os.environ.get("MEETFLOW_JOURNAL", "data/logs/llm_calls.jsonl"))
+    if os.environ.get("MEETFLOW_LLM", "mock").strip().lower() == "routes":
+        from ..connectors.llm_routes import RoutedLLM, routes_path
+        try:   # досмотр — только если у роли guard есть точки; без них решает правило guard.py
+            has_guard = bool(json.loads(routes_path().read_text(encoding="utf-8")).get("roles", {}).get("guard"))
+        except (OSError, ValueError):
+            has_guard = False
+        if has_guard:
+            pipe.guard_llm = RoutedLLM("guard", max_answer_tokens=5)
     intake = IntakeService(pipe)
+    accounts = Accounts(store)
+    backups = Backups(store.path)
     watch_on = os.environ.get("MEETFLOW_WATCH", "on") != "off" if watch is None else watch
 
     @asynccontextmanager
     async def lifespan(_app):
         if watch_on:
             intake.start()        # фоновый забор из папок-приёмников
+            backups.start()       # автокопия базы по расписанию
         yield
         intake.stop()
+        backups.stop()
 
     app = FastAPI(title="MeetFlow", lifespan=lifespan)
     app.state.theme, app.state.store, app.state.pipe, app.state.intake = theme, store, pipe, intake
+    app.state.accounts, app.state.backups = accounts, backups
     app_dir = Path(__file__).resolve().parents[2]
+    COOKIE = "mf_session"
+    PUBLIC = {"/api/theme", "/api/auth/mode", "/api/auth/login", "/api/auth/logout"}
 
-    def user(x_user_role: str = Header("member"), x_user_name: str = Header("")) -> dict:
+    @app.middleware("http")
+    async def _login_gate(request: Request, call_next):
+        """Вход включён — любой /api, кроме публичных, только с действующей сессией."""
+        path = request.url.path
+        if path.startswith("/api/") and path not in PUBLIC and accounts.auth_required() \
+                and not accounts.by_session(request.cookies.get(COOKIE)):
+            return JSONResponse({"detail": "Нужно войти: включён вход по логину и паролю."}, 401)
+        return await call_next(request)
+
+    def user(request: Request, x_user_role: str = Header("member"), x_user_name: str = Header("")) -> dict:
+        if accounts.auth_required():        # рабочий режим: роль и имя — из учётной записи, заголовки не в счёт
+            a = accounts.by_session(request.cookies.get(COOKIE))
+            if not a:
+                raise HTTPException(401, "Нужно войти.")
+            return {"role": a["role"] if a["role"] in theme["roles"] else "member", "name": a["full_name"],
+                    "login": a["login"]}
         role = x_user_role if x_user_role in theme["roles"] else "member"
-        return {"role": role, "name": unquote(x_user_name)[:200]}  # кириллица в заголовке — URL-кодом
+        return {"role": role, "name": unquote(x_user_name)[:200], "login": ""}  # кириллица в заголовке — URL-кодом
+
+    def client_ip(request: Request) -> str:
+        return request.client.host if request.client else ""
+
+    def confirm_super(u: dict, login: str, password: str, request: Request) -> dict:
+        """Пароль супер-администратора для опасных смен (папка, база голосов, выключение входа)."""
+        if not accounts.has_super_admin():
+            raise HTTPException(400, "Сначала заведите учётную запись супер-администратора с паролем: «Параметры "
+                                     "системы → Диск и доступы» или python -m meetflow set-password.")
+        who = u.get("login") or (login or "").strip()
+        if not who:
+            raise HTTPException(400, "Укажите логин супер-администратора и его пароль.")
+        try:
+            a = accounts.check(who, password, client_ip(request))
+        except AuthError as e:
+            raise HTTPException(403, str(e)) from None
+        if a["role"] != "super_admin":
+            raise HTTPException(403, "Подтвердить может только супер-администратор.")
+        return a
 
     perms = theme.get("permissions", {})
     admin_roles = set(perms.get("admin", ADMIN_ROLES))
@@ -383,7 +463,19 @@ def create_app(theme_name: str | None = None, db_path: str | None = None, journa
         project_or_404(pid)
         st = None if status == "all" else TaskStatus(status)
         rows = pipe.reg.list(pid, st)
-        return [{k: v for k, v in r.items() if k != "project_id"} for r in rows]
+        n = int(store.get_setting("overdue_highlight_working_days", None, 7) or 7)
+        today = date_cls.today()
+
+        def overdue(r: dict) -> bool:   # как в Планёрке: N рабочих дней после срока, только у задач в работе
+            d = lenient_date(r.get("due_date")) if r.get("status") == "active" else None
+            if not d or d >= today:
+                return False
+            days, cur = 0, d
+            while cur < today:
+                cur += timedelta(days=1)
+                days += cur.weekday() < 5
+            return days >= n
+        return [{**{k: v for k, v in r.items() if k != "project_id"}, "overdue": overdue(r)} for r in rows]
 
     @app.patch("/api/tasks/{tid}")
     def set_status(tid: int, body: StatusIn, u: dict = Depends(user)):
@@ -504,14 +596,6 @@ def create_app(theme_name: str | None = None, db_path: str | None = None, journa
     def decisions(pid: int, u: dict = Depends(admin)):
         return store.q("SELECT what, decision, why, at FROM decisions WHERE project_id=? ORDER BY id DESC", (pid,))
 
-    LOCAL = {"127.0.0.1", "::1", "localhost", "testclient"}
-
-    def local_only(request: Request) -> None:
-        """Пока вход по паролю не встроен, адреса папок и баз меняются только
-        с машины сервера (правило Планёрки 28.09)."""
-        if (request.client.host if request.client else "") not in LOCAL:
-            raise HTTPException(403, "Адрес меняется только с компьютера, где работает сервер.")
-
     @app.get("/api/projects/{pid}/settings")
     def get_settings(pid: int, u: dict = Depends(super_admin)):
         project_or_404(pid)
@@ -521,19 +605,33 @@ def create_app(theme_name: str | None = None, db_path: str | None = None, journa
 
     @app.post("/api/projects/{pid}/settings/watch-folder")
     def set_watch_folder(pid: int, body: FolderIn, request: Request, u: dict = Depends(super_admin)):
-        project_or_404(pid)
-        local_only(request)
-        if not body.path.strip() and not body.path_repeat.strip():
-            intake.set_folder(pid, None, u["name"] or u["role"])
-            return intake.state(pid)
-        try:
-            path = validate_folder(body.path, body.path_repeat, app_dir=app_dir)
-        except IntakeError as e:
-            raise HTTPException(422, str(e)) from None
-        other = [r for r in store.q("SELECT project_id, value FROM settings WHERE key='watch_folder'")
-                 if r["project_id"] != pid and json.loads(r["value"] or "null") == str(path)]
-        if other:
-            raise HTTPException(422, "Эта папка уже назначена приёмником другого проекта: у каждого проекта своя.")
+        """Два шага, как в Планёрке и ERP: первый — проверка и предпросмотр «что заберёт первый проход», второй —
+        подтверждение паролем супер-администратора. Пустой адрес — выключить папку (тоже по паролю)."""
+        prj = project_or_404(pid)
+        off = not body.path.strip() and not body.path_repeat.strip()
+        path = None
+        if not off:
+            try:
+                path = validate_folder(body.path, body.path_repeat, app_dir=app_dir, sign=False)
+            except IntakeError as e:
+                raise HTTPException(422, str(e)) from None
+            other = [r for r in store.q("SELECT project_id, value FROM settings WHERE key='watch_folder'")
+                     if r["project_id"] != pid and json.loads(r["value"] or "null") == str(path)]
+            if other:
+                raise HTTPException(422, "Эта папка уже назначена приёмником другого проекта: у каждого проекта своя.")
+        if not body.confirm:
+            if off:
+                return {"confirm_needed": True, "question": f"Выключить папку-приёмник проекта «{prj['name']}»? "
+                        f"Сейчас: {intake.folder(pid) or 'не задана'}. Файлы из неё забираться не будут."}
+            pv = preview_folder(path)
+            q = (f"Сделать «{path}» папкой-приёмником проекта «{prj['name']}»? В папке файлов: {pv['files']}, первый "
+                 f"проход заберёт {pv['first_pass']}.")
+            if pv["big"]:
+                q += f" Это больше {pv['big_limit']} — первый проход будет долгим и может стоить денег."
+            return {"confirm_needed": True, "question": q, "preview": pv}
+        confirm_super(u, body.login, body.current_password, request)
+        if path is not None:
+            sign_folder(path)
         intake.set_folder(pid, path, u["name"] or u["role"])
         return intake.state(pid)
 
@@ -553,12 +651,12 @@ def create_app(theme_name: str | None = None, db_path: str | None = None, journa
 
     @app.post("/api/settings/voice-base")
     def set_voice_base(body: FolderIn, request: Request, u: dict = Depends(super_admin)):
-        local_only(request)
         a, b = body.path.strip().strip('"'), body.path_repeat.strip().strip('"')
         if a != b:
             raise HTTPException(422, "Адрес и его повтор не совпадают — проверьте опечатку.")
         if a and not Path(a).is_absolute():
             raise HTTPException(422, r"Нужен полный путь к файлу базы, например D:\Голоса\voices.db.")
+        confirm_super(u, body.login, body.current_password, request)     # как смена папки — по паролю
         store.set_setting("voice_base_path", a or None, None, u["name"] or u["role"])
         return voice_base_state(a or None)
 
@@ -659,6 +757,297 @@ def create_app(theme_name: str | None = None, db_path: str | None = None, journa
                 "openrouter_key_set": bool(os.environ.get("OPENROUTER_API_KEY", "").strip())}
         return {"connectors": conns, "technical_messages": tech, "journal": pipe.journal.records[-50:],
                 "todo": theme.todo(), "llm_tool": tool}
+
+    # ---------------------------------------------------------------- вход по паролю (как в ERP и Планёрке)
+    def _csrf(request: Request) -> None:
+        if request.headers.get("x-requested-with") != "MeetFlow":
+            raise HTTPException(403, "Запрос без защитного заголовка.")
+
+    @app.get("/api/auth/mode")
+    def auth_mode():
+        return {"auth_required": accounts.auth_required()}
+
+    @app.post("/api/auth/login")
+    def auth_login(body: LoginIn, request: Request):
+        _csrf(request)
+        try:
+            a = accounts.check(body.login, body.password, client_ip(request))
+        except AuthError as e:
+            raise HTTPException(401, str(e)) from None
+        resp = JSONResponse({"login": a["login"], "full_name": a["full_name"], "role": a["role"]})
+        resp.set_cookie(COOKIE, accounts.open_session(a), httponly=True, samesite="strict",
+                        secure=request.url.scheme == "https", max_age=12 * 3600)
+        return resp
+
+    @app.post("/api/auth/logout")
+    def auth_logout(request: Request):
+        _csrf(request)
+        accounts.close_session(request.cookies.get(COOKIE))
+        resp = JSONResponse({"ok": True})
+        resp.delete_cookie(COOKIE)
+        return resp
+
+    @app.get("/api/auth/me")
+    def auth_me(u: dict = Depends(user)):
+        return {**u, "auth_required": accounts.auth_required()}
+
+    @app.post("/api/auth/mode")
+    def auth_set_mode(body: ModeIn, request: Request, u: dict = Depends(super_admin)):
+        """Включить вход — только подтвердив логин и пароль супер-администратора (иначе войти будет нечем);
+        выключить при включённом входе — своим паролем (украденная сессия не снимет защиту одним запросом)."""
+        was = accounts.auth_required()
+        if body.auth_required != was:
+            confirm_super(u, body.login, body.password, request)
+            accounts.set_auth_required(body.auth_required, u["name"] or u["role"])
+            pipe.cards.open(None, "technical", "Вход по логину и паролю " + ("ВКЛЮЧЁН" if body.auth_required
+                            else "ВЫКЛЮЧЕН (тестовый режим)"), {"кто": u["name"] or u["role"]})
+        return {"auth_required": accounts.auth_required()}
+
+    @app.get("/api/monitoring/accounts")
+    def mon_accounts(u: dict = Depends(super_admin)):
+        return accounts.list()
+
+    @app.post("/api/monitoring/accounts")
+    def mon_accounts_save(body: AccountIn, u: dict = Depends(super_admin)):
+        if body.role not in theme["roles"]:
+            raise HTTPException(422, "Такой роли нет в теме.")
+        try:
+            a = accounts.save(body.login, body.full_name, body.role, body.password)
+        except AuthError as e:
+            raise HTTPException(422, str(e)) from None
+        pipe.cards.open(None, "technical", f"Доступ выдан или пароль сменён: {a['login']}",
+                        {"роль": a["role"], "кто": u["name"] or u["role"]})
+        return accounts.list()
+
+    # ---------------------------------------------------------------- Мониторинг RealTime (как в ERP)
+    def _row(name: str, state: str, detail: str) -> dict:
+        return {"name": name, "state": state, "detail": detail}
+
+    def _services() -> list[dict]:
+        tool = os.environ.get("MEETFLOW_LLM", "mock")
+        key = bool(os.environ.get("OPENROUTER_API_KEY", "").strip())
+        gen, ver = getattr(pipe.gen, "model", "") or "", getattr(pipe.ver, "model", "") or ""
+        rows = []
+        if tool == "mock":
+            rows.append(_row("Модель", "выкл.", "стенд без модели: протоколы собирает заглушка"))
+        elif tool == "openrouter" and not key:
+            rows.append(_row("Модель", "нет", "OpenRouter: ключ OPENROUTER_API_KEY не задан"))
+        else:
+            rows.append(_row("Модель", "живо", f"{tool}: генерирует {gen or 'по маршрутам'}"))
+            rows.append(_row("Модель проверки", "живо", (ver or "по маршрутам") +
+                             (" — та же, что генерация" if ver and ver == gen else "")))
+        try:
+            store.q("SELECT 1 AS x")
+            size = Path(store.path).stat().st_size / 1024 if store.path != ":memory:" else 0
+            rows.append(_row("База данных", "живо", f"{store.path} · {size:.0f} КБ"))
+        except Exception as e:  # noqa: BLE001
+            rows.append(_row("База данных", "нет", type(e).__name__))
+        last = (backups.files() or [{}])[0].get("at", "")
+        rows.append(_row("Автобэкап", "выкл." if not backups.enabled else "живо" if backups.running else "нет",
+                         ("выключен переменной MEETFLOW_BACKUP=off" if not backups.enabled else
+                          f"раз в {backups.hours:g} ч, хранить {backups.keep}" + (f"; последняя копия {last}" if last else "")
+                          + (f"; сбой: {backups.last_error}" if backups.last_error else ""))))
+        rows.append(_row("Сервер", "живо", f"pid {os.getpid()} · {socket.gethostname()}"))
+        for p in store.q("SELECT id, name FROM projects ORDER BY id"):
+            st = intake.state(p["id"])
+            last_at = (st.get("last_scan") or {}).get("at", "—")
+            useful = (st.get("last_useful_scan") or {}).get("at", "—")
+            if not st["folder"]:
+                rows.append(_row(f"Папка-приёмник · {p['name']}", "выкл.", "не задана"))
+            elif not st.get("exists"):
+                rows.append(_row(f"Папка-приёмник · {p['name']}", "нет", f"{st['folder']} — не найдена"))
+            elif not st["worker"]:
+                rows.append(_row(f"Папка-приёмник · {p['name']}", "нет", f"{st['folder']} — фоновый забор не запущен"))
+            elif st.get("stalled"):
+                rows.append(_row(f"Папка-приёмник · {p['name']}", "нет",
+                                 f"{st['folder']} — поток завис: проходов нет дольше трёх интервалов"))
+            else:
+                rows.append(_row(f"Папка-приёмник · {p['name']}", "живо",
+                                 f"{st['folder']} · раз в {st['interval']} с · последний проход {last_at} · "
+                                 f"последний результативный {useful}"))
+        asr = [c for c in plugins.all("asr")]
+        try:
+            asr_ok = [c for c in asr if c.health().get("ok")]
+        except Exception:  # noqa: BLE001
+            asr_ok = []
+        rows.append(_row("Распознавание записей", "живо" if asr_ok else "нет" if asr else "выкл.",
+                         ", ".join(c.name for c in asr_ok) if asr_ok else "инструменты распознавания не найдены"
+                         if asr else "коннектор не подключён"))
+        vb = voice_base_state(store.get_setting("voice_base_path"))
+        rows.append(_row("База голосов", "живо" if vb.get("ok") else "выкл." if not vb.get("path") else "нет",
+                         (f"{vb.get('path')} · отпечатков {vb.get('samples')}" if vb.get("ok") else
+                          vb.get("detail") or "не задана")))
+        rows.append(_row("Досмотр реплик к системе", "живо" if pipe.guard_llm else "выкл.",
+                         "модель роли guard" if pipe.guard_llm else "роль guard в маршрутах не задана — решает правило"))
+        return rows
+
+    def _tech_cleanup() -> None:
+        """Технические сообщения старше N дней закрываются сами (ERP: 2 дня)."""
+        days = int(os.environ.get("MEETFLOW_SYSTEM_MESSAGES_KEEP_DAYS", "2") or 2)
+        edge = (datetime.now() - timedelta(days=days)).strftime("%Y-%m-%dT%H:%M:%S")
+        for r in store.q("SELECT id FROM cards WHERE kind='technical' AND status='open' AND created_at < ?", (edge,)):
+            store.update("cards", r["id"], status=CardStatus.ACCEPTED.value, resolution="закрыто по сроку",
+                         resolved_at=now())
+
+    def _awaiting() -> list[dict]:
+        _tech_cleanup()
+        out = []
+        n = store.q("SELECT COUNT(*) AS n FROM cards WHERE status='open' AND kind != 'technical'")[0]["n"]
+        out.append({"key": "cards", "title": "Карточки «Конфликтов»", "count": n, "link": "#cards",
+                    "need": "Решить: кто исполнитель, задача ли это, закрыта ли задача.",
+                    "if_not": "Задачи остаются без исполнителя или не заводятся; нерешённые снимаются по сроку."})
+        n = store.q("SELECT COUNT(*) AS n FROM people WHERE confirmed=0")[0]["n"]
+        out.append({"key": "people", "title": "Неподтверждённые люди в «Команде»", "count": n, "link": "#team",
+                    "need": "Подтвердить нового человека или объединить с существующим.",
+                    "if_not": "Задачи на него заведены, но сверка следующих встреч может ошибаться."})
+        no_date, stopped = [], []
+        for p in store.q("SELECT id, name FROM projects ORDER BY id"):
+            f = intake.folder(p["id"])
+            if f and Path(f).is_dir():
+                no_date += [f"{p['name']}: {x}" for x in preview_folder(Path(f))["no_date"]]
+                sd = Path(f) / "остановлено"
+                stopped += [f"{p['name']}: {x.name}" for x in sd.glob("*") if x.is_file()] if sd.is_dir() else []
+        out.append({"key": "no_date", "title": "Файлы без одной даты в папке-приёмнике", "count": len(no_date),
+                    "items": no_date[:10], "link": "#live", "need": "Переименовать файл: в имени — одна дата встречи.",
+                    "if_not": "Файл так и лежит в папке, встреча не разбирается."})
+        out.append({"key": "stopped", "title": "Остановлено по пределу", "count": len(stopped), "items": stopped[:10],
+                    "link": "#system/runs", "need": "Решить: повторить прогон вручную или убрать файл.",
+                    "if_not": "Протокол встречи неполный."})
+        n = store.q("SELECT COUNT(*) AS n FROM cards WHERE status='open' AND kind='technical'")[0]["n"]
+        out.append({"key": "tech", "title": "Системные сообщения", "count": n, "link": "#system/messages",
+                    "need": "Прочитать и закрыть.", "if_not": "Закроются сами через срок хранения."})
+        return out
+
+    @app.get("/api/monitoring/live")
+    def mon_live(pid: int | None = None, u: dict = Depends(super_admin)):
+        aw = _awaiting()
+        rec = store.q("SELECT s.name, s.created_at, m.date FROM sources s JOIN meetings m ON m.id = s.meeting_id "
+                      "WHERE s.removed_reason LIKE 'запись распознана%' ORDER BY s.id DESC LIMIT 5")
+        day = (datetime.now() - timedelta(days=1)).strftime("%Y-%m-%dT%H:%M:%S")
+        q = {"cards_open": store.q("SELECT COUNT(*) AS n FROM cards WHERE status='open' AND kind != 'technical'")[0]["n"],
+             "cards_resolved_day": store.q("SELECT COUNT(*) AS n FROM cards WHERE kind != 'technical' AND resolved_at >= ?",
+                                           (day,))[0]["n"],
+             "tech_open": store.q("SELECT COUNT(*) AS n FROM cards WHERE status='open' AND kind='technical'")[0]["n"]}
+        return {"services": _services(), "awaiting_total": sum(g["count"] for g in aw), "recognition": rec, "queue": q,
+                "intake": intake.state(pid) if pid and store.get("projects", pid) else None,
+                "min_interval": MIN_INTERVAL, "auth_required": accounts.auth_required()}
+
+    @app.get("/api/monitoring/awaiting-input")
+    def mon_awaiting(u: dict = Depends(super_admin)):
+        groups = _awaiting()
+        return {"total": sum(g["count"] for g in groups), "groups": groups}
+
+    # ---------------------------------------------------------------- Параметры системы (как в ERP)
+    @app.get("/api/monitoring/system-messages")
+    def mon_messages(u: dict = Depends(super_admin)):
+        _tech_cleanup()
+        rows = store.q("SELECT id, title, payload, created_at FROM cards WHERE kind='technical' AND status='open' "
+                       "ORDER BY id DESC LIMIT 100")
+        return [{**r, "payload": json.loads(r["payload"] or "{}")} for r in rows]
+
+    @app.post("/api/monitoring/system-messages/{cid}/close")
+    def mon_message_close(cid: int, u: dict = Depends(super_admin)):
+        c = store.get("cards", cid)
+        if not c or c["kind"] != "technical":
+            raise HTTPException(404, "Сообщение не найдено.")
+        store.update("cards", cid, status=CardStatus.ACCEPTED.value, resolution=f"закрыто: {u['name'] or u['role']}",
+                     resolved_at=now())
+        return {"ok": True}
+
+    @app.post("/api/monitoring/system-messages/close-all")
+    def mon_message_close_all(u: dict = Depends(super_admin)):
+        rows = store.q("SELECT id FROM cards WHERE kind='technical' AND status='open'")
+        for r in rows:
+            store.update("cards", r["id"], status=CardStatus.ACCEPTED.value,
+                         resolution=f"закрыто: {u['name'] or u['role']}", resolved_at=now())
+        return {"closed": len(rows)}
+
+    @app.get("/api/monitoring/data-state")
+    def mon_data_state(u: dict = Depends(super_admin)):
+        out = []
+        for p in store.q("SELECT id, name FROM projects ORDER BY id"):
+            pid = p["id"]
+            one = lambda sql, a=(pid,): store.q(sql, a)[0]["n"]  # noqa: E731
+            out.append({"project": p["name"],
+                        "meetings": one("SELECT COUNT(*) AS n FROM meetings WHERE project_id=?"),
+                        "with_protocol": one("SELECT COUNT(*) AS n FROM meetings WHERE project_id=? AND protocol_md IS NOT NULL"),
+                        "sources": {r["kind"]: r["n"] for r in store.q(
+                            "SELECT s.kind, COUNT(*) AS n FROM sources s JOIN meetings m ON m.id=s.meeting_id "
+                            "WHERE m.project_id=? AND s.removed_at IS NULL GROUP BY s.kind", (pid,))},
+                        "tasks": {r["status"]: r["n"] for r in store.q(
+                            "SELECT status, COUNT(*) AS n FROM tasks WHERE project_id=? GROUP BY status", (pid,))},
+                        "closed_by": {r["source"]: r["n"] for r in store.q(
+                            "SELECT h.source, COUNT(*) AS n FROM task_history h JOIN tasks t ON t.id=h.task_id WHERE "
+                            "t.project_id=? AND h.new_status IN ('done','dropped') GROUP BY h.source", (pid,))},
+                        "people": one("SELECT COUNT(*) AS n FROM people WHERE project_id=?"),
+                        "people_unconfirmed": one("SELECT COUNT(*) AS n FROM people WHERE project_id=? AND confirmed=0"),
+                        "people_external": one("SELECT COUNT(*) AS n FROM people WHERE project_id=? AND external=1"),
+                        "units": one("SELECT COUNT(*) AS n FROM units WHERE project_id=?")})
+        return out
+
+    @app.get("/api/monitoring/static")
+    def mon_static(u: dict = Depends(super_admin)):
+        def size(pth: Path) -> float:
+            if pth.is_file():
+                return round(pth.stat().st_size / 1024, 1)
+            return round(sum(f.stat().st_size for f in pth.rglob("*") if f.is_file()) / 1024, 1) if pth.is_dir() else 0
+        db = Path(store.path)
+        journal = Path(pipe.journal.path) if pipe.journal.path else None
+        return {"disk": {"db": str(db), "db_kb": size(db) if store.path != ":memory:" else 0,
+                         "journal": str(journal) if journal else "", "journal_kb": size(journal) if journal else 0,
+                         "backups_dir": str(backups.dir), "backups_kb": size(backups.dir)},
+                "backup": {"enabled": backups.enabled, "running": backups.running, "hours": backups.hours,
+                           "keep": backups.keep, "files": backups.files()[:10], "error": backups.last_error},
+                "access": {"auth_required": accounts.auth_required(), "accounts": accounts.list(),
+                           "roles": theme["roles"], "host": os.environ.get("MEETFLOW_HOST", "127.0.0.1")},
+                "models": {"tool": os.environ.get("MEETFLOW_LLM", "mock"), "generator": getattr(pipe.gen, "model", ""),
+                           "verifier": getattr(pipe.ver, "model", ""),
+                           "max_answer_tokens": theme.get("llm.max_answer_tokens", 4096),
+                           "budget": theme.get("budget", {})}}
+
+    @app.post("/api/monitoring/backup-now")
+    def mon_backup_now(u: dict = Depends(super_admin)):
+        if store.path == ":memory:":
+            raise HTTPException(400, "База в памяти — копировать нечего.")
+        f = backups.snapshot(manual=True)
+        return {"file": f.name, "files": backups.files()[:10]}
+
+    @app.get("/api/monitoring/decisions")
+    def mon_decisions(u: dict = Depends(super_admin)):
+        return store.q("SELECT d.what, d.decision, d.why, d.at, p.name AS project FROM decisions d LEFT JOIN projects p "
+                       "ON p.id = d.project_id ORDER BY d.id DESC LIMIT 200")
+
+    @app.get("/api/monitoring/rules")
+    def mon_rules(u: dict = Depends(super_admin)):
+        return store.q("SELECT r.id, r.kind, r.key, r.value, r.active, r.applied_count, r.created_at, r.revoked_at, "
+                       "p.name AS project FROM operator_rules r LEFT JOIN projects p ON p.id = r.project_id "
+                       "ORDER BY r.id DESC LIMIT 200")
+
+    @app.post("/api/monitoring/rules/{rid}/{action}")
+    def mon_rule_act(rid: int, action: Literal["revoke", "restore"], u: dict = Depends(super_admin)):
+        if not store.get("operator_rules", rid):
+            raise HTTPException(404, "Правило не найдено.")
+        (pipe.memory.revoke if action == "revoke" else pipe.memory.restore)(rid)
+        return {"ok": True}
+
+    @app.get("/api/settings/thresholds")
+    def get_thresholds(u: dict = Depends(super_admin)):
+        cc = store.get_setting("card_cleanup_days")
+        return {"overdue_highlight_working_days": int(store.get_setting("overdue_highlight_working_days", None, 7) or 7),
+                "card_cleanup_days": int(cc if cc is not None else theme.get("operator.card_cleanup_days", 0) or 0),
+                "card_cleanup_source": "задан на экране" if cc is not None else "из темы"}
+
+    @app.post("/api/settings/thresholds")
+    def set_thresholds(body: ThresholdsIn, u: dict = Depends(super_admin)):
+        by = u["name"] or u["role"]
+        for k in ("overdue_highlight_working_days", "card_cleanup_days"):
+            v = getattr(body, k)
+            if v is not None:
+                old = store.get_setting(k)
+                store.set_setting(k, v, None, by)
+                if old != v:
+                    pipe.cards.open(None, "technical", f"Порог изменён: {k}", {"было": old, "стало": v, "кто": by})
+        return get_thresholds(u)
 
     app.mount("/", StaticFiles(directory=STATIC, html=True), name="static")
     return app

@@ -1,0 +1,10 @@
+{
+  "name": "meetflow",
+  "version": "1.0.0",
+  "description": "Запись рабочей встречи — в протокол и реестр поручений: модель предлагает, код сверяет с текстом встречи и командой, спорное уходит человеку карточкой. Веб-приложение, движок без веба, маршруты моделей с резервом, защита от реплик к самой системе.",
+  "author": {
+    "name": "MilaTal"
+  },
+  "license": "MIT",
+  "keywords": ["meeting-minutes", "action-items", "task-registry", "llm", "transcript", "human-in-the-loop", "local-llm"]
+}

@@ -389,5 +389,6 @@ def test_models_is_a_left_menu_item():
     static = Path(lr.__file__).resolve().parents[1] / "web" / "static"
     js, html = (static / "app.js").read_text(encoding="utf-8"), (static / "index.html").read_text(encoding="utf-8")
     assert '<a href="#models" data-route="models">Модели</a>' in html
-    assert 'async models() { return routes.monitoring("models", true); }' in js
-    assert 'if (tab === "models" && !solo) { location.replace("#models"); return; }' in js
+    # 11.10.26: общий рендер принимает заголовок; прежний «Мониторинг» ведёт на «Модели» или «Мониторинг RealTime»
+    assert 'async models() { return routes.monitoring("models", true, "Модели"); }' in js
+    assert 'location.replace(tab === "models" ? "#models" : "#live")' in js

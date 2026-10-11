@@ -37,9 +37,25 @@ def main(argv: list[str] | None = None) -> int:
     s.add_argument("--port", type=int, default=8002); s.add_argument("--host", default="127.0.0.1")
     r = sub.add_parser("routes"); r.add_argument("action", choices=("show", "use", "check"))
     r.add_argument("role", nargs="?"); r.add_argument("point", nargs="?")
+    sp = sub.add_parser("set-password", help="учётная запись для входа по паролю; пароль спрашивается скрыто")
+    sp.add_argument("--login", required=True); sp.add_argument("--name", default="")
+    sp.add_argument("--role", default="super_admin"); sp.add_argument("--db", default="data/meetflow.db")
     a = ap.parse_args(argv)
 
-    if a.cmd == "themes":
+    if a.cmd == "set-password":
+        import getpass
+        from .core.accounts import Accounts, AuthError
+        pw = getpass.getpass("Пароль (не отображается): ")
+        if pw != getpass.getpass("Повторите пароль: "):
+            print("Пароли не совпадают.", file=sys.stderr)
+            return 2
+        try:
+            acc = Accounts(Store(a.db)).save(a.login, a.name, a.role, pw)
+        except AuthError as e:
+            print(str(e), file=sys.stderr)
+            return 2
+        print(f"Учётная запись {acc['login']} ({acc['role']}) сохранена.")
+    elif a.cmd == "themes":
         print("\n".join(list_themes()))
     elif a.cmd == "todo":
         th = load_theme(a.theme)

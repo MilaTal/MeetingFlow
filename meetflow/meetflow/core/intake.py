@@ -16,13 +16,16 @@
 """
 from __future__ import annotations
 
+import os
 import threading
 import time
+from datetime import datetime
 from pathlib import Path
 from typing import Any
 
 from ..connectors.base import ConnectorError
-from ..connectors.watch_folder import DONE_DIR, MARKER, FolderIntake, check_folder_path
+from ..connectors.watch_folder import (DONE_DIR, MARKER, SKIP_WORDS, STOPPED_DIR, FolderIntake, check_folder_path,
+                                       single_date)
 from .store import now
 
 HINT_FILE = "ЧТО СЮДА КЛАСТЬ.md"
@@ -31,13 +34,17 @@ HINT_TEXT = ("# Папка-приёмник встреч\n\nСюда кладу�
              "Файл без даты остаётся на месте, о нём придёт сообщение.\n")
 DEFAULT_INTERVAL = 900
 MIN_INTERVAL = 30
+BIG_FIRST_PASS = int(os.environ.get("MEETFLOW_WATCH_BIG_FIRST_PASS", "25"))
 
 
 class IntakeError(ValueError):
     """Отказ в настройке — текст для человека."""
 
 
-def validate_folder(path_text: str, repeat: str, app_dir: Path | None = None, home: Path | None = None) -> Path:
+def validate_folder(path_text: str, repeat: str, app_dir: Path | None = None, home: Path | None = None,
+                    sign: bool = True) -> Path:
+    """Проверка адреса. sign=False — только проверка, без записи в папку: подпись (метка и памятка) кладётся,
+    когда смена подтверждена паролем, а не на шаге предпросмотра (11.10.26)."""
     path_text, repeat = (path_text or "").strip().strip('"'), (repeat or "").strip().strip('"')
     if path_text != repeat:
         raise IntakeError("Адрес и его повтор не совпадают — проверьте опечатку.")
@@ -58,10 +65,29 @@ def validate_folder(path_text: str, repeat: str, app_dir: Path | None = None, ho
         check_folder_path(p, home=home)
     except ConnectorError as e:
         raise IntakeError(str(e)) from None
+    if sign:
+        sign_folder(p)
+    return p
+
+
+def sign_folder(p: Path) -> None:
     if not any(p.iterdir()):  # пустая — подписываем как приёмник
         (p / MARKER).write_text("Эта папка назначена приёмником встреч MeetFlow.\n", encoding="utf-8")
         (p / HINT_FILE).write_text(HINT_TEXT, encoding="utf-8")
-    return p
+
+
+def preview_folder(p: Path) -> dict[str, Any]:
+    """Что лежит в папке и что заберёт первый проход — до смены адреса (как в Планёрке и ERP с 07.10.26)."""
+    files, take, no_date = [], [], []
+    for f in sorted(p.rglob("*")):
+        parts = f.relative_to(p).parts
+        if (not f.is_file() or DONE_DIR in parts or STOPPED_DIR in parts or f.name in (MARKER, HINT_FILE)
+                or f.suffix.lower() == ".md" or any(w in f.name.lower() for w in SKIP_WORDS)):
+            continue
+        files.append(f.name)
+        (take if (single_date(f.name) or single_date(f.parent.name)) else no_date).append(f.name)
+    return {"files": len(files), "first_pass": len(take), "examples": take[:5], "no_date": no_date[:5],
+            "big": len(take) > BIG_FIRST_PASS, "big_limit": BIG_FIRST_PASS}
 
 
 class IntakeService:
@@ -92,7 +118,17 @@ class IntakeService:
                              {"было": old, "стало": str(path) if path else None, "кто": by})
 
     def interval(self, project_id: int) -> int:
-        return int(self.s.get_setting("watch_interval", project_id, self.interval_default))
+        return self.interval_info(project_id)[0]
+
+    def interval_info(self, project_id: int) -> tuple[int, str]:
+        """Частота обхода и откуда она взята: экран → переменная MEETFLOW_WATCH_INTERVAL_SEC → умолчание."""
+        v = self.s.get_setting("watch_interval", project_id)
+        if v is not None:
+            return int(v), "задана на экране"
+        env = os.environ.get("MEETFLOW_WATCH_INTERVAL_SEC", "").strip()
+        if env.isdigit() and int(env) >= MIN_INTERVAL:
+            return int(env), "из переменной MEETFLOW_WATCH_INTERVAL_SEC"
+        return self.interval_default, "по умолчанию"
 
     # ------------------------------------------------------------ проход
     def scan_project(self, project_id: int, today=None) -> dict[str, Any]:
@@ -163,9 +199,18 @@ class IntakeService:
     def state(self, project_id: int) -> dict[str, Any]:
         path = self.folder(project_id)
         last = self.s.get_setting("watch_last_scan", project_id)
-        info = {"folder": path, "interval": self.interval(project_id), "worker": self.running,
+        iv, iv_src = self.interval_info(project_id)
+        info = {"folder": path, "interval": iv, "interval_source": iv_src, "worker": self.running,
                 "last_scan": last, "last_useful_scan": self.s.get_setting("watch_last_useful_scan", project_id),
                 "autorun": bool(self.s.get_setting("autorun", project_id, False))}
+        # поток жив, а проходов нет дольше трёх интервалов — «завис» (как в ERP)
+        info["stalled"] = False
+        if path and self.running and last and last.get("at"):
+            try:
+                age = (datetime.now() - datetime.fromisoformat(last["at"])).total_seconds()
+                info["stalled"] = age > 3 * iv
+            except ValueError:
+                pass
         if path:
             p = Path(path)
             info["exists"] = p.is_dir()

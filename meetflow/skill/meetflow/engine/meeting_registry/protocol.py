@@ -37,6 +37,11 @@ def render(meeting_date: str, title: str, new_tasks: list, closures: list, held_
     out = [f"# Протокол совещания {_d(meeting_date)}", ""]
     if title:
         out += [title, ""]
+    addressed = notes.get("addressed") or []
+    if addressed:   # не отказ, а факт встречи: реплики к самой системе в разбор не взяты
+        nums = ", ".join(str(n) for n in addressed[:10]) + ("…" if len(addressed) > 10 else "")
+        out += [f"В записи {len(addressed)} реплик(и) обращены к самой системе, а не к участникам (строки {nums}); "
+                "в разбор не взяты, переданы оператору.", ""]
     if degraded:
         # это не служебная пометка, а свойство документа, которое должен знать читатель
         out += ["Протокол собран без языковой модели, по правилам. Возможны пропущенные поручения.", ""]

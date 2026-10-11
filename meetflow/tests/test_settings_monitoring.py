@@ -18,6 +18,7 @@ from meetflow.core.runs_report import runs_report
 from meetflow.web.app import create_app
 
 SUPER = {"X-User-Role": "super_admin", "X-User-Name": "admin"}
+PASSWORD = "пароль-для-теста"   # тестовое значение учётной записи стенда, не настоящий пароль
 ADMIN = {"X-User-Role": "project_admin"}
 
 
@@ -25,14 +26,22 @@ ADMIN = {"X-User-Role": "project_admin"}
 def client(tmp_path):
     app = create_app("erp_rollout", str(tmp_path / "t.db"), str(tmp_path / "j.jsonl"), watch=False)
     c = TestClient(app, raise_server_exceptions=False)
+    app.state.accounts.save("admin", "Админ", "super_admin", PASSWORD)   # смена папки — по паролю (11.10.26)
     c.pid = c.post("/api/projects", json={"name": "Пилот"}, headers=SUPER).json()["id"]
     for n in TEAM:
         c.post(f"/api/projects/{c.pid}/people", json={"full_name": n}, headers=SUPER)
     return c
 
 
-def _wf(c, a, b=None, h=SUPER, pid=None):
-    return c.post(f"/api/projects/{pid or c.pid}/settings/watch-folder", json={"path": str(a), "path_repeat": str(a if b is None else b)}, headers=h)
+def _wf(c, a, b=None, h=SUPER, pid=None, password=PASSWORD):
+    """Перевёрнут 11.10.26 (владелец: «как в ERP»): смена папки — два шага, второй по паролю супер-администратора.
+    Было: один запрос сразу менял папку, и только с машины сервера."""
+    url = f"/api/projects/{pid or c.pid}/settings/watch-folder"
+    body = {"path": str(a), "path_repeat": str(a if b is None else b)}
+    r = c.post(url, json=body, headers=h)
+    if r.status_code != 200 or not r.json().get("confirm_needed"):
+        return r
+    return c.post(url, json={**body, "confirm": True, "login": "admin", "current_password": password}, headers=h)
 
 
 # ---------------------------------------------------------------- адрес папки
@@ -114,8 +123,11 @@ def test_one_folder_per_project(client, tmp_path):
     assert r.status_code == 422 and "другого проекта" in r.json()["detail"]
 
 
-def test_remote_client_cannot_change_path(tmp_path):
+def test_remote_client_changes_path_only_with_password(tmp_path):
+    """Перевёрнут 11.10.26: было «адрес меняется только с компьютера сервера», стало — с любого адреса, но по паролю
+    супер-администратора, как в Планёрке и ERP с 07.10.26."""
     app = create_app("erp_rollout", str(tmp_path / "t.db"), str(tmp_path / "j.jsonl"), watch=False)
+    app.state.accounts.save("admin", "Админ", "super_admin", PASSWORD)
 
     async def remote(scope, receive, send):  # запрос как будто с другого компьютера сети
         if scope["type"] == "http":
@@ -126,8 +138,41 @@ def test_remote_client_cannot_change_path(tmp_path):
     pid = c.post("/api/projects", json={"name": "П"}, headers=SUPER).json()["id"]
     d = tmp_path / "in"
     d.mkdir()
-    r = c.post(f"/api/projects/{pid}/settings/watch-folder", json={"path": str(d), "path_repeat": str(d)}, headers=SUPER)
-    assert r.status_code == 403 and "компьютера" in r.json()["detail"]
+    url, body = f"/api/projects/{pid}/settings/watch-folder", {"path": str(d), "path_repeat": str(d)}
+    assert c.post(url, json=body, headers=SUPER).json()["confirm_needed"]
+    bad = c.post(url, json={**body, "confirm": True, "login": "admin", "current_password": "не тот"}, headers=SUPER)
+    assert bad.status_code == 403 and "Неверный" in bad.json()["detail"]
+    ok = c.post(url, json={**body, "confirm": True, "login": "admin", "current_password": PASSWORD}, headers=SUPER)
+    assert ok.status_code == 200 and ok.json()["folder"] == str(d)
+
+
+def test_first_step_changes_nothing_and_previews(client, tmp_path):
+    """Шаг 1 — только вопрос и предпросмотр: папка не меняется и не подписывается до пароля."""
+    d = tmp_path / "in"
+    d.mkdir()
+    (d / MARKER).write_text("метка", encoding="utf-8")
+    (d / "Встреча 01.10.2026.txt").write_text(TRANSCRIPT, encoding="utf-8")
+    (d / "без даты.txt").write_text("x", encoding="utf-8")
+    url = f"/api/projects/{client.pid}/settings/watch-folder"
+    r = client.post(url, json={"path": str(d), "path_repeat": str(d)}, headers=SUPER).json()
+    assert r["confirm_needed"] and r["preview"]["files"] == 2 and r["preview"]["first_pass"] == 1
+    assert r["preview"]["no_date"] == ["без даты.txt"] and "первый проход заберёт 1" in r["question"]
+    assert client.get(f"/api/projects/{client.pid}/settings", headers=SUPER).json()["intake"]["folder"] is None
+    e = tmp_path / "empty"
+    e.mkdir()
+    client.post(url, json={"path": str(e), "path_repeat": str(e)}, headers=SUPER)
+    assert not (e / MARKER).exists()                       # подпись — только после пароля
+
+
+def test_no_super_admin_account_means_clear_refusal(tmp_path):
+    app = create_app("erp_rollout", str(tmp_path / "t.db"), str(tmp_path / "j.jsonl"), watch=False)
+    c = TestClient(app)
+    pid = c.post("/api/projects", json={"name": "П"}, headers=SUPER).json()["id"]
+    d = tmp_path / "in"
+    d.mkdir()
+    r = c.post(f"/api/projects/{pid}/settings/watch-folder", json={"path": str(d), "path_repeat": str(d), "confirm": True,
+               "login": "admin", "current_password": "x"}, headers=SUPER)
+    assert r.status_code == 400 and "учётную запись супер-администратора" in r.json()["detail"]
 
 
 def test_interval_bounds(client):
@@ -278,7 +323,8 @@ def test_voice_base_contract_violation(tmp_path):
 def test_voice_base_via_settings_and_monitoring(client, tmp_path):
     db = tmp_path / "voices.db"
     _voice_db(db)
-    r = client.post("/api/settings/voice-base", json={"path": str(db), "path_repeat": str(db)}, headers=SUPER)
+    pw = {"login": "admin", "current_password": PASSWORD}     # как смена папки — по паролю (11.10.26)
+    r = client.post("/api/settings/voice-base", json={"path": str(db), "path_repeat": str(db), **pw}, headers=SUPER)
     assert r.status_code == 200 and r.json()["samples"] == 3
     assert client.get("/api/monitoring/voice-base", headers=SUPER).json()["people"] == 2
     assert client.post("/api/settings/voice-base", json={"path": "a.db", "path_repeat": "a.db"}, headers=SUPER).status_code == 422
@@ -313,12 +359,22 @@ def test_runs_monitoring_after_real_run(client):
     assert set(r["by_purpose"]) >= {"extract_tasks", "protocol", "verify"}
 
 
-def test_ui_has_tabs_and_settings_route():
+def test_ui_is_laid_out_like_erp():
+    """Перевёрнут 11.10.26 (владелец: меню и мониторинг — как в ERP): было «Мониторинг» с вкладками и экран
+    «Настройки»; стало «Параметры системы» с вкладками ERP, «Мониторинг RealTime» с папкой, обходом и автозапуском,
+    «Модели», «База голосов». Прежние адреса #settings и #monitoring ведут на новые экраны."""
     js = (Path(__file__).resolve().parents[1] / "meetflow/web/static/app.js").read_text(encoding="utf-8")
     html = (Path(__file__).resolve().parents[1] / "meetflow/web/static/index.html").read_text(encoding="utf-8")
-    for tab in ("Службы", "Приём записей", "База голосов", "Прогоны и расход", "Технические сообщения"):
-        assert tab in js
-    assert 'data-route="settings"' in html and "async settings()" in js
+    for route, label in (("system", "Параметры системы"), ("live", "Мониторинг RealTime"), ("models", "Модели"),
+                         ("voices", "База голосов")):
+        assert f'data-route="{route}">{label}' in html
+    assert 'data-route="settings"' not in html and 'data-route="monitoring"' not in html
+    for tab in ("Прогоны", "Расход", "Реестр решений", "Состояние базы", "Диск и доступы", "Системные сообщения",
+                "Ожидает ввода от оператора", "Пороги"):
+        assert f'"{tab}"' in js
+    for el in ('id="wf-save"', 'id="wf-int-save"', 'id="ar-toggle"', "Автозапуск Протокола", "Обход папки, секунд:"):
+        assert el in js
+    assert 'async settings() { location.replace("#live"); }' in js
 
 
 def test_same_text_with_crlf_is_duplicate(tmp_path):
