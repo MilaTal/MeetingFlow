@@ -37,6 +37,16 @@ class TaskRegistry:
         self._history(tid, None, TaskStatus.ACTIVE.value, "meeting" if meeting_id else "web_form", quote)
         return tid
 
+    def set_due(self, task_id: int, due: str | None, by: str = "", note: str = "") -> None:
+        """Срок по решению в карточке «срок под вопросом» (владелец 12.10.26, как в Планёрке) — с записью в историю."""
+        with self.s.tx():
+            t = self.s.get("tasks", task_id)
+            if not t:
+                raise KeyError(task_id)
+            self.s.update("tasks", task_id, due_date=due)
+            self._history(task_id, t["status"], t["status"], "operator",
+                          f"срок: {due or 'без срока'}" + (f" ({note})" if note else ""), by)
+
     def set_assignee(self, task_id: int, assignee: str, by: str = "", note: str = "") -> None:
         """Исполнитель в уже заведённую задачу — по выбору в карточке «кто из них» / «тот же или
         новый» (письмо 30: выбор ставит исполнителя в ту же задачу, новую не заводит)."""

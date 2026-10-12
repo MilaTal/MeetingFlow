@@ -35,7 +35,7 @@ from .negation import NegationRule
 from .people import Team
 from .prompts import PromptBuilder, chunks, parse_json, profile
 from .registry import CardQueue, OperatorMemory, TaskRegistry
-from .dates import lenient_date
+from .dates import due_text, lenient_date
 from .draft_checks import run_code_checks
 from .morph import supported_due
 from .guard import classify, filter_text, line_verdict
@@ -229,7 +229,7 @@ class MeetingPipeline:
         if dup:
             return {"status": "duplicate", "source_id": dup[0]["id"]}
         sid = self.s.insert("sources", meeting_id=meeting_id, name=doc.name, kind=doc.kind.value, text=doc.text,
-                            digest=doc.content_digest, created_at=now())
+                            digest=doc.content_digest, created_at=now(), local_asr=int(isinstance(c, ASRConnector)))
         media = doc.meta.get("media_path")
         if media and not doc.meta.get("keep_media"):
             try:  # запись удаляется только после сохранения расшифровки
@@ -316,6 +316,7 @@ class MeetingPipeline:
         gate = TaskGate(team, self.neg, GateConfig(**self.theme.get("gates", {})))
 
         planned: list[tuple[TaskDraft, Any]] = []
+        due_unconfirmed: dict[int, str] = {}     # id черновика → срок модели, не прозвучавший рядом (12.10.26)
         held: list[tuple[TaskDraft, list[str], str]] = []
         closings: list[tuple[int, str]] = []
         closing_cards: list = []          # (задача, цитата, почему[, описание])
@@ -383,9 +384,11 @@ class MeetingPipeline:
                     continue  # повторный прогон той же встречи: эта задача уже заведена
                 if d.due_date:            # срок — только если прозвучал рядом с цитатой (01/6)
                     said = supported_due(d.due_date, self._window(source.lines, g.quote or d.quote), meeting.get("date"))
-                    if said is None:
-                        rep.due_dropped += 1
+                    proposed = d.due_date
                     d = replace(d, due_date=said)
+                    if said is None:      # не молча: задача без срока и карточка, как в Планёрке (владелец 12.10.26)
+                        rep.due_dropped += 1
+                        due_unconfirmed[id(d)] = proposed
                 if g.accepted:
                     planned.append((d, g))
                     existing.append((g.description, who))
@@ -536,6 +539,8 @@ class MeetingPipeline:
                         who, np_id, np_new = new_person(pend["name"])
                     tid = self.reg.add(project_id, g.description, who, meeting_id, g.quote, d.due_date, mdate)
                     added.append((tid, d, g))
+                    if id(d) in due_unconfirmed:
+                        self._due_card(project_id, meeting_id, tid, g, due_unconfirmed[id(d)], mdate)
                     if pend.get("reason") == "new_person":
                         if np_new:
                             self.cards.open(project_id, "confirm_person",
@@ -729,6 +734,21 @@ class MeetingPipeline:
         return rep
 
     # ---------------------------------------------------------------- помощники
+    def _due_card(self, project_id: int, meeting_id: int, task_id: int, g, proposed: str, mdate: str | None) -> None:
+        """Карточка «срок под вопросом» — те же текст и поля, что в Планёрке (92498b5): задача заведена без срока,
+        предложенный моделью срок — на решение. «Подтвердить» ставит его в задачу."""
+        md = lenient_date(mdate)
+        word = self.theme.get("vocabulary.meeting", "Встреча")
+        when = f"{md:%d.%m.%y}" if md else ""
+        iso = lenient_date(proposed)
+        evidence = (f"{word} {when}. Модель предложила срок {proposed}, но рядом с поручением в записи он не прозвучал "
+                    "— задача заведена без срока." + (f" Цитата: «{(g.quote or '')[:300]}»" if g.quote else ""))[:2000]
+        self.cards.open(project_id, "due_unconfirmed", f"Срок под вопросом: {g.description[:100]}",
+                        {"task_id": task_id, "field": "due_date", "current_value": None,
+                         "proposed_value": iso.isoformat() if iso else None, "proposed_text": proposed,
+                         "source": "due_unconfirmed", "confidence": "low", "evidence_quote": evidence,
+                         "quote": g.quote}, meeting_id)
+
     @staticmethod
     def _window(lines: list[str], quote: str) -> str:
         """Цитата и соседние строки — где должен прозвучать срок."""
@@ -805,7 +825,7 @@ class MeetingPipeline:
                 # (письмо 39, находка Планёрки 692d05d — таблица собиралась раньше последнего решения)
                 t = self.s.get("tasks", tid) or {}
                 who = t.get("assignee") or th.word("unassigned")
-                due = t.get("due_date") or "—"
+                due = due_text(t.get("due_date"), t.get("date_set")) or "—"     # «сегодня (дата)» — владелец 12.10.26
                 out.append(f"| {i} | {_cell(t.get('description') or g.description)} | {_cell(who)} | {_cell(due)} |")
         else:
             out.append(th.word("no_new_tasks"))

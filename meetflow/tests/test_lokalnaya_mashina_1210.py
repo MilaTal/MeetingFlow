@@ -1,0 +1,141 @@
+# -*- coding: utf-8 -*-
+"""Правки локальной машины от 12.10.26 (коммит a9c07eb в ERP_Production_meetings), перенесённые в MeetFlow там, где они
+к нему относятся: смена модели на ближайшей попытке, подхват после перезапуска, поиск убран со страницы реестра,
+выгрузка локально распознанной расшифровки в Word. «Протокол последнего распознавания» и счёт отпечатков не
+переносились: своей базы голосов и разбора по голосам у MeetFlow нет, он только читает общую базу."""
+import json
+import os
+import time
+from pathlib import Path
+
+import pytest
+from fastapi.testclient import TestClient
+
+from meetflow.connectors import llm_routes as lr
+from meetflow.connectors.base import ConnectorUnavailable, LLMConnector
+from meetflow.core.types import LLMResult
+
+JS = Path(__file__).resolve().parents[1] / "meetflow" / "web" / "static" / "app.js"
+
+
+class Fake(LLMConnector):
+    def __init__(self, name, on_call):
+        self.name, self.model, self.profile, self.on_call = name, f"model-{name}", "generic", on_call
+        self.context_chars = 100_000
+
+    def worst_call_usd(self, prompt_chars):
+        return None
+
+    def complete(self, system, user, **kw):
+        return self.on_call(self.name)
+
+
+def _routes(path, chain):
+    path.write_text(json.dumps({
+        "endpoints": {"main": {"kind": "openai", "url": "http://main", "model": "m"},
+                      "spare": {"kind": "openrouter", "model": "s"},
+                      "fresh": {"kind": "ollama", "url": "http://localhost:11434", "model": "f"}},
+        "roles": {"generate": chain, "verify": ["fresh"]}, "cooldown_sec": 300}), encoding="utf-8")
+    t = time.time() + 5
+    os.utime(path, (t, t))          # mtime заведомо новый — перечитывание не зависит от точности часов файловой системы
+
+
+def test_смена_модели_подхватывается_на_следующей_попытке_того_же_вызова(tmp_path, monkeypatch):
+    path = tmp_path / "models.json"
+    _routes(path, ["main", "spare"])
+    monkeypatch.setenv("MODEL_ROUTES_PATH", str(path))
+    monkeypatch.setattr(lr.RoutedLLM, "_down_until", {})
+    calls = []
+
+    def on_call(name):
+        calls.append(name)
+        if name == "main":                     # пока главная думала, оператор переключил роль на «fresh»
+            _routes(path, ["fresh", "main"])
+            raise ConnectorUnavailable("main не отвечает")
+        return LLMResult(f"ответ {name}", name, raw={})
+
+    llm = lr.RoutedLLM("generator", factory=lambda n, ep: Fake(n, on_call))
+    assert llm.complete("s", "u").text == "ответ fresh"
+    assert calls == ["main", "fresh"]          # провалившаяся main не повторяется, spare старой цепочки не вызывается
+
+
+def test_одна_точка_в_цепочке_прежнее_поведение(tmp_path, monkeypatch):
+    path = tmp_path / "models.json"
+    _routes(path, ["main"])
+    monkeypatch.setenv("MODEL_ROUTES_PATH", str(path))
+    monkeypatch.setattr(lr.RoutedLLM, "_down_until", {})
+    calls = []
+
+    def on_call(name):
+        calls.append(name)
+        raise ConnectorUnavailable("нет")
+
+    with pytest.raises(ConnectorUnavailable):
+        lr.RoutedLLM("generator", factory=lambda n, ep: Fake(n, on_call)).complete("s", "u")
+    assert calls == ["main"]
+
+
+def _app(tmp_path):
+    from meetflow.web.app import create_app
+    app = create_app("erp_rollout", str(tmp_path / "t.db"), str(tmp_path / "j.jsonl"), watch=False)
+    return app, TestClient(app), {"X-User-Role": "project_admin"}
+
+
+def test_подхват_после_перезапуска(tmp_path, monkeypatch):
+    app, c, H = _app(tmp_path)
+    intake, store = app.state.intake, app.state.pipe.s
+    started = []
+    monkeypatch.setattr(app.state.pipe, "run", lambda pid, mid: started.append(mid))
+    pid = c.post("/api/projects", json={"name": "П"}, headers=H).json()["id"]
+    mids = []
+    for d in ("2026-10-01", "2026-10-02", "2026-10-05", "2026-10-06"):
+        mid = c.post(f"/api/projects/{pid}/meetings", json={"date": d}, headers=H).json()["id"]
+        store.insert("sources", meeting_id=mid, name="t.txt", kind="transcript", text="[00:01:00] А: текст", digest=d)
+        mids.append(mid)
+    store.update("meetings", mids[0], protocol_md="# готово")          # с протоколом — не трогаем
+    store.set_setting("autorun", True, pid)
+    out = intake.resume_after_restart(limit=2)
+    time.sleep(0.2)
+    assert sorted(started) == sorted(mids[2:])                         # сначала свежие, не больше двух
+    assert [o["status"] for o in out] == ["started", "started", "deferred"]
+    titles = [r["title"] for r in store.q("SELECT title FROM cards WHERE kind='technical'")]
+    assert any("продолжаю сборку" in t for t in titles) and any("следующем старте" in t for t in titles)
+
+
+def test_подхват_при_выключенном_автозапуске_только_сообщение(tmp_path, monkeypatch):
+    app, c, H = _app(tmp_path)
+    store = app.state.pipe.s
+    started = []
+    monkeypatch.setattr(app.state.pipe, "run", lambda pid, mid: started.append(mid))
+    pid = c.post("/api/projects", json={"name": "П"}, headers=H).json()["id"]
+    mid = c.post(f"/api/projects/{pid}/meetings", json={"date": "2026-10-05"}, headers=H).json()["id"]
+    store.insert("sources", meeting_id=mid, name="t.txt", kind="transcript", text="[00:01:00] А: текст", digest="x")
+    assert app.state.intake.resume_after_restart()[0]["status"] == "skipped" and not started
+
+
+def test_поиска_нет_на_странице_реестра():
+    js = JS.read_text(encoding="utf-8")
+    start = js.index("  async tasks() {")
+    body = js[start:js.index("\n  async ", start + 10)]
+    assert "reg-search" not in body and "data-rhint" not in body and "/search?q=" not in body
+    assert "trs.slice(1, 8)" in body                                    # предел 7 строк остаётся (09.10.26)
+
+
+def test_выгрузка_расшифровки_только_нашего_распознавания(tmp_path):
+    app, c, H = _app(tmp_path)
+    store = app.state.pipe.s
+    pid = c.post("/api/projects", json={"name": "П"}, headers=H).json()["id"]
+    mid = c.post(f"/api/projects/{pid}/meetings", json={"date": "2026-10-05"}, headers=H).json()["id"]
+    ours = store.insert("sources", meeting_id=mid, name="запись.mp4", kind="transcript", digest="a", local_asr=1,
+                        text="00:00:05\tИгнатов Иван\tДобрый день\n00:00:09\tПетрова Анна\tНачнём")
+    theirs = store.insert("sources", meeting_id=mid, name="t.txt", kind="transcript", digest="b", text="x")
+    r = c.get(f"/api/meetings/{mid}/sources/{ours}/export", headers=H)
+    assert r.status_code == 200 and r.content[:2] == b"PK"
+    from docx import Document
+    import io
+    text = "\n".join(p.text for p in Document(io.BytesIO(r.content)).paragraphs)
+    assert "05.10.2026" in text and "00:00:05 Игнатов Иван: Добрый день" in text and "*" not in text
+    assert c.get(f"/api/meetings/{mid}/sources/{theirs}/export", headers=H).status_code == 400
+    assert c.get(f"/api/meetings/{mid + 99}/sources/{ours}/export", headers=H).status_code == 404
+    srcs = c.get(f"/api/meetings/{mid}/sources", headers=H).json()
+    assert {s["id"]: s["local_asr"] for s in srcs} == {ours: 1, theirs: 0}

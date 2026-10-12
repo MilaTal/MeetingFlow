@@ -196,6 +196,39 @@ class IntakeService:
             return rows[0]["id"]
         return self.s.insert("meetings", project_id=project_id, date=iso_date, label="из папки-приёмника")
 
+    def resume_after_restart(self, limit: int = 3) -> list[dict[str, Any]]:
+        """Подхват работы, оборванной остановкой сервера (локальная машина 12.10.26, зеркально с ERP и Планёркой).
+
+        Прогон жил в памяти процесса и исчезал вместе с ним: у встречи есть источник, протокола нет, и никто его
+        не продолжает — автозапуск срабатывает только на новый файл. На старте ищем такие встречи в проектах с
+        включённым автозапуском и запускаем их тем же путём, что автозапуск; про каждую — системное сообщение,
+        и когда продолжаем, и когда нет. За раз — не больше `limit` (сначала свежие), про остальные — сообщение.
+        Контрольных точек в MeetFlow нет, поэтому прогон идёт заново; выключатель — MEETFLOW_RESUME_ON_START."""
+        out: list[dict[str, Any]] = []
+        rows = self.s.q("SELECT m.id, m.project_id, m.date FROM meetings m WHERE (m.protocol_md IS NULL OR m.protocol_md='') "
+                        "AND EXISTS (SELECT 1 FROM sources s WHERE s.meeting_id=m.id AND s.removed_at IS NULL "
+                        "AND s.kind IN ('transcript','notes')) ORDER BY m.date DESC, m.id DESC")
+        started = 0
+        for r in rows:
+            pid, mid = r["project_id"], r["id"]
+            if not self.s.get_setting("autorun", pid, False):
+                self.pipe.cards.open(pid, "technical", f"Встреча {r['date']}: источник есть, протокола нет",
+                                     {"why": "автозапуск выключен — сформируйте протокол кнопкой"}, mid)
+                out.append({"meeting_id": mid, "status": "skipped", "why": "autorun off"})
+                continue
+            if started >= limit:
+                self.pipe.cards.open(pid, "technical", f"Встреча {r['date']}: продолжу на следующем старте",
+                                     {"why": f"за раз подхватывается не больше {limit} встреч"}, mid)
+                out.append({"meeting_id": mid, "status": "deferred"})
+                continue
+            started += 1
+            self.pipe.cards.open(pid, "technical", f"Встреча {r['date']}: продолжаю сборку после перезапуска",
+                                 {"why": "источник есть, протокола нет; прогон идёт заново, нажимать ничего не нужно"},
+                                 mid)
+            threading.Thread(target=self.pipe.run, args=(pid, mid), daemon=True).start()
+            out.append({"meeting_id": mid, "status": "started"})
+        return out
+
     def state(self, project_id: int) -> dict[str, Any]:
         path = self.folder(project_id)
         last = self.s.get_setting("watch_last_scan", project_id)

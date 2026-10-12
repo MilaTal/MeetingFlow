@@ -69,32 +69,20 @@ const routes = {
         const can = isAdmin() || S.role === "director" || mine;
         return `<tr><td class="no" title="Внутренний номер: ${esc(t.id)}">${esc(t.no)}<small>${fmtDate(t.date_set)}</small></td>
           <td>${esc(t.description)}${t.source_quote ? `<span class="sub">«${esc(t.source_quote.slice(0, 160))}»</span>` : ""}</td>
-          <td>${esc(t.assignee || "Не назначен")}</td><td${t.overdue ? ' class="overdue" title="Просрочено: порог в «Параметры системы → Пороги»"' : ""}>${esc(t.due_date || "—")}</td><td>${esc(t.last_comment || "")}</td>
+          <td>${esc(t.assignee || "Не назначен")}</td><td${t.overdue ? ' class="overdue" title="Просрочено: порог в «Параметры системы → Пороги»"' : ""}>${esc(t.due_text || t.due_date || "—")}</td><td>${esc(t.last_comment || "")}</td>
           <td>${can && view === "active" ? `<button class="btn" data-done="${t.id}">Выполнено</button>` : ""}
               ${can && view !== "active" ? `<button class="btn btn-ghost" data-back="${t.id}">Вернуть</button>` : ""}</td></tr>`;
       }).join("")}</table></div>` : `<p class="empty">Задач нет.</p>`;
-    // поиск по реестру — прямо на экране реестра, как в Проекте ERP и Планёрке (локальная машина, 09.10.26)
-    const hints = ["задачи с ответственным (ФИО)", "в этой задаче есть о ...", "было ли упомянуто", "протокол встречи от", "информация о"];
-    $("#main").innerHTML = `<h1>${esc(S.theme.vocabulary.nav_tasks || S.theme.vocabulary.registry)}</h1><div class="row" style="margin-bottom:16px">${tabs}</div><div class="card-output">${body}</div>
-      <div class="card stack" id="reg-search"><div class="row"><input id="rq" style="flex:1;min-width:240px" placeholder="Поиск по реестру: слово, ФИО или дата встречи">
-      <button class="btn btn-primary" id="rgo">Найти</button></div>
-      <div class="row">${hints.map((h) => `<button class="btn btn-ghost" data-rhint="${esc(h.replace(/\s*\(.*\)|\.{2,}/g, ""))}">${esc(h)}</button>`).join("")}</div><div id="rres"></div></div>`;
-    // в таблице — до 7 строк: высота рамки считается от низа окна минус блок поиска, а не фиксированная
+    // поиска на странице реестра нет — решение владельца 12.10.26 (убран из ERP и Планёрки); страница «Поиск» работает
+    $("#main").innerHTML = `<h1>${esc(S.theme.vocabulary.nav_tasks || S.theme.vocabulary.registry)}</h1><div class="row" style="margin-bottom:16px">${tabs}</div><div class="card-output">${body}</div>`;
+    // в таблице — до 7 строк (решение 09.10.26): высота рамки считается от низа окна
     const fitRows = () => { const fr = $("#tasks-frame"); if (!fr) return;
       const trs = [...fr.querySelectorAll("tr")]; if (trs.length < 2) return;
       const head = trs[0].offsetHeight, rowsH = trs.slice(1, 8).reduce((a, r) => a + r.offsetHeight, 0);
-      const room = window.innerHeight - fr.getBoundingClientRect().top - ($("#reg-search").offsetHeight + 36);
+      const room = window.innerHeight - fr.getBoundingClientRect().top - 36;
       const minH = head + trs.slice(1, 5).reduce((a, r) => a + r.offsetHeight, 0);
       fr.style.maxHeight = Math.max(minH, Math.min(head + rowsH, room)) + "px"; fr.style.overflowY = "auto"; };
     fitRows(); window.onresize = fitRows;
-    const rrun = async () => { const v = $("#rq").value.trim(); if (!v) { $("#rres").innerHTML = ""; return; }
-      const r = await api(`/api/projects/${S.project}/search?q=${encodeURIComponent(v)}`);
-      const kind = { protocol: "протокол", source: "источник", task: "задача", unit: "из записи" };
-      $("#rres").innerHTML = r.problem ? `<p class="empty">${esc(r.problem)}</p>` : !r.results.length ? '<p class="empty">Ничего не найдено. Проверьте написание или попробуйте другое слово.</p>'
-        : `<p class="sub">Найдено: ${esc(r.total)}</p>${r.results.map((x) => `<div class="note"><span class="badge">${esc(kind[x.type] || x.type)}</span> <span class="meta">${fmtDate(x.meeting_date)}</span> ${x.type !== "task" ? `<a href="#meeting/${esc(x.id)}">открыть встречу</a>` : ""}<q>${esc(x.snippet)}</q></div>`).join("")}`;
-      fitRows(); };
-    $("#rgo").onclick = rrun; $("#rq").onkeydown = (e) => { if (e.key === "Enter") rrun(); };
-    $("#main").querySelectorAll("[data-rhint]").forEach((b) => b.onclick = () => { $("#rq").value = b.dataset.rhint + " "; $("#rq").focus(); });
     $("#main").querySelectorAll("[data-view]").forEach((b) => b.onclick = () => { store.set("tasks-view", b.dataset.view); render(); });
     $("#main").querySelectorAll("[data-done]").forEach((b) => b.onclick = () => undoable(b, b.dataset.done, "done"));
     $("#main").querySelectorAll("[data-back]").forEach((b) => b.onclick = async () => { await api(`/api/tasks/${b.dataset.back}`, { method: "PATCH", json: { status: "active" } }); render(); });
@@ -151,7 +139,7 @@ const routes = {
     $("#main").innerHTML = `<p><a href="#meetings">← ${esc(S.theme.vocabulary.meetings)}</a></p>
       <h1>${esc(S.theme.vocabulary.protocol)}</h1>
       <div class="card stack"><div class="dropzone" id="drop">Перетащите файлы встречи сюда или <label style="text-decoration:underline;cursor:pointer">выберите<input type="file" id="file" multiple hidden></label></div>
-      ${srcs.length ? `<div>${srcs.map((s) => `<span class="badge">${esc({ transcript: "расшифровка", notes: "заметки", other: "материал" }[s.kind] || s.kind)}</span> ${esc(s.name)}`).join("<br>")}</div>` : ""}
+      ${srcs.length ? `<div>${srcs.map((s) => `<span class="badge">${esc({ transcript: "расшифровка", notes: "заметки", other: "материал" }[s.kind] || s.kind)}</span> ${esc(s.name)}${s.local_asr ? ` <a class="btn-link" href="/api/meetings/${encodeURIComponent(id)}/sources/${encodeURIComponent(s.id)}/export" title="Расшифровка распознана здесь — выгрузить в Word">.docx</a>` : ""}`).join("<br>")}</div>` : ""}
       ${isAdmin() ? `<button class="btn btn-primary" id="run">${proto ? "Пересобрать протокол" : "Сформировать протокол"}</button>` : ""}</div>
       ${proto ? `<div class="doc-with-notes"><div><div class="row" style="justify-content:flex-end;margin-bottom:8px"><a class="btn" href="/api/meetings/${encodeURIComponent(id)}/protocol.docx">Скачать .docx</a></div>
       <article class="doc-content">${md(proto.markdown)}</article></div>
@@ -207,6 +195,10 @@ const routes = {
     const st = { done: "выполнено", dropped: "снято" };
     const body = (c) => {
       const p = c.payload;
+      // срок модели не прозвучал рядом с поручением: задача без срока, «Подтвердить» ставит предложенный (12.10.26)
+      if (c.kind === "due_unconfirmed") return `<span class="sub">${esc(p.evidence_quote || "")}</span>
+        <div class="row"><button class="btn btn-primary" data-r="${c.id}" data-s="accepted">Поставить срок ${esc(p.proposed_text || "")}</button>
+        <button class="btn btn-ghost" data-r="${c.id}" data-s="rejected">Оставить без срока</button></div>`;
       // задача уже заведена без исполнителя; выбор ставит исполнителя в неё (решение владельца 03.10.26, письмо 30)
       if (c.kind === "assign_person") return `<span class="sub">Задача уже в реестре без исполнителя. ${p.reason === "same_or_new" ? `Тот же человек или новый? Рядом: ${(p.marks || []).map(esc).join(", ")}.` : p.reason === "unknown" ? `«${esc(p.mention || "")}» нет в «Команде». Назначьте исполнителя в реестре или заведите нового.` : "Кто из них? Подсказки только упорядочивают список."}</span>
         ${(p.candidates || []).map((x) => `<div class="row"><button class="btn ${p.reason === "same_or_new" ? "btn-primary" : ""}" data-r="${c.id}" data-s="accepted" data-choice="${esc(x.id != null ? x.id : x.name)}">${p.reason === "same_or_new" ? "Это он: " : ""}${esc(x.name)}</button>

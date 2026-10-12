@@ -263,10 +263,17 @@ class RoutedLLM(LLMConnector):
     # --- вызов --------------------------------------------------------------------------------------------
     def complete(self, system: str, user: str, *, json_mode: bool = True, temperature: float = 0.0,
                  purpose: str = "", deadline: float | None = None) -> LLMResult:
-        names = self.chain()
-        cooldown = int(self._load().get("cooldown_sec", 300))
-        errors = []
-        for name in names:
+        # Цепочка перечитывается перед КАЖДОЙ попыткой (локальная машина 12.10.26, зеркально с Планёркой и ERP):
+        # переключение в панели «Модели» подхватывается на следующей попытке этого же вызова, без перезапуска.
+        # Точки, уже провалившиеся в этом вызове, не повторяются. Начатый запрос дожидается своего ответа.
+        errors, tried = [], set()
+        while True:
+            names = [n for n in self.chain() if n not in tried]
+            if not names:
+                break
+            name = names[0]
+            tried.add(name)
+            cooldown = int(self._load().get("cooldown_sec", 300))
             try:
                 res = self.connector(name).complete(system, user, json_mode=json_mode, temperature=temperature,
                                                     purpose=purpose, deadline=deadline)

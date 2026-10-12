@@ -27,7 +27,7 @@ SCHEMA: dict[str, dict[str, str]] = {
                  "leader": "TEXT", "review_notes": "TEXT DEFAULT '[]'"},
     "sources": {"id": "INTEGER PRIMARY KEY", "meeting_id": "INTEGER", "name": "TEXT", "kind": "TEXT",
                 "text": "TEXT", "digest": "TEXT", "removed_at": "TEXT", "removed_reason": "TEXT",
-                "created_at": "TEXT"},
+                "created_at": "TEXT", "local_asr": "INTEGER DEFAULT 0"},   # расшифровка нашим распознаванием
     "people": {"id": "INTEGER PRIMARY KEY", "project_id": "INTEGER", "full_name": "TEXT",
                "role": "TEXT DEFAULT ''", "department": "TEXT DEFAULT ''", "aliases": "TEXT DEFAULT '[]'",
                "external": "INTEGER DEFAULT 0", "confirmed": "INTEGER DEFAULT 1",

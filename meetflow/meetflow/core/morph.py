@@ -53,6 +53,7 @@ def lemmas(text: str) -> set[str] | None:
     return {_MORPH.parse(w)[0].normal_form.replace("ё", "е") for w in words(text) if w not in STOP_WORDS}
 
 
+_TODAY = {"сегодня", "сегодняшнего", "конца", "дня", "вечера"}
 _DUE_STOP = {"до", "к", "ко", "срок", "в", "на", "не", "позднее", "позже", "г", "года"}
 _MONTHS = ("январ", "феврал", "март", "апрел", "ма", "июн", "июл", "август", "сентябр", "октябр", "ноябр", "декабр")
 _NUM_DATE = re.compile(r"^\s*(?:(\d{4})-(\d{1,2})-(\d{1,2})|(\d{1,2})\.(\d{1,2})(?:\.(\d{2,4}))?)\s*$")
@@ -113,9 +114,33 @@ def _owner_format(day: int, month: int, year: int | None, meeting_date: str | No
     return f"{d.day:02d}.{d.month:02d}.{d.year}"
 
 
+_DUE_NEG = re.compile(r"\bне\s+(?:к|ко|до|успе\w*|сможе\w*|получится|будет|раньше|позже|позднее)\b|\bвряд\s+ли\b")
+_WEEK = ("понедельн", "вторн", "сред", "четверг", "пятниц", "суббот", "воскресен")
+
+
+def due_negated(due: str, window_text: str) -> bool:
+    """Правило отрицаний для срока (владелец 12.10.26): «к пятнице не успеем», «успеем до 5 октября?» срока не дают.
+    Смотрятся предложения окна, где звучат слова этого срока: если каждое из них — вопрос или отрицание, срока нет."""
+    low = (window_text or "").lower().replace("ё", "е")
+    keys = [w for w in re.findall(r"[а-яa-z]+|\d+", due.lower().replace("ё", "е")) if w not in _DUE_STOP]
+    keys = [w if w.isdigit() else w[:5] for w in keys]
+    num = _NUM_DATE.match(due.strip())
+    if num:                                   # срок цифрами: в речи — число и месяц словом или «дд.мм»
+        day = int(num.group(3)) if num.group(1) else int(num.group(4))
+        month = int(num.group(2)) if num.group(1) else int(num.group(5))
+        keys = [str(day), _MONTHS[month - 1]]
+    if not keys:
+        return False
+    sentences = re.findall(r"[^.!?\n]+[.!?]?", low)
+    hit = [s for s in sentences if any((k in re.findall(r"[а-яa-z]+|\d+", s)) if k.isdigit() else k in s for k in keys)]
+    return bool(hit) and all(s.strip().endswith("?") or _DUE_NEG.search(s) for s in hit)
+
+
 def supported_due(due, window_text: str, meeting_date: str | None = None) -> str | None:
-    """Срок из ответа модели — только если его значимые слова есть в окне цитаты."""
+    """Срок из ответа модели — только если его значимые слова есть в окне цитаты и не под отрицанием или вопросом."""
     if not isinstance(due, str) or not due.strip():
+        return None
+    if due_negated(due, window_text):
         return None
     said = (window_text or "").lower().replace("ё", "е")
     num = _numeric_date_said(due, said)
@@ -137,6 +162,11 @@ def supported_due(due, window_text: str, meeting_date: str | None = None) -> str
         except ValueError:
             return None
     toks = [w for w in re.split(r"[\s./,\-|]+", due.lower().replace("ё", "е")) if w and w not in _DUE_STOP]
+    if toks and set(toks) <= _TODAY and "сегодн" in said and meeting_date:
+        # «сегодня» — настоящий срок, дата встречи (владелец 12.10.26); показ — «сегодня (дата)», см. dates.due_text
+        from .dates import lenient_date
+        md = lenient_date(str(meeting_date))
+        return f"{md.day:02d}.{md.month:02d}.{md.year}" if md else due.strip()
     if toks and all((w if w.isdigit() else w[:5]) in said for w in toks):
         wd = _word_date(due)
         if wd:        # D6: прозвучавший срок словами — тоже в формате владельца

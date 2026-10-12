@@ -33,7 +33,7 @@ from ..connectors.voice_base import voice_base_state
 from ..core.config import Theme, list_themes, load_theme
 from ..core.accounts import Accounts, AuthError
 from ..core.backup import Backups
-from ..core.dates import lenient_date
+from ..core.dates import due_text, lenient_date
 from ..core.intake import MIN_INTERVAL, IntakeError, IntakeService, preview_folder, sign_folder, validate_folder
 from ..core.runs_report import runs_report
 from ..core import roadmap as roadmap_mod
@@ -199,6 +199,8 @@ def create_app(theme_name: str | None = None, db_path: str | None = None, journa
         if watch_on:
             intake.start()        # фоновый забор из папок-приёмников
             backups.start()       # автокопия базы по расписанию
+            if os.environ.get("MEETFLOW_RESUME_ON_START", "on") != "off":
+                intake.resume_after_restart()     # оборванная перезапуском работа (локальная машина 12.10.26)
         yield
         intake.stop()
         backups.stop()
@@ -377,8 +379,31 @@ def create_app(theme_name: str | None = None, db_path: str | None = None, journa
 
     @app.get("/api/meetings/{mid}/sources")
     def sources(mid: int):
-        return store.q("SELECT id, name, kind, created_at FROM sources WHERE meeting_id=? AND removed_at IS NULL",
+        return store.q("SELECT id, name, kind, created_at, local_asr FROM sources WHERE meeting_id=? AND removed_at IS NULL",
                        (mid,))
+
+    @app.get("/api/meetings/{mid}/sources/{sid}/export")
+    def source_docx(mid: int, sid: int):
+        """Расшифровка, сделанная НАШИМ распознаванием, — в Word тем же выводом, что протокол (локальная машина
+        12.10.26, зеркально с ERP и Планёркой). Чужой файл выгружать незачем — он и так у владельца."""
+        s = store.get("sources", sid)
+        if not s or s["meeting_id"] != mid or s["removed_at"]:
+            raise HTTPException(404, "Источник не найден.")
+        if not s.get("local_asr"):
+            raise HTTPException(400, "Выгружается только расшифровка, распознанная здесь; загруженный файл уже у вас.")
+        m = store.get("meetings", mid) or {}
+        fmt = lambda d: f"{d.day:02d}.{d.month:02d}.{d.year}" if d else ""   # noqa: E731 — дата владельца
+        out = DocxOutput(theme.get("design.document_font", "Times New Roman"),
+                         int(theme.get("design.document_size_pt", 12)))
+        def line(ln: str) -> str:            # «ЧЧ:ММ:СС<таб>Говорящий<таб>текст» → «ЧЧ:ММ:СС Говорящий: текст»
+            parts = [x.strip() for x in ln.split("\t")]
+            return f"{parts[0]} {parts[1]}: {parts[2]}" if len(parts) == 3 else " ".join(parts)
+        lines = [f"# Расшифровка встречи {fmt(lenient_date(m.get('date')))}", "", f"Источник: {s['name']}"]
+        lines += [line(ln) for ln in (s["text"] or "").splitlines() if ln.strip()]
+        return Response(out.render("\n\n".join(lines), "transcript"),
+                        media_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+                        headers={"Content-Disposition": "attachment; filename*=UTF-8''"
+                                 + quote(f"transcript_{m.get('date', mid)}.docx")})
 
     @app.post("/api/meetings/{mid}/run")
     def run(mid: int, u: dict = Depends(admin)):
@@ -475,7 +500,8 @@ def create_app(theme_name: str | None = None, db_path: str | None = None, journa
                 cur += timedelta(days=1)
                 days += cur.weekday() < 5
             return days >= n
-        return [{**{k: v for k, v in r.items() if k != "project_id"}, "overdue": overdue(r)} for r in rows]
+        return [{**{k: v for k, v in r.items() if k != "project_id"}, "overdue": overdue(r),
+                 "due_text": due_text(r.get("due_date"), r.get("date_set"))} for r in rows]
 
     @app.patch("/api/tasks/{tid}")
     def set_status(tid: int, body: StatusIn, u: dict = Depends(user)):
@@ -527,6 +553,11 @@ def create_app(theme_name: str | None = None, db_path: str | None = None, journa
                 if p and p["project_id"] == pid:
                     known = json.loads(p["known_marks"] or "[]")
                     store.update("people", p["id"], known_marks=sorted(set(known) | set(payload["marks"])))
+        elif c["kind"] == "due_unconfirmed" and payload.get("task_id"):
+            # «Подтвердить» ставит предложенный срок; «Не нужно» — задача остаётся без срока (как в Планёрке)
+            d = lenient_date(payload.get("proposed_value"))
+            pipe.reg.set_due(payload["task_id"], f"{d.day:02d}.{d.month:02d}.{d.year}" if d else
+                             payload.get("proposed_text"), by, "срок из карточки")
         elif c["kind"] == "confirm_person" and payload.get("person_id"):
             p = store.get("people", int(payload["person_id"]))
             if p and p["project_id"] == pid:
