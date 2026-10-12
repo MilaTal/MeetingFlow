@@ -196,3 +196,13 @@ def test_смена_модели_на_живой_сборке_пересобир
 
 def test_подсказка_о_смене_в_панели():
     assert "Когда применится смена" in JS.read_text(encoding="utf-8")
+
+
+def test_системных_сообщений_нет_в_очереди_оператора(tmp_path):
+    """Владелец 12.10.26 (локальная машина abb5789): очередь «Ожидает ввода» — только работа людей."""
+    app, c, _ = _app(tmp_path)
+    app.state.pipe.cards.open(None, "technical", "Сбой прохода папки-приёмника", {}, None)
+    keys = [g["key"] for g in c.get("/api/monitoring/awaiting-input", headers={"X-User-Role": "super_admin"}).json()["groups"]]
+    assert "tech" not in keys
+    tech = c.get("/api/monitoring/system-messages", headers={"X-User-Role": "super_admin"}).json()
+    assert any("папки-приёмника" in t["title"] for t in tech)          # на своей странице сообщение есть

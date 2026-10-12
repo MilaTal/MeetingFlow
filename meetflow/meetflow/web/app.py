@@ -987,9 +987,8 @@ def create_app(theme_name: str | None = None, db_path: str | None = None, journa
         out.append({"key": "stopped", "title": "Остановлено по пределу", "count": len(stopped), "items": stopped[:10],
                     "link": "#system/runs", "need": "Решить: повторить прогон вручную или убрать файл.",
                     "if_not": "Протокол встречи неполный."})
-        n = store.q("SELECT COUNT(*) AS n FROM cards WHERE status='open' AND kind='technical'")[0]["n"]
-        out.append({"key": "tech", "title": "Системные сообщения", "count": n, "link": "#system/messages",
-                    "need": "Прочитать и закрыть.", "if_not": "Закроются сами через срок хранения."})
+        # Системных сообщений в очереди оператора нет (владелец 12.10.26, локальная машина abb5789: «убери блок —
+        # здесь это дублирование, они уже есть на отдельной странице мониторинга»). Очередь — только работа людей.
         return out
 
     @app.get("/api/monitoring/live")
