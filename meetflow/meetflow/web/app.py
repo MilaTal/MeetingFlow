@@ -12,6 +12,8 @@ from __future__ import annotations
 import json
 import os
 import socket
+import threading
+import time
 from contextlib import asynccontextmanager
 from datetime import date as date_cls, datetime, timedelta
 from pathlib import Path
@@ -711,13 +713,54 @@ def create_app(theme_name: str | None = None, db_path: str | None = None, journa
         from ..connectors.llm_routes import panel
         return panel()
 
+    def _rebuild_after_switch(mid: int, pause: float, wait_limit: float = 7200) -> None:
+        """Смена модели генерации на живой сборке (локальная машина 7effaa2, решение владельца 12.10.26): текущий
+        вызов не обрываем; через паузу дожидаемся конца идущей сборки (до двух часов) и собираем заново — на
+        новой модели, иначе документ остаётся смесью шагов двух моделей (правило 08.10.26). Из прежнего прохода
+        не берётся ничего: все шаги выводятся из черновика прежней модели. И план, и итог — системным сообщением."""
+        time.sleep(pause)
+        lock, waited = pipe._meeting_lock(mid), 0.0
+        step = 30.0 if pause >= 60 else 0.2           # короткая пауза — только в тестах и на стенде
+        while lock.locked() and waited < wait_limit:
+            time.sleep(step)
+            waited += step
+        m = store.get("meetings", mid)
+        if not m:
+            return
+        if lock.locked():
+            pipe.cards.open(m["project_id"], "technical", f"Встреча {m['date']}: пересборка после смены модели не начата",
+                            {"why": "идущая сборка не закончилась за два часа — запустите сборку кнопкой"}, mid)
+            return
+        pipe.cards.open(m["project_id"], "technical", f"Встреча {m['date']}: пересборка на новой модели начата",
+                        {"why": "модель генерации сменили во время сборки; из прежнего прохода ничего не берётся"}, mid)
+        pipe.run(m["project_id"], mid)
+
     @app.post("/api/monitoring/models/use")
     def mon_models_use(body: RouteUseIn, u: dict = Depends(super_admin)):
-        from ..connectors.llm_routes import panel, use
+        from ..connectors.llm_routes import ROLE_TITLES, panel, routes_path, use
+        try:
+            old = (json.loads(routes_path().read_text(encoding="utf-8")).get("roles", {}).get(body.role) or [None])[0]
+        except (OSError, ValueError):
+            old = None
         try:
             use(body.role, body.point, by=u.get("name") or u["role"])
         except (ConnectorError, FileNotFoundError) as e:
             raise HTTPException(400, str(e))
+        if old != body.point:      # переключение на точку, которая и так основная, — не событие (локальная машина)
+            running = pipe.running_meetings()
+            pause = float(os.environ.get("MEETFLOW_MODEL_SWITCH_PAUSE_SEC", "900"))
+            note = ""
+            if running and body.role == "generate":
+                note = (f" Сейчас идёт сборка: текущий вызов дождётся ответа, через {int(pause // 60)} мин и после конца "
+                        "сборки протокол соберётся заново на новой модели.")
+            m = store.get("meetings", running[0]) if running else None
+            pipe.cards.open(m["project_id"] if m else None, "technical",
+                            f"Модель роли «{ROLE_TITLES.get(body.role, body.role)}» сменена: {old or '—'} → {body.point}",
+                            {"why": ("Следующий вызов пойдёт на новую модель." + note).strip(), "by": u.get("name") or u["role"]},
+                            running[0] if running else None)
+            if running and body.role == "generate":
+                for mid in running:
+                    threading.Thread(target=_rebuild_after_switch, args=(mid, pause), daemon=True).start()
         return panel()
 
     # Справочник подключений (09.10.26): завести, изменить, удалить, проверить до сохранения; запасная, убрать из

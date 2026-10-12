@@ -192,6 +192,11 @@ class MeetingPipeline:
                 c.notes_markers = list(self.theme.get("notes_markers", []))
                 c.own_output_markers = list(self.theme.get("own_output_markers", [])) + [self.theme.word("sources_line")]
 
+    def running_meetings(self) -> list[int]:
+        """Встречи, по которым сейчас идёт сборка (замок занят) — для сообщения о смене модели."""
+        with self._locks_guard:
+            return [mid for (sid, mid), lock in self._locks.items() if sid == id(self.s) and lock.locked()]
+
     def _meeting_lock(self, meeting_id: int) -> threading.Lock:
         key = (id(self.s), meeting_id)
         with self._locks_guard:

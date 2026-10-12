@@ -139,3 +139,60 @@ def test_выгрузка_расшифровки_только_нашего_ра�
     assert c.get(f"/api/meetings/{mid + 99}/sources/{ours}/export", headers=H).status_code == 404
     srcs = c.get(f"/api/meetings/{mid}/sources", headers=H).json()
     assert {s["id"]: s["local_asr"] for s in srcs} == {ours: 1, theirs: 0}
+
+
+# ---- смена модели: сообщение, подсказка, пересборка после паузы (локальная машина f94a68c, 7effaa2, 12.10.26)
+
+def _routes_app(tmp_path, monkeypatch):
+    from meetflow.web.app import create_app
+    path = tmp_path / "models.json"
+    path.write_text(json.dumps({
+        "endpoints": {"main": {"kind": "openai", "url": "http://main", "model": "m"},
+                      "spare": {"kind": "openrouter", "model": "s"}},
+        "roles": {"generate": ["main", "spare"], "verify": ["spare"]}, "cooldown_sec": 300}), encoding="utf-8")
+    monkeypatch.setenv("MODEL_ROUTES_PATH", str(path))
+    monkeypatch.setenv("MEETFLOW_LLM", "routes")
+    monkeypatch.setenv("MEETFLOW_MODEL_SWITCH_PAUSE_SEC", "0")
+    app = create_app("it_product", str(tmp_path / "t.db"), str(tmp_path / "j.jsonl"), watch=False)
+    return app, TestClient(app), {"X-User-Role": "super_admin", "X-User-Name": "boss"}
+
+
+def _tech(store):
+    return [r["title"] for r in store.q("SELECT title FROM cards WHERE kind='technical' ORDER BY id")]
+
+
+def test_смена_модели_пишет_системное_сообщение_и_молчит_без_смены(tmp_path, monkeypatch):
+    app, c, H = _routes_app(tmp_path, monkeypatch)
+    store = app.state.pipe.s
+    c.post("/api/monitoring/models/use", json={"role": "generate", "point": "main"}, headers=H)      # уже основная
+    assert _tech(store) == []
+    c.post("/api/monitoring/models/use", json={"role": "generate", "point": "spare"}, headers=H)
+    assert _tech(store) == ["Модель роли «Генерация черновика» сменена: main → spare"]
+
+
+def test_смена_модели_на_живой_сборке_пересобирает_после_паузы(tmp_path, monkeypatch):
+    app, c, H = _routes_app(tmp_path, monkeypatch)
+    pipe, store = app.state.pipe, app.state.pipe.s
+    pid = c.post("/api/projects", json={"name": "П"}, headers=H).json()["id"]
+    mid = c.post(f"/api/projects/{pid}/meetings", json={"date": "2026-10-05"}, headers=H).json()["id"]
+    reruns = []
+    monkeypatch.setattr(pipe, "run", lambda p, m: reruns.append(m))
+    lock = pipe._meeting_lock(mid)
+    lock.acquire()                                    # идёт сборка этой встречи
+    try:
+        c.post("/api/monitoring/models/use", json={"role": "generate", "point": "spare"}, headers=H)
+        assert pipe.running_meetings() == [mid]
+        assert "Сейчас идёт сборка" in store.q("SELECT payload FROM cards WHERE kind='technical'")[0]["payload"]
+        time.sleep(0.2)
+        assert reruns == []                           # пока сборка идёт — не трогаем
+    finally:
+        lock.release()
+    deadline = time.time() + 40
+    while not reruns and time.time() < deadline:
+        time.sleep(0.5)
+    assert reruns == [mid]
+    assert any("пересборка на новой модели начата" in t for t in _tech(store))
+
+
+def test_подсказка_о_смене_в_панели():
+    assert "Когда применится смена" in JS.read_text(encoding="utf-8")
