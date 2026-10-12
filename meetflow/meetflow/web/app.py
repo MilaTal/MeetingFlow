@@ -907,8 +907,14 @@ def create_app(theme_name: str | None = None, db_path: str | None = None, journa
         elif tool == "openrouter" and not key:
             rows.append(_row("Модель", "нет", "OpenRouter: ключ OPENROUTER_API_KEY не задан"))
         else:
-            rows.append(_row("Модель", "живо", f"{tool}: генерирует {gen or 'по маршрутам'}"))
-            rows.append(_row("Модель проверки", "живо", (ver or "по маршрутам") +
+            def route(llm) -> str:   # точка и запасные — как в ERP и Планёрке (локальная машина 71b2b27, 12.10.26)
+                try:
+                    names = llm.chain() if hasattr(llm, "chain") else []
+                except Exception:   # noqa: BLE001 — сбой файла маршрутов не должен ронять мониторинг
+                    return ""
+                return (f" · точка «{names[0]}»" + (f", запасные: {', '.join(names[1:])}" if names[1:] else "")) if names else ""
+            rows.append(_row("Модель", "живо", f"{tool}: генерирует {gen or 'по маршрутам'}{route(pipe.gen)}"))
+            rows.append(_row("Модель проверки", "живо", (ver or "по маршрутам") + route(pipe.ver) +
                              (" — та же, что генерация" if ver and ver == gen else "")))
         try:
             store.q("SELECT 1 AS x")

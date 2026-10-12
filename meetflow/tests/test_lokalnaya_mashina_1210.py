@@ -206,3 +206,13 @@ def test_системных_сообщений_нет_в_очереди_опер
     assert "tech" not in keys
     tech = c.get("/api/monitoring/system-messages", headers={"X-User-Role": "super_admin"}).json()
     assert any("папки-приёмника" in t["title"] for t in tech)          # на своей странице сообщение есть
+
+
+def test_мониторинг_называет_точку_и_запасные(tmp_path, monkeypatch):
+    """Локальная машина 71b2b27: модель в мониторинге — по маршрутам, с точкой и запасными."""
+    app, c, H = _routes_app(tmp_path, monkeypatch)
+    rows = {r["name"]: r for r in c.get("/api/monitoring/live", headers=H).json()["services"]}
+    assert "точка «main», запасные: spare" in rows["Модель"]["detail"]
+    c.post("/api/monitoring/models/use", json={"role": "generate", "point": "spare"}, headers=H)
+    rows = {r["name"]: r for r in c.get("/api/monitoring/live", headers=H).json()["services"]}
+    assert "точка «spare», запасные: main" in rows["Модель"]["detail"]
