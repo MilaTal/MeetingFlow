@@ -33,7 +33,7 @@ SCHEMA: dict[str, dict[str, str]] = {
                "external": "INTEGER DEFAULT 0", "confirmed": "INTEGER DEFAULT 1",
                "organization": "TEXT DEFAULT ''", "known_marks": "TEXT DEFAULT '[]'"},
     "tasks": {"id": "INTEGER PRIMARY KEY", "project_id": "INTEGER", "description": "TEXT",
-              "assignee": "TEXT", "status": "TEXT DEFAULT 'active'", "due_date": "TEXT",
+              "assignee": "TEXT", "status": "TEXT DEFAULT 'active'", "due_date": "TEXT", "due_kind": "TEXT",
               "date_set": "TEXT", "date_closed": "TEXT", "source_meeting_id": "INTEGER",
               "source_quote": "TEXT DEFAULT ''", "last_comment": "TEXT DEFAULT ''"},
     "task_history": {"id": "INTEGER PRIMARY KEY", "task_id": "INTEGER", "old_status": "TEXT",

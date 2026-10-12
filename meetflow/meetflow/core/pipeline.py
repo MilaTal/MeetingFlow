@@ -35,6 +35,7 @@ from .negation import NegationRule
 from .people import Team
 from .prompts import PromptBuilder, chunks, parse_json, profile
 from .registry import CardQueue, OperatorMemory, TaskRegistry
+from . import deadline
 from .dates import due_text, lenient_date
 from .draft_checks import run_code_checks
 from .morph import supported_due
@@ -321,7 +322,8 @@ class MeetingPipeline:
         gate = TaskGate(team, self.neg, GateConfig(**self.theme.get("gates", {})))
 
         planned: list[tuple[TaskDraft, Any]] = []
-        due_unconfirmed: dict[int, str] = {}     # id черновика → срок модели, не прозвучавший рядом (12.10.26)
+        due_unconfirmed: dict[int, str] = {}
+        due_kinds: dict[int, str] = {}           # id черновика → вид срока: «сегодня» / «оценка» (12.10.26)     # id черновика → срок модели, не прозвучавший рядом (12.10.26)
         held: list[tuple[TaskDraft, list[str], str]] = []
         closings: list[tuple[int, str]] = []
         closing_cards: list = []          # (задача, цитата, почему[, описание])
@@ -390,7 +392,29 @@ class MeetingPipeline:
                 if d.due_date:            # срок — только если прозвучал рядом с цитатой (01/6)
                     said = supported_due(d.due_date, self._window(source.lines, g.quote or d.quote), meeting.get("date"))
                     proposed = d.due_date
+                    kind = None
+                    md = lenient_date(meeting.get("date"))
+                    if md is not None:
+                        # относительный срок — в дату от даты встречи, «к следующему совещанию» = +7 «оценка»; фраза из
+                        # записи важнее даты модели (владелец 12.10.26, как в ERP и Планёрке: общий deadline.py)
+                        win = self._window(source.lines, g.quote or d.quote)
+                        if said is not None and lenient_date(said) is None:
+                            dl = deadline.resolve(said, md)
+                            if dl.due is not None:
+                                said, kind = f"{dl.due:%d.%m.%Y}", dl.kind
+                        elif said is None:
+                            heard = {(x, k) for x, k, _p in deadline._candidates(win, md)}
+                            if len({x for x, _k in heard}) == 1:
+                                x, kind = next(iter(heard))
+                                said = f"{x:%d.%m.%Y}"
+                        if said is not None and kind is None:
+                            same = [k for x, k, _p in deadline._candidates(win, md) if x == lenient_date(said)]
+                            kind = same[0] if same else None
+                        if said is not None and lenient_date(said) == md:
+                            kind = deadline.TODAY
                     d = replace(d, due_date=said)
+                    if kind is not None:
+                        due_kinds[id(d)] = kind
                     if said is None:      # не молча: задача без срока и карточка, как в Планёрке (владелец 12.10.26)
                         rep.due_dropped += 1
                         due_unconfirmed[id(d)] = proposed
@@ -542,7 +566,8 @@ class MeetingPipeline:
                         # документ 14: фамилия и имя, похожих нет — сразу в «Команду» «не подтверждён», задача на
                         # него, оператору карточка на подтверждение; в одном прогоне — одна запись на человека
                         who, np_id, np_new = new_person(pend["name"])
-                    tid = self.reg.add(project_id, g.description, who, meeting_id, g.quote, d.due_date, mdate)
+                    tid = self.reg.add(project_id, g.description, who, meeting_id, g.quote, d.due_date, mdate,
+                                       due_kinds.get(id(d)))
                     added.append((tid, d, g))
                     if id(d) in due_unconfirmed:
                         self._due_card(project_id, meeting_id, tid, g, due_unconfirmed[id(d)], mdate)
@@ -830,7 +855,7 @@ class MeetingPipeline:
                 # (письмо 39, находка Планёрки 692d05d — таблица собиралась раньше последнего решения)
                 t = self.s.get("tasks", tid) or {}
                 who = t.get("assignee") or th.word("unassigned")
-                due = due_text(t.get("due_date"), t.get("date_set")) or "—"     # «сегодня (дата)» — владелец 12.10.26
+                due = due_text(t.get("due_date"), t.get("date_set"), t.get("due_kind")) or "—"     # «сегодня (дата)» — владелец 12.10.26
                 out.append(f"| {i} | {_cell(t.get('description') or g.description)} | {_cell(who)} | {_cell(due)} |")
         else:
             out.append(th.word("no_new_tasks"))

@@ -77,3 +77,30 @@ def test_подтвердить_в_карточке_ставит_срок(tmp_pa
     r = c.post(f"/api/cards/{cid}/resolve", json={"status": "accepted"}, headers=H)
     assert r.status_code == 200
     assert pipe.s.get("tasks", tid)["due_date"] == "10.10.2026"
+
+
+# ---- относительные сроки (владелец 12.10.26, письмо ветки copilot 12.10 14-44: «да, для всех», как в ERP)
+
+@pytest.mark.parametrize("due, line, expect, kind", [
+    ("завтра", "Игнатов Иван: Сидоров, подготовьте узлы подвеса и передайте на склад завтра.", "02.10.2026", None),
+    ("до пятницы", "Игнатов Иван: Сидоров, подготовьте узлы подвеса и передайте на склад до пятницы.", "02.10.2026", None),
+    ("до конца месяца", "Игнатов Иван: Сидоров, подготовьте узлы подвеса и передайте на склад до конца месяца.",
+     "31.10.2026", None),
+    ("к следующему совещанию", "Игнатов Иван: Сидоров, подготовьте узлы подвеса и передайте на склад к следующему "
+     "совещанию.", "08.10.2026", "оценка"),
+])
+def test_относительный_срок_в_дату(store, project, make_pipe, due, line, expect, kind):
+    _, tasks, cards = _run(store, project, make_pipe, due, line)
+    assert len(tasks) == 1 and tasks[0]["due_date"] == expect and tasks[0]["due_kind"] == kind and not cards
+
+
+def test_фраза_важнее_даты_модели(store, project, make_pipe):
+    _, tasks, cards = _run(store, project, make_pipe, "15.10.2026",
+                           "Игнатов Иван: Сидоров, подготовьте узлы подвеса и передайте на склад до пятницы.")
+    assert tasks[0]["due_date"] == "02.10.2026" and not cards
+
+
+def test_оценка_в_показе():
+    from meetflow.core.dates import due_text
+    assert due_text("08.10.2026", "2026-10-01", "оценка") == "08.10.2026 (оценка)"
+    assert due_text("01.10.2026", "2026-10-01", "оценка") == "сегодня (01.10.2026)"

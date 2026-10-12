@@ -103,7 +103,7 @@ def lenient_date(value: str | None) -> date | None:
     return None
 
 
-def due_text(due: str | None, date_set: str | None) -> str:
+def due_text(due: str | None, date_set: str | None, kind: str | None = None) -> str:
     """Срок для человека (владелец 12.10.26): срок, равный дате встречи, — «сегодня (дд.мм.гггг)», иначе голая дата
     читается как дата постановки. Просрочка по нему настоящая. Срок раньше даты постановки сохраняется как есть и
     помечается — решение по нему за владельцем. Непонятный срок («к следующей встрече») — как записан."""
@@ -114,4 +114,6 @@ def due_text(due: str | None, date_set: str | None) -> str:
     shown = f"{d.day:02d}.{d.month:02d}.{d.year}"
     if d == s:
         return f"сегодня ({shown})"
+    if kind == "оценка":       # «к следующему совещанию» = дата встречи + 7 дней (владелец 12.10.26)
+        return f"{shown} (оценка)"
     return f"{shown} (раньше даты постановки — как в источнике)" if d < s else shown

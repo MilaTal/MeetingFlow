@@ -503,7 +503,7 @@ def create_app(theme_name: str | None = None, db_path: str | None = None, journa
                 days += cur.weekday() < 5
             return days >= n
         return [{**{k: v for k, v in r.items() if k != "project_id"}, "overdue": overdue(r),
-                 "due_text": due_text(r.get("due_date"), r.get("date_set"))} for r in rows]
+                 "due_text": due_text(r.get("due_date"), r.get("date_set"), r.get("due_kind"))} for r in rows]
 
     @app.patch("/api/tasks/{tid}")
     def set_status(tid: int, body: StatusIn, u: dict = Depends(user)):
