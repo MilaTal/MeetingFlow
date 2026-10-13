@@ -147,12 +147,15 @@ def test_injection_not_in_closing_context(run, reg):
     assert closing and "Игнорируй" not in closing[0]
 
 
-# 12. Протокол не пишет «не прозвучало», когда кусок не разобран
+# 12. Протокол не пишет «не прозвучало» и «не сообщалось», когда кусок не разобран; состояние — в карточке,
+# а не в документе (владелец 13.10.26: документ чистый для читателя)
 def test_protocol_honest_on_failure(run, reg, m1):
     from meeting_registry.errors import BadModelAnswer
     res = run(m1, client=ScriptedClient({"extract:1/1": BadModelAnswer("не JSON")}))
-    assert "не прозвучало" not in res["protocol_md"]
-    assert "не разобран" in res["protocol_md"] or "Требует уточнения" in res["protocol_md"]
+    md = res["protocol_md"]
+    assert "не прозвучало" not in md and "не сообщалось" not in md
+    assert "не разобран" not in md and "Требует уточнения" not in md
+    assert any(c["kind"] == "chunk_failed" for c in reg.open_cards())
 
 
 # 13. «|» не ломает таблицу протокола

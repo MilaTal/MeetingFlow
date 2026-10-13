@@ -37,20 +37,13 @@ def render(meeting_date: str, title: str, new_tasks: list, closures: list, held_
     out = [f"# Протокол совещания {_d(meeting_date)}", ""]
     if title:
         out += [title, ""]
-    addressed = notes.get("addressed") or []
-    if addressed:   # не отказ, а факт встречи: реплики к самой системе в разбор не взяты
-        nums = ", ".join(str(n) for n in addressed[:10]) + ("…" if len(addressed) > 10 else "")
-        out += [f"В записи {len(addressed)} реплик(и) обращены к самой системе, а не к участникам (строки {nums}); "
-                "в разбор не взяты, переданы оператору.", ""]
-    if degraded:
-        # это не служебная пометка, а свойство документа, которое должен знать читатель
-        out += ["Протокол собран без языковой модели, по правилам. Возможны пропущенные поручения.", ""]
-
+    # Документ чистый для читателя (владелец 13.10.26): реплики к системе, сборка без модели, недоразобранные куски,
+    # незавершённая сверка и пункты на решении идут карточками оператору и в журнал прогона, не в протокол.
     out += ["## Поручения этой встречи", ""]
     if new_tasks:
         out += _table(new_tasks, people)
     elif failed_chunks:
-        out.append("Поручения с названным исполнителем в разобранной части записи не найдены.")
+        pass  # часть записи не разобрана: «не прозвучало» писать нельзя, а состояние разбора — в карточке
     else:
         out.append("Новых поручений с названным исполнителем не прозвучало.")
     if duplicates:
@@ -62,21 +55,11 @@ def render(meeting_date: str, title: str, new_tasks: list, closures: list, held_
         out += ["| № | Задача | Итог | Основание |", "|---|---|---|---|"]
         for i, c in enumerate(closures, 1):
             out.append(f"| {i} | {_cell(c['description'])} | {'выполнено' if c['status'] == 'done' else 'снято'} | «{_cell(c['quote'])}» |")
-    elif closing_unfinished:
-        out.append("Сверка выполнения задач по этой встрече не завершена, решение — у ответственного за реестр.")
+    elif closing_unfinished or failed_chunks:
+        pass  # сверка не завершена или запись разобрана не вся: утверждать «не сообщалось» нельзя, состояние — в карточке
     else:
         out.append("О выполнении задач из реестра на встрече не сообщалось.")
     out.append("")
-
-    if held_count or failed_chunks or closing_unfinished:
-        out += ["## Требует уточнения", ""]
-        if held_count:
-            out.append(f"Пунктов, которые требуют решения ответственного за реестр: {held_count}. Они не внесены в реестр до уточнения.")
-        if failed_chunks:
-            out.append(f"Часть записи не разобрана (фрагментов: {failed_chunks}) — список поручений может быть неполным.")
-        if closing_unfinished:
-            out.append("Сообщения о выполнении задач требуют проверки человеком.")
-        out.append("")
 
     out += [f"## Открытые задачи — срез на {_d(meeting_date)}", ""]
     if open_tasks:

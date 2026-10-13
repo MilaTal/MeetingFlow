@@ -93,7 +93,7 @@ def test_bad_json_chunk_goes_to_card_others_continue(run, reg, m1):
 def test_provider_down_falls_back_to_rules_visibly(run, reg, m1):
     res = run(m1, client=ScriptedClient({"extract:1/1": ProviderUnavailable("connection refused")}))
     assert res["outcome"] == "degraded"
-    assert "без языковой модели" in res["protocol_md"]
+    assert "без языковой модели" not in res["protocol_md"]   # документ чистый (владелец 13.10.26), факт — в карточке
     assert len(reg.all_tasks()) >= 2
     assert any(c["kind"] == "degraded" for c in reg.open_cards())
 
