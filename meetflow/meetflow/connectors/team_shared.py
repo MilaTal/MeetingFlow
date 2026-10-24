@@ -6,12 +6,11 @@
 `full_name`, `role`, `department`, `project_role`, `organization`, `is_external`.
 
 Правила:
-- в общую базу попадают только подтверждённые записи, поэтому «люди» и
-  «подтверждены» здесь — одно число; отдельного поля `confirmed` в ней нет;
+- подтверждение человеком — отдельный признак `confirmed_human` (решение владелицы 24.10.2026, вариант «а»):
+  внутренние подтверждены всегда; внешний идёт в работу, только если `confirmed_human = 1`. 24.10.2026 системные
+  подтверждения внешних сняты — записи остаются в общей базе, но в работу не идут;
 - решения по людям принимаются в «Команде» Планёрки и ERP, MeetFlow их только
   читает: ни записи, ни сверки, ни создания файла;
-- внешние контакты используются только подтверждённые — это свойство самой общей
-  базы, здесь оно лишь показывается отдельным счётчиком;
 - сбой или отсутствие файла не роняет экран: причина описывается словами.
 """
 from __future__ import annotations
@@ -81,22 +80,37 @@ def team_shared_state(path: str | None = None, voice_base_path: str | None = Non
             st["contract_problems"] = problems
             return st
         one = lambda sql: con.execute(sql).fetchone()[0]  # noqa: E731
+        cols = _cols(con, "people")
+        # Подтверждение человеком — отдельный признак (решение владелицы 24.10.2026, вариант «а»). 24.10.2026
+        # системные подтверждения внешних сняты: в общей базе они остаются, но confirmed_human = 0 и в работу
+        # не идут. Внутренние подтверждены, как прежде. Старая база без поля: внешние считаются неподтверждёнными.
+        human = "COALESCE(confirmed_human, 0)" if "confirmed_human" in cols else "0"
         st["people"] = one("SELECT COUNT(*) FROM people")
-        st["people_confirmed"] = st["people"]      # в общую базу попадают только подтверждённые
         st["external"] = one("SELECT COUNT(*) FROM people WHERE COALESCE(is_external, 0) = 1")
         st["internal"] = st["people"] - st["external"]
-        cols = _cols(con, "people")
+        st["external_confirmed"] = one(f"SELECT COUNT(*) FROM people WHERE COALESCE(is_external, 0) = 1 AND {human} = 1")
+        st["external_waiting"] = st["external"] - st["external_confirmed"]
+        st["people_confirmed"] = st["internal"] + st["external_confirmed"]
         if "department" in cols:
             st["by_department"] = {d or "не указан": n for d, n in con.execute(
                 "SELECT department, COUNT(*) FROM people WHERE COALESCE(is_external, 0) = 0 "
                 "GROUP BY department ORDER BY department")}
         fields = [f for f in ("full_name", "role", "department", "organization", "is_external") if f in cols]
-        rows = con.execute(f"SELECT {', '.join(fields)} FROM people "
+        rows = con.execute(f"SELECT {', '.join(fields)}, {human} AS human_confirmed FROM people "
                            "ORDER BY COALESCE(is_external, 0), full_name").fetchall()
-        st["people_list"] = [{**{f: r[f] for f in fields if f != "is_external"},
-                              "external": bool(r["is_external"])} for r in rows]
+        everyone = []
+        for r in rows:
+            external = bool(r["is_external"])
+            # внутренний подтверждён всегда; внешний — только если подтвердил человек
+            confirmed = True if not external else bool(r["human_confirmed"])
+            everyone.append({**{f: r[f] for f in fields if f != "is_external"},
+                             "external": external, "confirmed": confirmed})
+        st["people_all"] = everyone
+        st["people_list"] = [p for p in everyone if p["confirmed"]]      # в работу — только подтверждённые
         st["ok"] = True
         st["detail"] = "Общая «Команда» доступна, только чтение."
+        if st["external_waiting"]:
+            st["detail"] += (f" Внешних без подтверждения человеком: {st['external_waiting']} — в работу не идут.")
     except sqlite3.Error as e:
         st["detail"] = f"Ошибка чтения общей «Команды»: {type(e).__name__}"
     finally:

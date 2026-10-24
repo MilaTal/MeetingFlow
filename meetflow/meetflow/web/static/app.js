@@ -328,7 +328,7 @@ const routes = {
 
   async teamshared() { // общая «Команда» Планёрки и ERP — только чтение (задание 24.10.2026, раздел 0)
     const st = await api("/api/monitoring/team-shared");
-    const rows = st.people_list || [];
+    const rows = st.people_all || [];
     const state = !st.enabled ? "выключена" : st.ok ? "доступна, только чтение"
       : `<span class="overdue">${esc(st.detail || "недоступна")}</span>`;
     $("#main").innerHTML = `<h1>Общая команда</h1>
@@ -339,10 +339,12 @@ const routes = {
         ${st.ok ? `<tr><td>Людей</td><td>${esc(st.people)}</td></tr>
         <tr><td>Подтверждены</td><td>${esc(st.people_confirmed)}</td></tr>
         <tr><td>Внутренних</td><td>${esc(st.internal)}</td></tr>
-        <tr><td>Внешних</td><td>${esc(st.external)}</td></tr>` : ""}
+        <tr><td>Внешних</td><td>${esc(st.external)}</td></tr>
+        <tr><td>Внешних подтверждены человеком</td><td>${esc(st.external_confirmed)}</td></tr>
+        <tr><td>Внешних ждут подтверждения</td><td>${esc(st.external_waiting)}</td></tr>` : ""}
       </table>
-      <p class="sub">Общая «Команда» одна у Планёрки и ERP. Сюда попадают только подтверждённые люди; MeetFlow её только читает, решения по людям принимаются в «Команде» Планёрки и ERP. Файл ищется по пути TEAM_SHARED_PATH, иначе рядом с базой голосов.</p></div>
-      ${rows.length ? `<div class="card-output"><h2 style="margin-top:0">Люди</h2>${moreRows("<tr><th>№</th><th>ФИО</th><th>Роль</th><th>Отдел</th><th>Организация</th></tr>", rows, (p, i) => `<tr><td class="no">${i + 1}</td><td>${esc(p.full_name)}${p.external ? ' <span class="badge">внешний</span>' : ""}</td><td>${esc(p.role || "")}</td><td>${esc(p.department || "")}</td><td>${esc(p.organization || "")}</td></tr>`)}</div>` : ""}`;
+      <p class="sub">Общая «Команда» одна у Планёрки и ERP. Внутренние подтверждены всегда; внешний идёт в работу, только если его подтвердил человек. MeetFlow её только читает, решения по людям принимаются в «Команде» Планёрки и ERP. Файл ищется по пути TEAM_SHARED_PATH, иначе рядом с базой голосов.</p></div>
+      ${rows.length ? `<div class="card-output"><h2 style="margin-top:0">Люди</h2>${moreRows("<tr><th>№</th><th>ФИО</th><th>Роль</th><th>Отдел</th><th>Организация</th></tr>", rows, (p, i) => `<tr><td class="no">${i + 1}</td><td>${esc(p.full_name)}${p.external ? (p.confirmed ? ' <span class="badge">внешний</span>' : ' <span class="badge">внешний, не подтверждён человеком</span>') : ""}</td><td>${esc(p.role || "")}</td><td>${esc(p.department || "")}</td><td>${esc(p.organization || "")}</td></tr>`)}</div>` : ""}`;
   },
 
   async monitoring(tab, solo = false, title = "", prefix = "") {
