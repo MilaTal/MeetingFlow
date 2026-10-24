@@ -28,6 +28,7 @@ from typing import Any
 from ..connectors.base import (AnswerTruncated, ASRConnector, ConnectorError, LLMConnector, SourceConnector,
                                VisionConnector)
 from ..connectors.registry import PluginRegistry
+from . import rebuild as rebuild_mod
 from .budget import BudgetExceeded, BudgetLimits, CallJournal, RunBudget
 from .config import Theme
 from .gates import GateConfig, TaskGate
@@ -483,22 +484,31 @@ class MeetingPipeline:
                                 f"рассмотрены", {"cut": cut, "what": "поручения"}, meeting_id)
             # реестр «на дату встречи»: поставленное позже D не делает поручение D дублем (стенд 42, 371f967)
             existing = [(r["description"], r["assignee"]) for r in _as_of(self.reg.list(project_id), meeting.get("date"))]
-            this_meeting = self.s.q("SELECT source_quote, description, assignee FROM tasks WHERE source_meeting_id=?",
-                                    (meeting_id,))
-            # уже заведённое этой встречей: (цитата, исполнитель, основы описания). Ключ только
+            this_meeting = self.s.q("SELECT id, source_quote, description, assignee, status FROM tasks "
+                                    "WHERE source_meeting_id=?", (meeting_id,))
+            # уже заведённое этой встречей: (номер задачи, цитата, исполнитель, основы описания). Ключ только
             # по цитате терял второе поручение из той же строки, в том числе другому человеку (01/4)
-            known = [(r["source_quote"], r["assignee"] or "", set(stems(r["description"]))) for r in this_meeting]
+            known = [(r["id"], r["source_quote"], r["assignee"] or "", set(stems(r["description"])))
+                     for r in this_meeting]
+            kept_ids: set[int] = set()      # задачи прежней сборки, которые новая сборка подтвердила
 
-            def already_set(quote: str, who: str, desc: str) -> bool:
+            def already_set(quote: str, who: str, desc: str) -> int | None:
+                """Номер уже заведённой задачи этой встречи или -1, если совпала с заведённой в этом же прогоне;
+                None — не совпала ни с чем."""
                 ds = set(stems(desc))
-                return any(q == quote and a == who and jaccard(ds, s0) >= 0.5 for q, a, s0 in known)
+                for tid, q, a, s0 in known:
+                    if q == quote and a == who and jaccard(ds, s0) >= 0.5:
+                        return tid if tid is not None else -1
+                return None
             for d in drafts:
                 if self.memory.lookup(project_id, "not_a_task", " ".join(sorted(set(stems(d.description))))):
                     rep.skipped_by_rule += 1
                     continue
                 g = gate.check(d, source, existing)
                 who = g.assignee.label if g.assignee else ""
-                if g.quote and already_set(g.quote, who, g.description):
+                if g.quote and (hit := already_set(g.quote, who, g.description)) is not None:
+                    if hit > 0:
+                        kept_ids.add(hit)
                     continue  # повторный прогон той же встречи: эта задача уже заведена
                 if d.due_date:            # срок — только если прозвучал рядом с цитатой (01/6)
                     said = supported_due(d.due_date, self._window(source.lines, g.quote or d.quote), meeting.get("date"))
@@ -532,7 +542,7 @@ class MeetingPipeline:
                 if g.accepted:
                     planned.append((d, g))
                     existing.append((g.description, who))
-                    known.append((g.quote, who, set(stems(g.description))))
+                    known.append((None, g.quote, who, set(stems(g.description))))
                 else:
                     held.append((d, g.reasons, g.quote, g))
 
@@ -779,9 +789,11 @@ class MeetingPipeline:
                         who = g.assignee.label if g.assignee else None
                         # пересборка: та же задача этой встречи уже заведена — без цитаты повтор узнаётся по
                         # формулировке и исполнителю (находка циклов ролей ERP и Планёрки, 15.10.26)
-                        if any((r["assignee"] or None) == who and same_task_text(g.description or d.description,
-                                                                                 [r["description"]])
-                               for r in this_meeting):
+                        hit = next((r["id"] for r in this_meeting
+                                    if (r["assignee"] or None) == who
+                                    and same_task_text(g.description or d.description, [r["description"]])), None)
+                        if hit is not None:
+                            kept_ids.add(hit)
                             continue
                         tid = self.reg.add(project_id, g.description or d.description, who, meeting_id, quote,
                                            d.due_date, mdate, due_kinds.get(id(d)), doubt_reason=doubt_text(reasons))
@@ -837,7 +849,10 @@ class MeetingPipeline:
                     for unit, g in ures["held"]:
                         if same_task_text(unit.text, [getattr(x[2], "description", "") for x in added]):
                             continue        # D4: та же задача уже заведена этим прогоном — карточка была бы ложной тревогой
-                        if any(same_task_text(g.description or unit.text, [r["description"]]) for r in this_meeting):
+                        hit = next((r["id"] for r in this_meeting
+                                    if same_task_text(g.description or unit.text, [r["description"]])), None)
+                        if hit is not None:
+                            kept_ids.add(hit)
                             continue        # пересборка: эта задача встречи уже заведена
                         if set(g.reasons) & SIFTED:                  # отсеяно — строкой в журнал разбора
                             self.journal.write(purpose="triage", meeting_id=meeting_id, verdict="отсеяно",
@@ -858,6 +873,21 @@ class MeetingPipeline:
                         self.cards.open(project_id, "held_task", f"Задача из записи не заведена: {unit.text[:120]}",
                                         {"description": unit.text, "reasons": g.reasons, "quote": unit.quote,
                                          "from": "единицы встречи"}, meeting_id)
+                # Пересборка снимает задачи прежней сборки, которых нет в новой (решение владелицы 21.10.2026).
+                # Неполное извлечение (остановка по пределу) ничего не снимает: «не найдена» не доказано.
+                res = rebuild_mod.drop_missing(self.s, self.reg, meeting_id, mdate,
+                                               kept_ids | {tid for tid, _d, _g in added},
+                                               incomplete=stopped is not None)
+                for t, edits in res["kept"]:
+                    # одна карточка на задачу за всё время: повторная пересборка новых не заводит
+                    if any(json.loads(c["payload"] or "{}").get("task_id") == t["id"]
+                           for c in self.s.q("SELECT payload FROM cards WHERE kind='rebuild_kept' AND meeting_id=?",
+                                             (meeting_id,))):
+                        continue
+                    self.cards.open(project_id, "rebuild_kept",
+                                    f"Задача не вошла в пересборку, но правилась человеком: {(t['description'] or '')[:100]}",
+                                    {"task_id": t["id"], "description": t["description"], "edits": edits,
+                                     "when": res["when"]}, meeting_id)
                 protocol_md = self._render_protocol(meeting, sections, added, closings, srcs, removals)
                 protocol_md, marks = clean_document(protocol_md)   # проверка кодом до сохранения (13.10.26)
                 if marks:
