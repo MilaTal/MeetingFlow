@@ -35,9 +35,18 @@ if ($needKey -and -not $env:OPENROUTER_API_KEY -and $Llm -eq "routes" -and -not 
 if ($needKey -and -not $env:OPENROUTER_API_KEY) {
     if (-not (Test-Path $KeyFrom)) { Write-Error "Ключ OpenRouter не задан, файла $KeyFrom нет."; exit 2 }
     $line = Get-Content -LiteralPath $KeyFrom -Encoding UTF8 | Where-Object { $_ -match '^\s*OPENROUTER_API_KEY\s*=' } | Select-Object -First 1
-    if (-not $line) { Write-Error "В $KeyFrom нет строки OPENROUTER_API_KEY."; exit 2 }
-    $env:OPENROUTER_API_KEY = ($line -replace '^\s*OPENROUTER_API_KEY\s*=\s*', '').Trim().Trim('"').Trim("'")
-    Write-Host "Ключ OpenRouter взят из $KeyFrom (значение не показывается)."
+    if (-not $line) {
+        # routes: ключ можно ввести значением в «Моделях» — без строки в файле запуск не останавливаем
+        # (24.10.2026: автозапуск на 8005 падал из-за этого, хотя ключ не нужен)
+        if ($Llm -eq "routes") {
+            Write-Warning "В $KeyFrom нет строки OPENROUTER_API_KEY: точкам OpenRouter нужен ключ значением в «Моделях»."
+        } else {
+            Write-Error "В $KeyFrom нет строки OPENROUTER_API_KEY."; exit 2
+        }
+    } else {
+        $env:OPENROUTER_API_KEY = ($line -replace '^\s*OPENROUTER_API_KEY\s*=\s*', '').Trim().Trim('"').Trim("'")
+        Write-Host "Ключ OpenRouter взят из $KeyFrom (значение не показывается)."
+    }
 }
 Set-Location (Split-Path $PSScriptRoot -Parent)
 python -m meetflow serve --theme $Theme --db $Db --port $Port
