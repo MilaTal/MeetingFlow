@@ -17,6 +17,11 @@ voice = ["faster-whisper>=1.0", "imageio-ffmpeg>=0.4"]
 morph = ["pymorphy3>=2.0"]
 test = ["pytest>=8"]
 
+[tool.setuptools.packages.find]
+# Плоская раскладка: рядом с пакетом лежат public/, skill/, eval/, themes/ — без явного include
+# setuptools принимает их за несколько пакетов верхнего уровня и отказывается ставить (24.10.2026).
+include = ["meetflow*"]
+
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 addopts = "-q"
