@@ -4,9 +4,9 @@
 Правило: срок пишется всегда, когда он прозвучал; не прозвучал — пусто. «Сегодня» и срок, равный дате совещания, — настоящий
 срок, показывается «сегодня (дд.мм.гггг)», голой датой — никогда: её путают с датой постановки. Относительный срок
 («завтра», «к пятнице», «через две недели») переводится в дату от даты совещания, исходная фраза хранится рядом.
-«К следующему совещанию» — дата совещания + 7 дней с пометкой «оценка» (решение владельца 13.10.2026: у встреч ERP дата
-следующей заранее неизвестна). Спорное — два срока в одной фразе, срок раньше совещания, фраза без распознанного срока —
-не решается молча, а уходит оператору карточкой.
+«К следующему совещанию» — маркер «к следующей встрече» без даты (решение владелицы 20.10.2026; в Проекте ERP осталось
+прежнее правило +7 дней с пометкой «оценка»). Спорное — два срока в одной фразе, срок раньше совещания, фраза без
+распознанного срока — не решается молча, а уходит оператору карточкой.
 
 Отрицание и вопрос срока не дают («не к пятнице», «к пятнице успеете?») — по правилу отрицаний. Поручение и будущее время
 сроку не мешают: «сделайте к следующему совещанию» и есть срок, поэтому общий признак «сомнительно» модуля negation здесь
@@ -27,6 +27,7 @@ class negation:  # noqa: N801 — в ERP и Планёрке это модуль
     _TOKEN_RE = re.compile(r"[а-яёa-z0-9]+")
 
 TODAY, ESTIMATE, BEFORE_MEETING = "сегодня", "оценка", "раньше встречи"
+NEXT_MEETING = "к следующей встрече"      # маркер без даты (решение владелицы 20.10.2026)
 ISSUE_TWO, ISSUE_BEFORE, ISSUE_UNREAD = "два срока", "срок раньше даты совещания", "срок не распознан"
 ISSUE_NOT_IN_RECORD = "срок не найден в записи рядом с поручением"
 NEXT_MEETING_DAYS = 7
@@ -106,10 +107,11 @@ def _friday_of_week(d: date) -> date:
     return friday if friday >= d else friday + timedelta(days=7)
 
 
-def _candidates(text: str, meeting: date) -> list[tuple[date, str | None, int]]:
-    """Все сроки фразы: (дата, вид, позиция). Отрицания и вопросы отброшены."""
+def _candidates(text: str, meeting: date, *, marker: bool = True) -> list[tuple[date | None, str | None, int]]:
+    """Все сроки фразы: (дата, вид, позиция). Отрицания и вопросы отброшены. `marker` — «к следующей встрече»
+    маркером без даты: (None, NEXT_MEETING, позиция) — правило владелицы 20.10.2026."""
     t = _norm(text)
-    out: list[tuple[date, str | None, int]] = []
+    out: list[tuple[date | None, str | None, int]] = []
 
     def add(d: date | None, kind: str | None, pos: int) -> None:
         if d is not None and not _negated_or_question(t, pos):
@@ -153,7 +155,11 @@ def _candidates(text: str, meeting: date) -> list[tuple[date, str | None, int]]:
         wd = next(i for stem, i in _WEEKDAYS if word.startswith(stem[:4]))
         add(_next_weekday(meeting, wd), None, m.start())
     for m in _NEXT_MEETING.finditer(t):
-        add(meeting + timedelta(days=NEXT_MEETING_DAYS), ESTIMATE, m.start())
+        if marker:
+            if not _negated_or_question(t, m.start()):
+                out.append((None, NEXT_MEETING, m.start()))
+        else:
+            add(meeting + timedelta(days=NEXT_MEETING_DAYS), ESTIMATE, m.start())
     for m in _NEXT_WEEK.finditer(t):
         add(_friday_of_week(meeting) + timedelta(days=7), ESTIMATE, m.start())
     for m in _END_WEEK.finditer(t):
@@ -163,21 +169,24 @@ def _candidates(text: str, meeting: date) -> list[tuple[date, str | None, int]]:
     return out
 
 
-def resolve(phrase: str | None, meeting: date, model_date: date | None = None) -> Deadline:
+def resolve(phrase: str | None, meeting: date, model_date: date | None = None, *, marker: bool = True) -> Deadline:
     """Срок из фразы совещания. Фраза важнее даты модели: код считает от даты встречи сам и не верит пересказу. Нет фразы —
-    берётся дата модели (её тоже проверяют на «раньше встречи»)."""
+    берётся дата модели (её тоже проверяют на «раньше встречи»). `marker` — «к следующей встрече» без даты
+    (решение владелицы 20.10.2026; прежнее правило +7 дней осталось только в Проекте ERP)."""
     phrase = (phrase or "").strip()
-    found = _candidates(phrase, meeting) if phrase else []
+    found = _candidates(phrase, meeting, marker=marker) if phrase else []
     if not found and model_date is None:
         if phrase and not _negated_any(phrase):
             return Deadline(phrase=phrase, issue=ISSUE_UNREAD)
         return Deadline(phrase=phrase)
     if found:
-        dates = {d for d, _k, _p in found}
+        dates = {d if d is not None else k for d, k, _p in found}
         due, kind, _pos = sorted(found, key=lambda x: x[2])[0]
         issue = ISSUE_TWO if len(dates) > 1 else None
     else:
         due, kind, issue = model_date, None, None
+    if due is None:
+        return Deadline(due=None, kind=kind, phrase=phrase, issue=issue)      # маркер «к следующей встрече»
     if due == meeting:
         kind = TODAY
     elif due < meeting:
@@ -195,7 +204,7 @@ def label(due: date | None, date_set: date | None = None, kind: str | None = Non
     """Как срок показывается человеку: «сегодня (дд.мм.гггг)», «дд.мм.гггг (оценка)» или просто дата. Голой датой срок,
     равный дате постановки, не показывается никогда."""
     if due is None:
-        return ""
+        return NEXT_MEETING if kind == NEXT_MEETING else ""
     if kind == TODAY or (date_set is not None and due == date_set):
         return f"сегодня ({due:%d.%m.%Y})"
     if kind == ESTIMATE:

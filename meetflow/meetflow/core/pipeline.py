@@ -516,18 +516,20 @@ class MeetingPipeline:
                     kind = None
                     md = lenient_date(meeting.get("date"))
                     if md is not None:
-                        # относительный срок — в дату от даты встречи, «к следующему совещанию» = +7 «оценка»; фраза из
-                        # записи важнее даты модели (владелец 12.10.26, как в ERP и Планёрке: общий deadline.py)
+                        # относительный срок — в дату от даты встречи; «к следующей встрече» — маркер без даты
+                        # (решение владелицы 20.10.2026); фраза из записи важнее даты модели (общий deadline.py)
                         win = self._window(source.lines, g.quote or d.quote)
                         if said is not None and lenient_date(said) is None:
                             dl = deadline.resolve(said, md)
                             if dl.due is not None:
                                 said, kind = f"{dl.due:%d.%m.%Y}", dl.kind
+                            elif dl.kind == deadline.NEXT_MEETING:
+                                said, kind = None, deadline.NEXT_MEETING
                         elif said is None:
                             heard = {(x, k) for x, k, _p in deadline._candidates(win, md)}
                             if len({x for x, _k in heard}) == 1:
                                 x, kind = next(iter(heard))
-                                said = f"{x:%d.%m.%Y}"
+                                said = f"{x:%d.%m.%Y}" if x is not None else None
                         if said is not None and kind is None:
                             same = [k for x, k, _p in deadline._candidates(win, md) if x == lenient_date(said)]
                             kind = same[0] if same else None
@@ -536,7 +538,8 @@ class MeetingPipeline:
                     d = replace(d, due_date=said)
                     if kind is not None:
                         due_kinds[id(d)] = kind
-                    if said is None:      # не молча: задача без срока и карточка, как в Планёрке (владелец 12.10.26)
+                    if said is None and kind != deadline.NEXT_MEETING:
+                        # не молча: задача без срока и карточка, как в Планёрке (владелец 12.10.26)
                         rep.due_dropped += 1
                         due_unconfirmed[id(d)] = proposed
                 if g.accepted:
