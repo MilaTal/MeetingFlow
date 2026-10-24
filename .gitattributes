@@ -1,0 +1,7 @@
+# Побайтовые сверки общих модулей (tests/test_stand_1510_*.py) сравнивают md5 файла.
+# Окончания строк при клоне менялись настройкой core.autocrlf, и проверка падала не по смыслу.
+# Здесь окончания закреплены так, как в эталонных хэшах тестов.
+meetflow/meetflow/connectors/shared/doubt_labels.py text eol=lf
+meetflow/meetflow/connectors/shared/recognition_lease.py text eol=crlf
+meetflow/meetflow/connectors/shared/model_routes.py text eol=crlf
+meetflow/meetflow/connectors/shared/llm_cost.py text eol=crlf
