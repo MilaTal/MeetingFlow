@@ -25,7 +25,33 @@ DEMO_TEXT = """[00:00:05] Орлова Мария: Доброе утро, нач
 """
 
 
+def _load_env_local() -> None:
+    """Свой `.env.local` MeetFlow: строки `ИМЯ=значение` рядом с папкой пакета.
+
+    Как у Планёрки и ERP: файл вне git, уже заданная переменная окружения главнее файла.
+    Нужен для путей раздела 0 задания 24.10.2026 (`VOICE_BASE_PATH`, `TEAM_SHARED_PATH`) —
+    без него ручной запуск требовал бы передавать их в каждом окне.
+    """
+    from pathlib import Path
+    path = Path(__file__).resolve().parents[1] / ".env.local"
+    if not path.is_file():
+        return
+    try:
+        lines = path.read_text(encoding="utf-8").splitlines()
+    except OSError:
+        return
+    for line in lines:
+        line = line.strip()
+        if not line or line.startswith("#") or "=" not in line:
+            continue
+        key, value = line.split("=", 1)
+        key = key.strip()
+        if key and key not in os.environ:
+            os.environ[key] = value.strip().strip('"').strip("'")
+
+
 def main(argv: list[str] | None = None) -> int:
+    _load_env_local()
     ap = argparse.ArgumentParser(prog="meetflow")
     sub = ap.add_subparsers(dest="cmd", required=True)
     sub.add_parser("themes")

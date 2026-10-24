@@ -326,6 +326,25 @@ const routes = {
     $("#vb-save").onclick = async () => { try { await api("/api/settings/voice-base", { method: "POST", json: { path: $("#vb-path").value, path_repeat: $("#vb-repeat").value, login: ($("#vb-login") || {}).value || "", current_password: $("#vb-pass").value } }); toast("Путь к базе голосов сохранён."); render(); } catch (e) { toast(e.message); } };
   },
 
+  async teamshared() { // общая «Команда» Планёрки и ERP — только чтение (задание 24.10.2026, раздел 0)
+    const st = await api("/api/monitoring/team-shared");
+    const rows = st.people_list || [];
+    const state = !st.enabled ? "выключена" : st.ok ? "доступна, только чтение"
+      : `<span class="overdue">${esc(st.detail || "недоступна")}</span>`;
+    $("#main").innerHTML = `<h1>Общая команда</h1>
+      <div class="card-output"><table>
+        <tr><th>Что</th><th>Значение</th></tr>
+        <tr><td>Файл общей базы</td><td class="meta">${st.path ? esc(st.path) : "не задан — путь берётся из «Базы голосов»"}</td></tr>
+        <tr><td>Состояние</td><td>${state}</td></tr>
+        ${st.ok ? `<tr><td>Людей</td><td>${esc(st.people)}</td></tr>
+        <tr><td>Подтверждены</td><td>${esc(st.people_confirmed)}</td></tr>
+        <tr><td>Внутренних</td><td>${esc(st.internal)}</td></tr>
+        <tr><td>Внешних</td><td>${esc(st.external)}</td></tr>` : ""}
+      </table>
+      <p class="sub">Общая «Команда» одна у Планёрки и ERP. Сюда попадают только подтверждённые люди; MeetFlow её только читает, решения по людям принимаются в «Команде» Планёрки и ERP. Файл ищется по пути TEAM_SHARED_PATH, иначе рядом с базой голосов.</p></div>
+      ${rows.length ? `<div class="card-output"><h2 style="margin-top:0">Люди</h2>${moreRows("<tr><th>№</th><th>ФИО</th><th>Роль</th><th>Отдел</th><th>Организация</th></tr>", rows, (p, i) => `<tr><td class="no">${i + 1}</td><td>${esc(p.full_name)}${p.external ? ' <span class="badge">внешний</span>' : ""}</td><td>${esc(p.role || "")}</td><td>${esc(p.department || "")}</td><td>${esc(p.organization || "")}</td></tr>`)}</div>` : ""}`;
+  },
+
   async monitoring(tab, solo = false, title = "", prefix = "") {
     // горизонтальные вкладки под разные задачи мониторинга (по образцу «Технических служб» Планёрки)
     if (!solo) { location.replace(tab === "models" ? "#models" : "#live"); return; }   // прежний «Мониторинг» — теперь «Мониторинг RealTime» и «Параметры системы»
@@ -668,7 +687,7 @@ async function render() {
   document.querySelectorAll("[data-admin]").forEach((el) => (el.hidden = !isAdmin()));
   document.querySelectorAll("[data-super]").forEach((el) => (el.hidden = S.role !== "super_admin"));
   // мониторинг — общесистемный экран: модели и службы нужны и до первого проекта (09.10.26)
-  if (!S.project && !["design", "monitoring", "models", "live", "system", "voices"].includes(route)) { $("#main").innerHTML = `<h1>Нет проекта</h1><p class="page-sub">Создайте проект: python -m meetflow new-project "Имя" --theme it_product --db &lt;та же база, что у сервера&gt;.</p>`; return; }
+  if (!S.project && !["design", "monitoring", "models", "live", "system", "voices", "teamshared"].includes(route)) { $("#main").innerHTML = `<h1>Нет проекта</h1><p class="page-sub">Создайте проект: python -m meetflow new-project "Имя" --theme it_product --db &lt;та же база, что у сервера&gt;.</p>`; return; }
   try { await (routes[route] || routes.tasks)(arg); } catch (e) {
     if (e instanceof Stale || seq !== renderSeq) return;
     $("#main").innerHTML = `<h1>Не получилось открыть раздел</h1><p class="page-sub">${esc(e.message)}</p>`; }

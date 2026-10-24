@@ -32,6 +32,7 @@ from ..connectors.llm_mock import MockLLM
 from ..connectors.llm_ollama import OllamaLLM
 from ..connectors.llm_openrouter import OpenRouterLLM
 from ..connectors.registry import default_registry
+from ..connectors.team_shared import team_shared_state
 from ..connectors.voice_base import voice_base_state
 from ..core.config import Theme, list_themes, load_theme
 from ..core.accounts import Accounts, AuthError
@@ -821,6 +822,8 @@ def create_app(theme_name: str | None = None, db_path: str | None = None, journa
         project_or_404(pid)
         return {"intake": intake.state(pid),
                 "voice_base_path": store.get_setting("voice_base_path") or os.environ.get("VOICE_BASE_PATH"),
+                "team_shared": team_shared_state(
+                    voice_base_path=store.get_setting("voice_base_path") or os.environ.get("VOICE_BASE_PATH")),
                 "min_interval": MIN_INTERVAL}
 
     @app.post("/api/projects/{pid}/settings/watch-folder")
@@ -889,6 +892,11 @@ def create_app(theme_name: str | None = None, db_path: str | None = None, journa
     @app.get("/api/monitoring/voice-base")
     def mon_voice(u: dict = Depends(super_admin)):
         return voice_base_state(store.get_setting("voice_base_path"))
+
+    @app.get("/api/monitoring/team-shared")
+    def mon_team(u: dict = Depends(super_admin)):
+        """Общая «Команда» Планёрки и ERP — только чтение (задание 24.10.2026, раздел 0)."""
+        return team_shared_state(voice_base_path=store.get_setting("voice_base_path"))
 
     @app.get("/api/monitoring/runs")
     def mon_runs(days: int = 7, u: dict = Depends(super_admin)):
@@ -1197,6 +1205,10 @@ def create_app(theme_name: str | None = None, db_path: str | None = None, journa
         rows.append(_row("База голосов", "живо" if vb.get("ok") else "выкл." if not vb.get("path") else "нет",
                          (f"{vb.get('path')} · отпечатков {vb.get('samples')}" if vb.get("ok") else
                           vb.get("detail") or "не задана")))
+        ts = team_shared_state(voice_base_path=store.get_setting("voice_base_path"))
+        rows.append(_row("Общая «Команда»", "живо" if ts.get("ok") else "выкл." if not ts.get("enabled") else "нет",
+                         (f"людей {ts.get('people')} · внутренних {ts.get('internal')} · внешних {ts.get('external')}"
+                          if ts.get("ok") else ts.get("detail") or "не задана")))
         rows.append(_row("Досмотр реплик к системе", "живо" if pipe.guard_llm else "выкл.",
                          "модель роли guard" if pipe.guard_llm else "роль guard в маршрутах не задана — решает правило"))
         return rows
