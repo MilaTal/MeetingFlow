@@ -101,8 +101,11 @@ def test_report_of_done_is_not_assignment(store, project, make_pipe):
     p.ingest(project, mid, "t 01.10.2026.txt",
              "[00:01:00] Петрова Анастасия: Договор подписан, отправили в бухгалтерию.\n".encode())
     rep = p.run(project, mid)
-    assert rep.tasks_added == 0 and rep.tasks_held == 1
-    card = store.q("SELECT * FROM cards WHERE kind='held_task'")[0]
+    # перевёрнут 15.10.26 (находка стенда 44, решение владельца 15.10.26 заменяет пункт документа 14): 
+    # отчёт о сделанном не теряется — в реестре под вопросом, оператору карточка с причиной
+    assert rep.tasks_added == 1 and rep.tasks_held == 0 and rep.tasks_doubt == 1
+    assert "отчёт" in p.reg.list(project)[0]["doubt_reason"]
+    card = store.q("SELECT * FROM cards WHERE kind='task_doubt'")[0]
     assert "report_not_assignment" in json.loads(card["payload"])["reasons"]
 
 

@@ -27,6 +27,7 @@ from pydantic import BaseModel, Field, field_validator
 
 from ..connectors.base import ConnectorError
 from ..connectors.export import DocxOutput
+from ..core.draft_checks import clean_document
 from ..connectors.llm_mock import MockLLM
 from ..connectors.llm_ollama import OllamaLLM
 from ..connectors.llm_openrouter import OpenRouterLLM
@@ -112,6 +113,7 @@ class AccountIn(BaseModel):
 class ThresholdsIn(BaseModel):
     overdue_highlight_working_days: int | None = Field(None, ge=1, le=60)
     card_cleanup_days: int | None = Field(None, ge=0, le=365)
+    show_doubt_mark: bool | None = None       # отметка «под вопросом» в реестре — выключатель на пилот (15.10.26)
 
 
 class IntervalIn(BaseModel):
@@ -126,7 +128,8 @@ class RouteUseIn(BaseModel):
 class RoutePointIn(BaseModel):
     name: str = Field(max_length=100)
     old_name: str = Field("", max_length=100)
-    fields: dict
+    fields: dict = Field(default_factory=dict)
+    key_value: str = Field("", max_length=400)    # ключ значением — только в хранилище вне git, наружу не отдаётся
 
 
 class RouteRoleIn(BaseModel):
@@ -144,6 +147,8 @@ class ResolveIn(BaseModel):
     resolution: str = Field("", max_length=2000)
     why: str = Field("", max_length=1000)
     choice: str = Field("", max_length=200)   # выбранный кандидат по спорному имени
+    # действие карточки «под вопросом»: accept / custom / reject / duplicate (общая таблица кнопок, 15.10.26)
+    action: str = Field("", max_length=20)
     # «новый человек» в карточке «тот же или новый» — только подтверждением, внешний с организацией и ролью
     new_full_name: str = Field("", max_length=200)
     new_organization: str = Field("", max_length=200)
@@ -153,25 +158,33 @@ class ResolveIn(BaseModel):
 LLM_TOOLS = ("mock", "ollama", "openrouter", "routes")
 
 
-def _llm(theme: Theme, side: str):
-    """Инструмент подключения модели выбирается при развёртывании (решение владельца 03.10.26):
-    MEETFLOW_LLM=mock — стенд без модели с плашкой; ollama — локальная модель (модели в теме
-    llm.generator / llm.verifier, пока заглушки); openrouter — модели из llm.openrouter.*, ключ —
-    переменная OPENROUTER_API_KEY; routes — цепочки точек по ролям из models.json с переходом на запасную
-    при недоступности (решение владельца 09.10.26, connectors/llm_routes.py). Потолок ответа — llm.max_answer_tokens."""
-    mode = os.environ.get("MEETFLOW_LLM", "mock").strip().lower()
+def llm_mode() -> str:
+    """Модели по умолчанию нет (правило владельца 13.10.26, ответ 15.10.26): без MEETFLOW_LLM — маршруты из «Моделей»,
+    где роль без точек «не настроена»; заглушка — только явным MEETFLOW_LLM=mock."""
+    return os.environ.get("MEETFLOW_LLM", "").strip().lower() or "routes"
+
+
+def _llm(theme: Theme, side: str, journal: str | None = None):
+    """Инструмент подключения: routes (умолчание) — цепочки точек по ролям из models.json, назначает
+    супер-администратор в «Моделях» (connectors/llm_routes.py); mock — стенд без модели с плашкой, только явно;
+    ollama / openrouter — модели из темы (llm.generator / llm.openrouter.*), в теме их по умолчанию нет.
+    Потолок ответа — llm.max_answer_tokens, у точки — свой, если задан."""
+    mode = llm_mode()
     if mode not in LLM_TOOLS:
         raise ValueError(f"MEETFLOW_LLM={mode}: допустимы {', '.join(LLM_TOOLS)}")
     if mode == "mock":
         return MockLLM()
     cap = int(theme.get("llm.max_answer_tokens", 4096))
     if mode == "routes":
-        from ..connectors.llm_routes import RoutedLLM
-        return RoutedLLM(side, max_answer_tokens=cap)
+        from ..connectors.llm_routes import RoutedLLM, ensure_file
+        ensure_file()
+        return RoutedLLM(side, max_answer_tokens=cap, journal_path=Path(journal) if journal else None)
+    cfg = theme.get(f"llm.openrouter.{side}" if mode == "openrouter" else f"llm.{side}", {}) or {}
+    if not str(cfg.get("model") or "").strip():
+        from ..connectors.llm_routes import NotConfiguredLLM
+        return NotConfiguredLLM(side)
     if mode == "openrouter":
-        cfg = theme.get(f"llm.openrouter.{side}", {})
         return OpenRouterLLM(model=cfg.get("model", ""), profile=cfg.get("profile", "generic"), max_answer_tokens=cap)
-    cfg = theme.get(f"llm.{side}", {})
     return OllamaLLM(model=cfg.get("model", ""), profile=cfg.get("profile", "generic"),
                      num_ctx=int(cfg.get("num_ctx", 32768)), max_answer_tokens=cap)
 
@@ -181,34 +194,109 @@ def create_app(theme_name: str | None = None, db_path: str | None = None, journa
     theme = load_theme(theme_name or os.environ.get("MEETFLOW_THEME", "_default"))
     store = Store(db_path or os.environ.get("MEETFLOW_DB", "data/meetflow.db"))
     plugins = default_registry()
-    pipe = MeetingPipeline(theme, store, plugins, _llm(theme, "generator"), _llm(theme, "verifier"),
-                           journal or os.environ.get("MEETFLOW_JOURNAL", "data/logs/llm_calls.jsonl"))
-    if os.environ.get("MEETFLOW_LLM", "mock").strip().lower() == "routes":
-        from ..connectors.llm_routes import RoutedLLM, routes_path
-        try:   # досмотр — только если у роли guard есть точки; без них решает правило guard.py
-            has_guard = bool(json.loads(routes_path().read_text(encoding="utf-8")).get("roles", {}).get("guard"))
-        except (OSError, ValueError):
-            has_guard = False
-        if has_guard:
-            pipe.guard_llm = RoutedLLM("guard", max_answer_tokens=5)
+    journal = journal or os.environ.get("MEETFLOW_JOURNAL", "data/logs/llm_calls.jsonl")
+    pipe = MeetingPipeline(theme, store, plugins, _llm(theme, "generator", journal), _llm(theme, "verifier", journal),
+                           journal)
+    if llm_mode() == "routes":
+        from ..connectors.llm_routes import RoutedLLM, configured
+        if configured("guard"):   # досмотр — только если у роли guard есть точки; без них решает правило guard.py
+            pipe.guard_llm = RoutedLLM("guard", max_answer_tokens=5, journal_path=Path(journal))
+    # Копия базы на другом месте не дотягивается до файлов прежнего (стенд 22): база помнит, где лежит; открыта в
+    # другом месте — ссылки на внешние папки (приёмник, база голосов) откладываются до подтверждения супер-админом.
+    if store.path != ":memory:":
+        home, here = store.get_setting("db_home"), str(Path(store.path).resolve())
+        if home and home != here:
+            moved = []
+            for p in store.q("SELECT id, name FROM projects ORDER BY id"):
+                wf = store.get_setting("watch_folder", p["id"])
+                if wf:
+                    store.set_setting("watch_folder_previous", wf, p["id"], "система")
+                    store.set_setting("watch_folder", None, p["id"], "система")
+                    moved.append(f"папка-приёмник «{p['name']}»: {wf}")
+            vb = store.get_setting("voice_base_path")
+            if vb:
+                store.set_setting("voice_base_path_previous", vb, None, "система")
+                store.set_setting("voice_base_path", None, None, "система")
+                moved.append(f"база голосов: {vb}")
+            pipe.cards.open(None, "technical", "База открыта на новом месте — внешние папки прежнего места отложены",
+                            {"was": home, "now": here, "отложено": moved,
+                             "why": "копия не должна забирать файлы прежней установки; задайте папки заново в «Настройках»"})
+        if home != here:
+            store.set_setting("db_home", here, None, "система")
     intake = IntakeService(pipe)
+    from ..core.build_queue import BuildQueue, later
+    queue = BuildQueue(pipe)
+    pipe.queue = queue                     # автозапуск из папки-приёмника идёт через ту же очередь
+
+    # Очередь распознавания на одну машину — общая аренда ERP, Планёрки и MeetFlow (recognition_lease.py): файл
+    # лежит рядом с общей базой голосов. У MeetFlow путь к базе — в «Настройках», а не в переменной окружения.
+    lease_from_env = bool(os.environ.get("RECOGNITION_LEASE_PATH", "").strip())
+
+    def _lease_path() -> None:
+        vb = store.get_setting("voice_base_path")
+        if not lease_from_env and vb and Path(vb).parent.is_dir():
+            os.environ["RECOGNITION_LEASE_PATH"] = str(Path(vb).parent / "recognition_lease.json")
+
+    _lease_path()
+    from ..connectors.shared import recognition_lease
+    left = recognition_lease.снять_брошенную("meetflow")     # своя аренда от умершего процесса — снимаем при старте
+    if left:
+        pipe.cards.open(None, "technical", "Очередь распознавания: снята брошенная аренда", {"detail": left})
     accounts = Accounts(store)
     backups = Backups(store.path)
     watch_on = os.environ.get("MEETFLOW_WATCH", "on") != "off" if watch is None else watch
 
+    def _primary() -> bool:
+        """Метка запуска рядом с базой (стенд 34, Планёрка 0e79042): «первый уже работает» — только если его процесс
+        жив И его порт слушает. Завис при остановке и порт молчит — метка перехватывается, иначе следующие запуски
+        работали бы «вторыми» без забора из папки, и сбой не был бы виден."""
+        if store.path == ":memory:":
+            return True
+        marker = Path(store.path).with_suffix(".launch.json")
+        try:
+            m = json.loads(marker.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            m = {}
+        from ..core.build_queue import _alive
+        pid, port = int(m.get("pid") or 0), int(m.get("port") or 0)
+        if pid and pid != os.getpid() and _alive(pid) and port:
+            try:
+                with socket.create_connection(("127.0.0.1", port), timeout=0.5):
+                    return False
+            except OSError:
+                pass                       # процесс жив, а порт не слушает — завис; метку берём себе
+        try:
+            marker.write_text(json.dumps({"pid": os.getpid(), "port": int(os.environ.get("MEETFLOW_PORT", "0") or 0),
+                                          "started": time.strftime("%Y-%m-%dT%H:%M:%S")}), encoding="utf-8")
+        except OSError:
+            pass
+        return True
+
     @asynccontextmanager
     async def lifespan(_app):
-        if watch_on:
+        if watch_on and _primary():
             intake.start()        # фоновый забор из папок-приёмников
             backups.start()       # автокопия базы по расписанию
-            if os.environ.get("MEETFLOW_RESUME_ON_START", "on") != "off":
-                intake.resume_after_restart()     # оборванная перезапуском работа (локальная машина 12.10.26)
+        elif watch_on:
+            pipe.cards.open(None, "technical", "Второй экземпляр MeetFlow на той же базе — забор из папки и автокопия "
+                            "в нём выключены", {"why": "первый экземпляр работает: его процесс жив и порт слушает; "
+                                                       "остановите лишний запуск"})
         yield
         intake.stop()
         backups.stop()
 
     app = FastAPI(title="MeetFlow", lifespan=lifespan)
     app.state.theme, app.state.store, app.state.pipe, app.state.intake = theme, store, pipe, intake
+    app.state.queue = queue
+    if os.environ.get("MEETFLOW_RESUME_ON_START", "on") != "off":
+        queue.recover()       # начатое продолжается по записи о начале, независимо от автозапуска (стенд 19)
+
+    def queue_rebuild(mid: int, pause: float) -> int:
+        """Пересборка после смены модели — в очередь с «не раньше»: идущая сборка дожидается своего ответа, новая
+        начнётся после паузы и после неё (стенд 41; прежде — поток со sleep в памяти, перезапуск его терял)."""
+        m = store.get("meetings", mid)
+        return queue.enqueue(m["project_id"], mid, "смена модели генерации", not_before=later(pause))
+    app.state.queue_rebuild = queue_rebuild
     app.state.accounts, app.state.backups = accounts, backups
     app_dir = Path(__file__).resolve().parents[2]
     COOKIE = "mf_session"
@@ -263,6 +351,17 @@ def create_app(theme_name: str | None = None, db_path: str | None = None, journa
         if not p:
             raise HTTPException(404, "Проект не найден.")
         return p
+
+    def doubt_visible(u: dict) -> bool:
+        """Отметка «под вопросом» (решение владельца 15.10.26): только администраторам; выключена — никому.
+        Проверяет сервер: причина сомнения не уходит тому, кому её не показывают (находка Планёрки 3411d1f)."""
+        return u["role"] in admin_roles and bool(store.get_setting("show_doubt_mark", None, True))
+
+    def task_out(t: dict, u: dict) -> dict:
+        if not doubt_visible(u):
+            return {**t, "doubt_reason": "", "doubt_label": ""}
+        from ..connectors.shared.doubt_labels import подпись
+        return {**t, "doubt_label": подпись(t.get("doubt_reason"))}    # короткая подпись — общая с ERP и Планёркой
 
     def admin(u: dict = Depends(user)) -> dict:
         if u["role"] not in admin_roles:
@@ -412,16 +511,46 @@ def create_app(theme_name: str | None = None, db_path: str | None = None, journa
         m = store.get("meetings", mid)
         if not m:
             raise HTTPException(404, "Встреча не найдена.")
-        rep = pipe.run(m["project_id"], mid)
-        return rep.__dict__
+        # через очередь (стенд 41): одна сборка за раз по датам; ответ — когда сборка этой встречи закончится
+        rid = queue.enqueue(m["project_id"], mid, "кнопка", by=u.get("name") or u["role"])
+        res = queue.wait(rid)
+        if res.get("internal_error"):          # карточка уже заведена исполнителем очереди — одна на одинаковый сбой
+            raise HTTPException(500, res["detail"])
+        return res
+
+    @app.get("/api/meetings/{mid}/build")
+    def build_state(mid: int, u: dict = Depends(user)):
+        """Состояние сборки встречи — для экрана (стенд 3, 4): в очереди (какая по счёту) или идёт с какого часа."""
+        if not store.get("meetings", mid):
+            raise HTTPException(404, "Встреча не найдена.")
+        return queue.state(mid)
+
+    @app.post("/api/meetings/{mid}/enqueue")
+    def enqueue(mid: int, u: dict = Depends(admin)):
+        m = store.get("meetings", mid)
+        if not m:
+            raise HTTPException(404, "Встреча не найдена.")
+        queue.enqueue(m["project_id"], mid, "кнопка", by=u.get("name") or u["role"])
+        return queue.state(mid)
+
+    @app.get("/api/meetings/{mid}/tasks")
+    def meeting_tasks(mid: int, u: dict = Depends(user)):
+        """Задачи встречи (стенд 5): у каждой встречи — её задачи; «под вопросом» — только администраторам."""
+        if not store.get("meetings", mid):
+            raise HTTPException(404, "Встреча не найдена.")
+        rows = store.q("SELECT * FROM tasks WHERE source_meeting_id=? ORDER BY id", (mid,))
+        return [task_out({k: v for k, v in r.items() if k != "project_id"}, u) for r in rows]
 
     @app.get("/api/meetings/{mid}/protocol")
-    def protocol(mid: int):
+    def protocol(mid: int, u: dict = Depends(user)):
         m = store.get("meetings", mid)
         if not m or not m["protocol_md"]:
             raise HTTPException(404, "Протокола пока нет.")
-        return {"markdown": m["protocol_md"], "built_at": m["protocol_built_at"],
-                "review_notes": json.loads(m["review_notes"] or "[]"), "units": meeting_units(mid)}
+        # служебные поля (замечания проверки, когда собран) — только администраторам; участнику — документ
+        # (находка циклов ролей ERP и Планёрки 15.10.26: Планёрка GET /meetings/{id}/minutes отдавала их всем)
+        staff = u["role"] in admin_roles
+        return {"markdown": m["protocol_md"], "built_at": m["protocol_built_at"] if staff else None,
+                "review_notes": json.loads(m["review_notes"] or "[]") if staff else [], "units": meeting_units(mid)}
 
     def meeting_units(mid: int) -> list[dict]:
         """Единицы встречи показываются отдельно от протокола: протокол задним
@@ -473,6 +602,14 @@ def create_app(theme_name: str | None = None, db_path: str | None = None, journa
                         media_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
                         headers={"Content-Disposition": "attachment; filename*=UTF-8''" + quote("roadmap.docx")})
 
+    @app.get("/api/meetings/{mid}/versions")
+    def protocol_versions(mid: int, u: dict = Depends(admin)):
+        """История версий протокола (стенд 43): прежняя не затирается; модель — та, что написала текст (47)."""
+        if not store.get("meetings", mid):
+            raise HTTPException(404, "Встреча не найдена.")
+        return store.q("SELECT version, model, built_at, protocol_md FROM protocol_versions WHERE meeting_id=? "
+                       "ORDER BY version DESC", (mid,))
+
     @app.get("/api/meetings/{mid}/protocol.docx")
     def protocol_docx(mid: int):
         m = store.get("meetings", mid)
@@ -480,16 +617,19 @@ def create_app(theme_name: str | None = None, db_path: str | None = None, journa
             raise HTTPException(404, "Протокола пока нет.")
         out = DocxOutput(theme.get("design.document_font", "Times New Roman"),
                          int(theme.get("design.document_size_pt", 12)))
-        return Response(out.render(m["protocol_md"], "protocol"),
+        # проверка кодом до передачи: старые протоколы хранят шапку с пометками; сам документ не переписывается
+        return Response(out.render(clean_document(m["protocol_md"])[0], "protocol"),
                         media_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
                         headers={"Content-Disposition": "attachment; filename*=UTF-8''"
                                  + quote(f"protocol_{m['date']}.docx")})
 
     @app.get("/api/projects/{pid}/tasks")
-    def tasks(pid: int, status: Literal["active", "done", "dropped", "all"] = "active"):
+    def tasks(pid: int, status: Literal["active", "done", "dropped", "all"] = "active", u: dict = Depends(user)):
         project_or_404(pid)
         st = None if status == "all" else TaskStatus(status)
         rows = pipe.reg.list(pid, st)
+        # задача связана со встречей (стенд 5): дата встречи — для ссылки «встреча дд.мм.гггг — протокол»
+        mdates = {m["id"]: m["date"] for m in store.q("SELECT id, date FROM meetings WHERE project_id=?", (pid,))}
         n = int(store.get_setting("overdue_highlight_working_days", None, 7) or 7)
         today = date_cls.today()
 
@@ -502,8 +642,9 @@ def create_app(theme_name: str | None = None, db_path: str | None = None, journa
                 cur += timedelta(days=1)
                 days += cur.weekday() < 5
             return days >= n
-        return [{**{k: v for k, v in r.items() if k != "project_id"}, "overdue": overdue(r),
-                 "due_text": due_text(r.get("due_date"), r.get("date_set"), r.get("due_kind"))} for r in rows]
+        return [task_out({**{k: v for k, v in r.items() if k != "project_id"}, "overdue": overdue(r),
+                          "meeting_date": mdates.get(r.get("source_meeting_id")),
+                          "due_text": due_text(r.get("due_date"), r.get("date_set"), r.get("due_kind"))}, u) for r in rows]
 
     @app.patch("/api/tasks/{tid}")
     def set_status(tid: int, body: StatusIn, u: dict = Depends(user)):
@@ -514,7 +655,7 @@ def create_app(theme_name: str | None = None, db_path: str | None = None, journa
         if not can(u, "task_status") and not responsible:
             raise HTTPException(403, "Статус меняет ответственный или администратор.")
         pipe.reg.set_status(tid, body.status, "web_form", by=u["name"] or u["role"])
-        return store.get("tasks", tid)
+        return task_out(store.get("tasks", tid), u)
 
     @app.post("/api/tasks/{tid}/comment")
     def comment(tid: int, body: CommentIn, u: dict = Depends(user)):
@@ -527,11 +668,23 @@ def create_app(theme_name: str | None = None, db_path: str | None = None, journa
         pipe.reg.comment(tid, body.text, u["name"] or u["role"])
         return {"ok": True}
 
+    def doubt_buttons_now(c: dict) -> list[dict]:
+        """Кнопки «под вопросом» — по реестру СЕЙЧАС: «Это дубль» — только пока похожая задача действует (встреча
+        могла закрыть её уже после заведения карточки)."""
+        from ..core.pipeline import doubt_buttons
+        p = c["payload"] if isinstance(c["payload"], dict) else json.loads(c["payload"] or "{}")
+        t = store.get("tasks", p.get("task_id") or 0) or {}
+        return doubt_buttons(pipe.reg, c["project_id"], t.get("id") or 0, t.get("description") or p.get("description", ""))
+
     @app.get("/api/projects/{pid}/cards")
     def cards(pid: int, u: dict = Depends(admin)):
-        return [c for c in pipe.cards.list(pid) if c["kind"] != "technical"]
+        out = [c for c in pipe.cards.list(pid) if c["kind"] != "technical"]
+        for c in out:
+            if c["kind"] == "task_doubt" and c["status"] == "open":
+                c["payload"] = {**c["payload"], "buttons": doubt_buttons_now(c)}
+        return out
 
-    def _apply_card(c: dict, payload: dict, chosen: dict | None, by: str) -> None:
+    def _apply_card(c: dict, payload: dict, chosen: dict | None, by: str, custom_text: str = "") -> None:
         """«Подтвердить» делает то, что карточка предлагала. Раньше решение
         только записывалось: задача не заводилась, закрытие не применялось."""
         pid, mid = c["project_id"], c["meeting_id"]
@@ -546,6 +699,14 @@ def create_app(theme_name: str | None = None, db_path: str | None = None, journa
             who = chosen["name"] if chosen else payload.get("assignee")
             pipe.reg.add(pid, payload["description"], who, mid, payload.get("quote", ""),
                          payload.get("due_date"), (m or {}).get("date"))
+        elif c["kind"] == "task_doubt" and payload.get("task_id"):
+            # «Подтвердить» — задача остаётся, пометка снимается; выбор исполнителя — в ту же задачу (15.10.26);
+            # «Своя формулировка» — текст оператора в ту же задачу, пометка снимается
+            if custom_text:
+                pipe.reg.set_description(payload["task_id"], custom_text, by)
+            if chosen:
+                pipe.reg.set_assignee(payload["task_id"], chosen["name"], by, "из карточки «под вопросом»")
+            pipe.reg.clear_doubt(payload["task_id"], by)
         elif c["kind"] == "assign_person" and chosen and payload.get("task_id"):
             # выбор ставит исполнителя в ту же задачу, новую не заводит (письмо 30)
             pipe.reg.set_assignee(payload["task_id"], chosen["name"], by,
@@ -589,7 +750,7 @@ def create_app(theme_name: str | None = None, db_path: str | None = None, journa
             pid_new = twin[0]["id"] if twin else store.insert("people", project_id=c["project_id"], full_name=nm,
                                                              role=body.new_role.strip(), organization=org, external=1)
             chosen = {"id": pid_new, "name": f"{nm} ({org})", "new": True}
-        elif c["kind"] in ("held_task", "assign_person") and body.status == CardStatus.ACCEPTED and cands:
+        elif (c["kind"] in ("held_task", "assign_person") or c["kind"] == "task_doubt" and body.choice.strip())                 and body.status == CardStatus.ACCEPTED and cands:
             # выбор по id, а не по строке ФИО: у двух людей ФИО может совпасть (письмо 19, по ответу ERP);
             # имя принимается, только если оно однозначно среди кандидатов
             by_id = [x for x in cands if x.get("id") is not None and str(x["id"]) == body.choice.strip()]
@@ -605,11 +766,36 @@ def create_app(theme_name: str | None = None, db_path: str | None = None, journa
                 raise HTTPException(409, f"На «{p0['full_name']}» назначено несколько задач — «не человек» здесь нельзя; "
                                          "переназначьте задачи в реестре.")
         by = u["name"] or u["role"]
+        custom_text = ""
+        if c["kind"] == "task_doubt":
+            act = body.action.strip() or ("accept" if body.status == CardStatus.ACCEPTED else
+                                          "duplicate" if body.resolution.strip().lower() in ("duplicate", "дубль", "это дубль")
+                                          else "reject")
+            now_buttons = doubt_buttons_now({**c, "payload": payload})
+            if act not in {b["action"] for b in now_buttons}:
+                raise HTTPException(400, "Для этой задачи такого действия нет: " + ", ".join(b["label"] for b in now_buttons) + ".")
+            if act == "custom":
+                custom_text = body.resolution.strip()
+                if not custom_text:
+                    raise HTTPException(422, "Впишите свою формулировку задачи.")
+                body.status = CardStatus.ACCEPTED
+            elif act == "duplicate":
+                body.status, body.resolution = CardStatus.REJECTED, "duplicate"
+            elif act == "reject":
+                body.status = CardStatus.REJECTED
+            else:
+                body.status = CardStatus.ACCEPTED
         with store.tx():                      # действие и решение — вместе; второе нажатие ничего не делает
             if store.get("cards", cid)["status"] != CardStatus.OPEN.value:
                 return store.get("cards", cid)
             if body.status == CardStatus.ACCEPTED:
-                _apply_card(c, payload, chosen, by)
+                _apply_card(c, payload, chosen, by, custom_text)
+            elif c["kind"] == "task_doubt" and payload.get("task_id"):
+                # «Не задача» и «Это дубль» — задача снимается (статус «снято», не удаляется), пометка уходит
+                dup = body.resolution.strip().lower() in ("duplicate", "дубль", "это дубль")
+                pipe.reg.set_status(payload["task_id"], TaskStatus.DROPPED, "operator",
+                                    "это дубль" if dup else "не задача", by=by)
+                pipe.reg.clear_doubt(payload["task_id"], by, "дубль" if dup else "не задача")
             elif c["kind"] == "confirm_person" and payload.get("person_id"):
                 # «не тот человек»: неподтверждённая запись убирается, задачи остаются без исполнителя
                 p = store.get("people", int(payload["person_id"]))
@@ -619,7 +805,8 @@ def create_app(theme_name: str | None = None, db_path: str | None = None, journa
                         store.update("tasks", t["id"], assignee=None)
                     store.delete("people", p["id"])
             out = pipe.cards.resolve(cid, body.status, body.resolution or (chosen or {}).get("name", ""), body.why)
-        if c["kind"] == "held_task" and body.status == CardStatus.REJECTED and c["project_id"]:
+        if (c["kind"] == "held_task" or c["kind"] == "task_doubt" and body.resolution.strip().lower()
+                not in ("duplicate", "дубль", "это дубль")) and body.status == CardStatus.REJECTED and c["project_id"]:
             desc = json.loads(c["payload"] or "{}").get("description", "")
             rule = pipe.memory.answer(c["project_id"], "not_a_task", " ".join(sorted(set(stems(desc)))), "reject")
             out = dict(out, rule=rule["status_text"])
@@ -691,6 +878,7 @@ def create_app(theme_name: str | None = None, db_path: str | None = None, journa
             raise HTTPException(422, r"Нужен полный путь к файлу базы, например D:\Голоса\voices.db.")
         confirm_super(u, body.login, body.current_password, request)     # как смена папки — по паролю
         store.set_setting("voice_base_path", a or None, None, u["name"] or u["role"])
+        _lease_path()                       # аренда распознавания — рядом с новой базой голосов
         return voice_base_state(a or None)
 
     @app.get("/api/monitoring/intake")
@@ -710,8 +898,13 @@ def create_app(theme_name: str | None = None, db_path: str | None = None, journa
     # «Проверить связь». Только супер-администратору; при MEETFLOW_LLM=routes действует сразу, без перезапуска.
     @app.get("/api/monitoring/models")
     def mon_models(u: dict = Depends(super_admin)):
-        from ..connectors.llm_routes import panel
-        return panel()
+        from ..connectors.llm_routes import panel, provider_limits
+        try:
+            d = panel(full_keys=True)
+            d["provider_spend"] = provider_limits(pipe.journal.path)     # расход за месяц и предел (стенд 46)
+            return d
+        except ConnectorError as e:
+            raise HTTPException(400, str(e))
 
     def _rebuild_after_switch(mid: int, pause: float, wait_limit: float = 7200) -> None:
         """Смена модели генерации на живой сборке (локальная машина 7effaa2, решение владельца 12.10.26): текущий
@@ -760,7 +953,7 @@ def create_app(theme_name: str | None = None, db_path: str | None = None, journa
                             running[0] if running else None)
             if running and body.role == "generate":
                 for mid in running:
-                    threading.Thread(target=_rebuild_after_switch, args=(mid, pause), daemon=True).start()
+                    queue_rebuild(mid, pause)
         return panel()
 
     # Справочник подключений (09.10.26): завести, изменить, удалить, проверить до сохранения; запасная, убрать из
@@ -774,7 +967,19 @@ def create_app(theme_name: str | None = None, db_path: str | None = None, journa
     @app.post("/api/monitoring/models/endpoint")
     def mon_models_save(body: RoutePointIn, u: dict = Depends(super_admin)):
         from ..connectors import llm_routes as lr
-        _routes(lr.save_point, body.name, body.fields, by=u.get("name") or u["role"], old_name=body.old_name)
+        _routes(lr.save_point, body.name, body.fields, by=u.get("name") or u["role"], old_name=body.old_name,
+                key_value=body.key_value or None)
+        return lr.panel()
+
+    @app.post("/api/monitoring/models/endpoint/key")
+    def mon_models_key(body: RoutePointIn, u: dict = Depends(super_admin)):
+        """«Заменить ключ» / «Удалить ключ» (пустое значение) — наружу только «ключ задан · …XXXX»."""
+        from ..connectors import llm_routes as lr
+        by = u.get("name") or u["role"]
+        if body.key_value.strip():
+            _routes(lr.set_point_key, body.name, body.key_value, by=by)
+        else:
+            _routes(lr.delete_point_key, body.name, by=by)
         return lr.panel()
 
     @app.post("/api/monitoring/models/endpoint/delete")
@@ -786,7 +991,7 @@ def create_app(theme_name: str | None = None, db_path: str | None = None, journa
     @app.post("/api/monitoring/models/endpoint/test")
     def mon_models_test(body: RoutePointIn, u: dict = Depends(super_admin)):
         from ..connectors import llm_routes as lr
-        ok, detail = _routes(lr.test_point, body.fields)
+        ok, detail = _routes(lr.test_point, body.fields, body.key_value, body.old_name or body.name)
         return {"ok": ok, "detail": detail}
 
     @app.post("/api/monitoring/models/role")
@@ -804,13 +1009,40 @@ def create_app(theme_name: str | None = None, db_path: str | None = None, journa
         _routes(lr.rollback, by=u.get("name") or u["role"])
         return lr.panel()
 
-    @app.post("/api/monitoring/models/check")
-    def mon_models_check(u: dict = Depends(super_admin)):
+    # Опрос моделей фоном (стенд 12, ERP 8020): итог в памяти 20 с, все точки разом, экран ждёт не больше 0,5 с —
+    # иначе прошлый итог с возрастом. Молчащий сервер не держит экран мониторинга.
+    poll = {"results": [], "at": None, "running": False, "error": "", "done": threading.Event()}
+    poll_lock = threading.Lock()
+
+    def _poll_run() -> None:
         from ..connectors.llm_routes import check_all
         try:
-            return {"results": check_all()}
-        except ConnectorError as e:
-            raise HTTPException(400, str(e))
+            res, err = check_all(), ""
+        except Exception as e:  # noqa: BLE001 — итог опроса — справка, не ошибка экрана
+            res, err = poll["results"], str(e)[:300]
+        with poll_lock:
+            poll.update(results=res, at=time.time(), running=False, error=err)
+            poll["done"].set()
+
+    def _poll_state(force: bool) -> dict:
+        with poll_lock:
+            stale = poll["at"] is None or time.time() - poll["at"] > 20
+            if (force or stale) and not poll["running"]:
+                poll["running"], poll["done"] = True, threading.Event()
+                threading.Thread(target=_poll_run, daemon=True).start()
+            done = poll["done"]
+        done.wait(0.5)
+        with poll_lock:
+            age = None if poll["at"] is None else round(time.time() - poll["at"], 1)
+            return {"results": poll["results"], "age_sec": age, "running": poll["running"], "error": poll["error"]}
+
+    @app.get("/api/monitoring/models/status")
+    def mon_models_status(u: dict = Depends(super_admin)):
+        return _poll_state(False)
+
+    @app.post("/api/monitoring/models/check")
+    def mon_models_check(u: dict = Depends(super_admin)):
+        return _poll_state(True)
 
     @app.get("/api/monitoring")
     def monitoring(u: dict = Depends(super_admin)):
@@ -826,11 +1058,19 @@ def create_app(theme_name: str | None = None, db_path: str | None = None, journa
         tech = store.q("SELECT id, title, payload, created_at FROM cards WHERE kind='technical' AND status='open' "
                        "ORDER BY id DESC LIMIT 50")
         # выбранный при развёртывании инструмент модели; ключ — только «задан / не задан», без значения
-        tool = {"tool": os.environ.get("MEETFLOW_LLM", "mock"), "generator": getattr(pipe.gen, "model", ""),
-                "verifier": getattr(pipe.ver, "model", ""), "max_answer_tokens": theme.get("llm.max_answer_tokens", 4096),
+        tool = {"tool": llm_mode(), "generator": getattr(pipe.gen, "model", ""),
+                "verifier": getattr(pipe.ver, "display", None) or getattr(pipe.ver, "model", ""),
+                "max_answer_tokens": theme.get("llm.max_answer_tokens", 4096),
                 "openrouter_key_set": bool(os.environ.get("OPENROUTER_API_KEY", "").strip())}
+        spend = []
+        if llm_mode() == "routes":      # расход по поставщикам за месяц и предел (стенд 46), общим llm_cost
+            from ..connectors.llm_routes import provider_limits
+            try:
+                spend = provider_limits(pipe.journal.path)
+            except ConnectorError:
+                spend = []
         return {"connectors": conns, "technical_messages": tech, "journal": pipe.journal.records[-50:],
-                "todo": theme.todo(), "llm_tool": tool}
+                "todo": theme.todo(), "llm_tool": tool, "provider_spend": spend}
 
     # ---------------------------------------------------------------- вход по паролю (как в ERP и Планёрке)
     def _csrf(request: Request) -> None:
@@ -898,7 +1138,7 @@ def create_app(theme_name: str | None = None, db_path: str | None = None, journa
         return {"name": name, "state": state, "detail": detail}
 
     def _services() -> list[dict]:
-        tool = os.environ.get("MEETFLOW_LLM", "mock")
+        tool = llm_mode()
         key = bool(os.environ.get("OPENROUTER_API_KEY", "").strip())
         gen, ver = getattr(pipe.gen, "model", "") or "", getattr(pipe.ver, "model", "") or ""
         rows = []
@@ -972,6 +1212,11 @@ def create_app(theme_name: str | None = None, db_path: str | None = None, journa
     def _awaiting() -> list[dict]:
         _tech_cleanup()
         out = []
+        # задачи под вопросом — отдельной строкой и первой: фокус на операторе (решение владельца 15.10.26)
+        n = store.q("SELECT COUNT(*) AS n FROM cards WHERE status='open' AND kind='task_doubt'")[0]["n"]
+        out.append({"key": "doubt", "title": "Задачи под вопросом", "count": n, "link": "#cards",
+                    "need": "Подтвердить, снять как «не задача» или отметить дублем.",
+                    "if_not": "Задача уже в реестре и в протоколе; без ответа она так и останется под вопросом."})
         n = store.q("SELECT COUNT(*) AS n FROM cards WHERE status='open' AND kind != 'technical'")[0]["n"]
         out.append({"key": "cards", "title": "Карточки «Конфликтов»", "count": n, "link": "#cards",
                     "need": "Решить: кто исполнитель, задача ли это, закрыта ли задача.",
@@ -1003,12 +1248,14 @@ def create_app(theme_name: str | None = None, db_path: str | None = None, journa
         rec = store.q("SELECT s.name, s.created_at, m.date FROM sources s JOIN meetings m ON m.id = s.meeting_id "
                       "WHERE s.removed_reason LIKE 'запись распознана%' ORDER BY s.id DESC LIMIT 5")
         day = (datetime.now() - timedelta(days=1)).strftime("%Y-%m-%dT%H:%M:%S")
-        q = {"cards_open": store.q("SELECT COUNT(*) AS n FROM cards WHERE status='open' AND kind != 'technical'")[0]["n"],
+        q = {"tasks_doubt_open": store.q("SELECT COUNT(*) AS n FROM cards WHERE status='open' AND kind='task_doubt'")[0]["n"],
+             "cards_open": store.q("SELECT COUNT(*) AS n FROM cards WHERE status='open' AND kind != 'technical'")[0]["n"],
              "cards_resolved_day": store.q("SELECT COUNT(*) AS n FROM cards WHERE kind != 'technical' AND resolved_at >= ?",
                                            (day,))[0]["n"],
              "tech_open": store.q("SELECT COUNT(*) AS n FROM cards WHERE status='open' AND kind='technical'")[0]["n"]}
         return {"services": _services(), "awaiting_total": sum(g["count"] for g in aw), "recognition": rec, "queue": q,
                 "intake": intake.state(pid) if pid and store.get("projects", pid) else None,
+                "recognition_queue": recognition_lease.состояние(),   # кто распознаёт сейчас, кто ждёт
                 "min_interval": MIN_INTERVAL, "auth_required": accounts.auth_required()}
 
     @app.get("/api/monitoring/awaiting-input")
@@ -1079,8 +1326,8 @@ def create_app(theme_name: str | None = None, db_path: str | None = None, journa
                            "keep": backups.keep, "files": backups.files()[:10], "error": backups.last_error},
                 "access": {"auth_required": accounts.auth_required(), "accounts": accounts.list(),
                            "roles": theme["roles"], "host": os.environ.get("MEETFLOW_HOST", "127.0.0.1")},
-                "models": {"tool": os.environ.get("MEETFLOW_LLM", "mock"), "generator": getattr(pipe.gen, "model", ""),
-                           "verifier": getattr(pipe.ver, "model", ""),
+                "models": {"tool": llm_mode(), "generator": getattr(pipe.gen, "model", ""),
+                           "verifier": getattr(pipe.ver, "display", None) or getattr(pipe.ver, "model", ""),
                            "max_answer_tokens": theme.get("llm.max_answer_tokens", 4096),
                            "budget": theme.get("budget", {})}}
 
@@ -1114,12 +1361,13 @@ def create_app(theme_name: str | None = None, db_path: str | None = None, journa
         cc = store.get_setting("card_cleanup_days")
         return {"overdue_highlight_working_days": int(store.get_setting("overdue_highlight_working_days", None, 7) or 7),
                 "card_cleanup_days": int(cc if cc is not None else theme.get("operator.card_cleanup_days", 0) or 0),
-                "card_cleanup_source": "задан на экране" if cc is not None else "из темы"}
+                "card_cleanup_source": "задан на экране" if cc is not None else "из темы",
+                "show_doubt_mark": bool(store.get_setting("show_doubt_mark", None, True))}
 
     @app.post("/api/settings/thresholds")
     def set_thresholds(body: ThresholdsIn, u: dict = Depends(super_admin)):
         by = u["name"] or u["role"]
-        for k in ("overdue_highlight_working_days", "card_cleanup_days"):
+        for k in ("overdue_highlight_working_days", "card_cleanup_days", "show_doubt_mark"):
             v = getattr(body, k)
             if v is not None:
                 old = store.get_setting(k)

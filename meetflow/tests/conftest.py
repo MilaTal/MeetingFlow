@@ -10,8 +10,10 @@ import pytest
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 os.environ["MEETFLOW_LLM"] = "mock"
-# Рабочий data/models.json тестам не виден: маршруты задают сами тесты (09.10.26)
-os.environ["MODEL_ROUTES_PATH"] = str(ROOT / "tests" / "_нет_маршрутов.json")
+# Рабочий data/models.json тестам не виден: маршруты задают сами тесты (09.10.26). Папка временная: «Модели» без
+# файла кладут справочник заготовок (15.10.26) — в репозиторий он не попадает.
+import tempfile  # noqa: E402
+os.environ["MODEL_ROUTES_PATH"] = str(Path(tempfile.mkdtemp(prefix="meetflow-routes-")) / "models.json")
 
 from meetflow.connectors.llm_mock import MockLLM  # noqa: E402
 from meetflow.connectors.registry import default_registry  # noqa: E402
@@ -27,6 +29,18 @@ TRANSCRIPT = """[00:00:10] Игнатов Иван: Добрый день, на�
 [00:05:00] Игнатов Иван: Нужно ли обновить спецификации?
 """
 TEAM = ["Игнатов Иван", "Петрова Анастасия", "Сидоров Пётр"]
+
+
+@pytest.fixture
+def asr_route(tmp_path, monkeypatch):
+    """Назначенная точка распознавания (с 15.10.26 модели по умолчанию нет: без роли asr запись ждёт)."""
+    import json as _json
+    path = tmp_path / "models.json"
+    path.write_text(_json.dumps({"endpoints": {"whisper": {"kind": "faster-whisper", "model": "large-v3"}},
+                                 "roles": {"asr": ["whisper"]}}), encoding="utf-8")
+    monkeypatch.setenv("MODEL_ROUTES_PATH", str(path))
+    monkeypatch.setenv("RECOGNITION_LEASE_PATH", str(tmp_path / "recognition_lease.json"))
+    return path
 
 
 @pytest.fixture

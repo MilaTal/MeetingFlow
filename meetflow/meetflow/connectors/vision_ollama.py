@@ -24,7 +24,7 @@ PROMPT = ("Опиши, что написано и нарисовано на из
 class OllamaVision(VisionConnector):
     name = "ollama_vision"
 
-    def __init__(self, model: str = "PLACEHOLDER: deepseek-vision", url: str | None = None,
+    def __init__(self, model: str = "", url: str | None = None,
                  timeout: float = 300.0, transport: httpx.BaseTransport | None = None, max_bytes: int = 15 * 2 ** 20):
         self.model = model
         self.url = (url or os.environ.get("OLLAMA_URL") or "http://localhost:11434").rstrip("/")

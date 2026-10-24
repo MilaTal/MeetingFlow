@@ -25,3 +25,6 @@ markers = [
   "load: устойчивость и нагрузка",
   "scale: масштабируемость коннекторов",
 ]
+
+[tool.setuptools.package-data]
+"meetflow.core" = ["document_marks.md"]

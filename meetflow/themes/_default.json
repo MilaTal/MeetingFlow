@@ -128,35 +128,35 @@
     "document_size_pt": 12
   },
   "llm": {
-    "tool_choice": "MEETFLOW_LLM при развёртывании: mock — стенд без модели; ollama — локальная модель (llm.generator / llm.verifier); openrouter — llm.openrouter.*, ключ OPENROUTER_API_KEY; routes — цепочки точек по ролям из data/models.json, образец docs/models.example.json. Решение владельца 03.10.26",
+    "tool_choice": "Модели по умолчанию нет (правило владельца 13.10.26, ответ 15.10.26): без MEETFLOW_LLM — маршруты из «Моделей» (data/models.json), роль без точек — «не настроена»; mock — стенд без модели, только явно; ollama / openrouter — модель задаётся здесь, по умолчанию пусто",
     "max_answer_tokens": 4096,
     "max_answer_tokens_source": "Решение владельца 03.10.26: потолок ответа 4096 токенов на вызов — гарантирует денежный предел прогона и защищает от зависания на длинном ответе. Планёрка ставит 32000 из-за обрывов на больших таблицах (16.09.26); у MeetFlow вызовы узкие, обрыв видно сообщением",
     "openrouter": {
       "generator": {
-        "model": "qwen/qwen-plus",
+        "model": "",
         "family": "qwen",
         "profile": "qwen",
         "source": "как в Планёрке (run_dev.ps1, QWEN_MODEL)"
       },
       "verifier": {
-        "model": "meta/muse-spark-1.3",
+        "model": "",
         "family": "muse",
         "profile": "generic",
         "source": "как в Планёрке (QWEN_VERIFY_MODEL, решение владельца «на проде проверяющая модель Muse»)"
       }
     },
     "generator": {
-      "model": "PLACEHOLDER: glm-4.7-flash",
+      "model": "",
       "profile": "glm",
       "num_ctx": 32768
     },
     "verifier": {
-      "model": "PLACEHOLDER: deepseek-r1",
+      "model": "",
       "profile": "deepseek",
       "num_ctx": 32768
     },
     "vision": {
-      "model": "PLACEHOLDER: deepseek-vision"
+      "model": ""
     },
     "allow_same_verifier": false
   },

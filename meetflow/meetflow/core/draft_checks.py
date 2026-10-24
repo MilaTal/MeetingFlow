@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import re
 
+from . import document_marks
 from .text import stems
 
 # Слова оценки и обвинения: протокол фиксирует сказанное, а не выносит суждение. Список намеренно
@@ -159,3 +160,21 @@ def facts_from_other_episode(draft_md: str, source_text: str) -> list[dict]:
 
 def run_code_checks(draft_md: str, source_text: str) -> list[dict]:
     return added_judgement(draft_md, source_text) + facts_from_other_episode(draft_md, source_text)
+
+
+# ---------------------------------------------------------------- документ чистый для читателя
+# Правило владельца 13.10.26 для всех систем: в протоколе и выгрузках нет системных сообщений, пометок
+# о прогоне и проверке. Формы — общий файл ERP и Планёрки (core/document_marks.md) плюс шапка MeetFlow
+# до 15.10.26. Ловятся ФОРМЫ, а не слова: «принял с замечаниями» — деловой текст. Строка с пометкой убирается.
+def clean_document(md: str) -> tuple[str, list[dict]]:
+    """Убирает строки с системными пометками. Возвращает (чистый текст, находки) — находки идут в карточку."""
+    keep, hits = [], []
+    for ln in md.splitlines():
+        found = [rx.pattern for rx in document_marks.marks() if rx.search(ln)]
+        if found:
+            hits.append({"mark": found[0], "line": ln.strip()[:200]})
+            continue
+        keep.append(ln)
+    out = "\n".join(keep)
+    out = re.sub(r"\n{3,}", "\n\n", out)
+    return out + ("\n" if md.endswith("\n") else ""), hits

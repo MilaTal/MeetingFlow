@@ -27,7 +27,7 @@ LOCAL_HOSTS = {"localhost", "127.0.0.1", "::1"}
 class OllamaLLM(LLMConnector):
     name = "ollama"
 
-    def __init__(self, model: str = "PLACEHOLDER: glm-4.7-flash", profile: str = "glm",
+    def __init__(self, model: str = "", profile: str = "glm",
                  url: str | None = None, num_ctx: int = 32768, timeout: float = 900.0,
                  attempts: int = 3, allow_remote: bool = False, transport: httpx.BaseTransport | None = None,
                  backoff: float = 15.0, max_answer_tokens: int = 4096):

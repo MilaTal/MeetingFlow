@@ -35,7 +35,18 @@ SCHEMA: dict[str, dict[str, str]] = {
     "tasks": {"id": "INTEGER PRIMARY KEY", "project_id": "INTEGER", "description": "TEXT",
               "assignee": "TEXT", "status": "TEXT DEFAULT 'active'", "due_date": "TEXT", "due_kind": "TEXT",
               "date_set": "TEXT", "date_closed": "TEXT", "source_meeting_id": "INTEGER",
-              "source_quote": "TEXT DEFAULT ''", "last_comment": "TEXT DEFAULT ''"},
+              "source_quote": "TEXT DEFAULT ''", "last_comment": "TEXT DEFAULT ''",
+              # «под вопросом» — причина сомнения, служебная: в документы не идёт, видна только администраторам (15.10.26)
+              "doubt_reason": "TEXT DEFAULT ''"},
+    # версии протокола (находки стенда 43, 47; решение владельца 15.10.26): прежняя не затирается; model — модель,
+    # которая написала текст (ответившая точка маршрута), а не настроенная основная
+    "protocol_versions": {"id": "INTEGER PRIMARY KEY", "meeting_id": "INTEGER", "version": "INTEGER",
+                          "protocol_md": "TEXT", "model": "TEXT DEFAULT ''", "built_at": "TEXT"},
+    # очередь сборок (находки стенда 41, 19): одна за раз, по датам встреч; строка «идёт» — запись о начале
+    "build_queue": {"id": "INTEGER PRIMARY KEY", "project_id": "INTEGER", "meeting_id": "INTEGER",
+                    "meeting_date": "TEXT DEFAULT ''", "status": "TEXT", "reason": "TEXT DEFAULT ''",
+                    "not_before": "TEXT", "created_at": "TEXT", "started_at": "TEXT", "finished_at": "TEXT",
+                    "pid": "INTEGER", "result": "TEXT", "by": "TEXT DEFAULT ''"},
     "task_history": {"id": "INTEGER PRIMARY KEY", "task_id": "INTEGER", "old_status": "TEXT",
                      "new_status": "TEXT", "source": "TEXT", "evidence_quote": "TEXT DEFAULT ''",
                      "changed_by": "TEXT DEFAULT ''", "at": "TEXT"},

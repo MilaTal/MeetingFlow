@@ -111,7 +111,10 @@ def test_decided_action_without_assignee_is_task_without_card(env):
 def test_negated_action_is_not_a_task(env):
     line = "Гаврилов Павел: Вид цены добавлять не будем"
     run(env, line, [{"description": "Добавить вид цены", "assignee": None, "quote": line}])
-    assert tasks(env) == []
+    # перевёрнут дважды 15.10.26: днём (стенд 44) отрицание шло в реестр под вопросом; вечером — решение владельца:
+    # отрицание, вопрос, условие, намерение отсеиваются ДО «под вопросом», правило отрицаний сильнее
+    # и без карточки — строкой в журнал разбора, как у Планёрки ddfa618
+    assert tasks(env) == [] and not cards(env, "task_doubt") and not cards(env, "held_task")
 
 
 def test_prompt_returns_unassigned_actions():

@@ -102,7 +102,8 @@ def test_card_reject_becomes_rule_after_two(client):
 
 def test_monitoring_super_only_and_has_todo(client):
     m = client.get("/api/monitoring", headers=SUPER).json()
-    assert any(c["name"] == "whisper_local" for c in m["connectors"]) and m["todo"]
+    # перевёрнут 15.10.26 (стенд 25): заглушек имён моделей в теме больше нет — список заглушек может быть пуст
+    assert any(c["name"] == "whisper_local" for c in m["connectors"]) and isinstance(m["todo"], list)
 
 
 def test_technical_errors_not_in_cards_tab(client):

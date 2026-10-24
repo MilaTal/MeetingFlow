@@ -36,5 +36,7 @@ def test_more_than_60_mentioned_is_one_protocol_line(store, project, make_pipe):
              "[00:01:00] Игнатов Иван: Пломбы цистерн на станции проверяем по графику.\n".encode())
     p.run(project, mid)
     proto = store.get("meetings", mid)["protocol_md"]
-    assert "65" in proto and "60" in proto and "сверк" in proto.lower()
+    # перевёрнут 15.10.26 (находка стенда 30, правило владельца 13.10.26): документ чистый — пометка в журнале прогона
+    assert "сверк" not in proto.lower()
+    assert [r for r in p.journal.records if r.get("run") == mid][-1]["closing_mentioned"] == 65
     assert not store.q("SELECT * FROM cards WHERE kind='limit_cut'")

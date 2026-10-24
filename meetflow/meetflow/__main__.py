@@ -80,20 +80,14 @@ def main(argv: list[str] | None = None) -> int:
         print(p.run(pid, mid))
     elif a.cmd == "routes":
         import json
-        from .connectors.llm_routes import RoutedLLM, routes_path, use, validate
+        from .connectors.llm_routes import check_all, ensure_file, read, use
         if a.action == "use":
             print(json.dumps(use(a.role, a.point), ensure_ascii=False, indent=2))
-        elif a.action == "show":
-            print(json.dumps(validate(json.loads(routes_path().read_text(encoding="utf-8"))), ensure_ascii=False, indent=2))
-        else:
-            for side in ("generator", "verifier"):
-                llm = RoutedLLM(side)
-                for name in llm.chain():
-                    try:
-                        res = llm.connector(name).complete("Отвечай одним словом.", "Ответь: да", json_mode=False)
-                        print(f"ок   {llm.role:<9} {name:<16} {res.model} — {res.text.strip()[:30]!r}, {res.seconds:.1f} с")
-                    except Exception as e:  # noqa: BLE001 — для проверки достаточно текста ошибки
-                        print(f"НЕТ  {llm.role:<9} {name:<16} — {e}")
+        elif a.action == "show":                   # файла нет — справочник заготовок, роли «не настроены» (15.10.26)
+            print(json.dumps(read(ensure_file()), ensure_ascii=False, indent=2))
+        else:                                      # тем же телом, что рабочий вызов (общий ping)
+            for r in check_all():
+                print(f"{'ок ' if r['ok'] else 'НЕТ'}  {r['name']:<20} {r['model'] or ''} — {r['detail']}")
     elif a.cmd == "serve":
         import uvicorn
         os.environ["MEETFLOW_THEME"], os.environ["MEETFLOW_DB"] = a.theme, a.db
@@ -107,6 +101,7 @@ def main(argv: list[str] | None = None) -> int:
             print(f"Адрес {a.host} доступен из сети, а входа по паролю пока нет — сервер не запущен. "
                   "Запускайте на 127.0.0.1.", file=sys.stderr)
             return 2
+        os.environ["MEETFLOW_PORT"] = str(a.port)      # метка запуска знает свой порт (стенд 34)
         uvicorn.run(create_app(), host=a.host, port=a.port)
     return 0
 

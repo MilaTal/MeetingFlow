@@ -44,7 +44,7 @@ def test_смена_модели_подхватывается_на_следую�
     path = tmp_path / "models.json"
     _routes(path, ["main", "spare"])
     monkeypatch.setenv("MODEL_ROUTES_PATH", str(path))
-    monkeypatch.setattr(lr.RoutedLLM, "_down_until", {})
+    monkeypatch.setattr(lr.mr._state, "down_until", {})
     calls = []
 
     def on_call(name):
@@ -63,7 +63,7 @@ def test_одна_точка_в_цепочке_прежнее_поведение
     path = tmp_path / "models.json"
     _routes(path, ["main"])
     monkeypatch.setenv("MODEL_ROUTES_PATH", str(path))
-    monkeypatch.setattr(lr.RoutedLLM, "_down_until", {})
+    monkeypatch.setattr(lr.mr._state, "down_until", {})
     calls = []
 
     def on_call(name):
@@ -92,14 +92,21 @@ def test_подхват_после_перезапуска(tmp_path, monkeypatch)
         mid = c.post(f"/api/projects/{pid}/meetings", json={"date": d}, headers=H).json()["id"]
         store.insert("sources", meeting_id=mid, name="t.txt", kind="transcript", text="[00:01:00] А: текст", digest=d)
         mids.append(mid)
-    store.update("meetings", mids[0], protocol_md="# готово")          # с протоколом — не трогаем
+    # перевёрнут 15.10.26 (находка стенда 19, итог ERP 13.10 12-11): начатое продолжается по записи о начале
+    # (строка очереди «идёт» от умершего процесса), а не по косвенному признаку «источник есть, протокола нет»;
+    # автозапуск запрещает начинать новое, а не доводить начатое
+    store.update("meetings", mids[0], protocol_md="# готово")
     store.set_setting("autorun", True, pid)
-    out = intake.resume_after_restart(limit=2)
-    time.sleep(0.2)
-    assert sorted(started) == sorted(mids[2:])                         # сначала свежие, не больше двух
-    assert [o["status"] for o in out] == ["started", "started", "deferred"]
+    store.insert("build_queue", project_id=pid, meeting_id=mids[3], meeting_date="2026-10-06", status="running",
+                 pid=999999, started_at="2026-10-15T10:00:00", reason="автозапуск из папки-приёмника")
+    out = app.state.queue.recover()
+    for _ in range(40):
+        if started:
+            break
+        time.sleep(0.1)
+    assert started == [mids[3]] and out == [{"meeting_id": mids[3], "status": "requeued"}]   # только начатое
     titles = [r["title"] for r in store.q("SELECT title FROM cards WHERE kind='technical'")]
-    assert any("продолжаю сборку" in t for t in titles) and any("следующем старте" in t for t in titles)
+    assert any("продолжаю сборку" in t for t in titles)
 
 
 def test_подхват_при_выключенном_автозапуске_только_сообщение(tmp_path, monkeypatch):
@@ -109,8 +116,20 @@ def test_подхват_при_выключенном_автозапуске_т�
     monkeypatch.setattr(app.state.pipe, "run", lambda pid, mid: started.append(mid))
     pid = c.post("/api/projects", json={"name": "П"}, headers=H).json()["id"]
     mid = c.post(f"/api/projects/{pid}/meetings", json={"date": "2026-10-05"}, headers=H).json()["id"]
+    # перевёрнут 15.10.26 (находка стенда 19, итог ERP 13.10 12-11): начатое продолжается по записи о начале
+    # (строка очереди «идёт» от умершего процесса), а не по косвенному признаку «источник есть, протокола нет»;
+    # автозапуск запрещает начинать новое, а не доводить начатое
     store.insert("sources", meeting_id=mid, name="t.txt", kind="transcript", text="[00:01:00] А: текст", digest="x")
-    assert app.state.intake.resume_after_restart()[0]["status"] == "skipped" and not started
+    store.set_setting("autorun", False, pid)
+    assert app.state.queue.recover() == [] and not started              # не начато — не начинается само
+    store.insert("build_queue", project_id=pid, meeting_id=mid, meeting_date="2026-10-05", status="running",
+                 pid=999999, started_at="2026-10-15T10:00:00", reason="кнопка")
+    app.state.queue.recover()
+    for _ in range(40):
+        if started:
+            break
+        time.sleep(0.1)
+    assert started == [mid], "начатое доводится и при выключенном автозапуске"
 
 
 def test_поиска_нет_на_странице_реестра():

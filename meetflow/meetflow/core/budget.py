@@ -42,6 +42,7 @@ class RunBudget:
     max_price_per_char: float = 0.0     # самая высокая цена знака запроса из сделанных вызовов
     started: float = field(default_factory=time.monotonic)
     stopped_by: str | None = None
+    answered: dict = field(default_factory=dict)   # назначение вызова → модели, которые ответили (стенд 47)
     _lock: threading.Lock = field(default_factory=threading.Lock, repr=False)
 
     def check(self, prompt_chars: int, purpose: str = "", worst_usd: float | None = None) -> None:

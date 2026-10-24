@@ -77,7 +77,7 @@ def test_asr_offline_env_and_waiting_tools(monkeypatch, tmp_path):
     assert f.exists()  # запись не теряется
 
 
-def test_asr_leaves_media_for_pipeline_to_remove(monkeypatch, tmp_path):
+def test_asr_leaves_media_for_pipeline_to_remove(monkeypatch, tmp_path, asr_route):
     """Перевёрнут в итерации 4: коннектор больше не удаляет запись сам —
     удаляет конвейер после сохранения расшифровки (находка ревью №22)."""
     class Seg:
@@ -87,8 +87,9 @@ def test_asr_leaves_media_for_pipeline_to_remove(monkeypatch, tmp_path):
         def transcribe(self, *a, **k):
             return [Seg(1, "Игнатов, подготовьте отчёт"), Seg(65, " ")], type("I", (), {"duration": 1800})()
 
+    # с 15.10.26 распознаёт назначенная точка роли asr, а не модель темы (модели по умолчанию нет)
     asr = WhisperLocalASR(duration_min=20, duration_max=90)
-    asr._model = FakeModel()
+    monkeypatch.setattr(asr, "_load_point", lambda *a: FakeModel())
     f = tmp_path / "rec.mp4"
     f.write_bytes(b"x")
     doc = asr.transcribe(f)
@@ -96,7 +97,7 @@ def test_asr_leaves_media_for_pipeline_to_remove(monkeypatch, tmp_path):
     assert doc.meta["media_path"] == str(f)
 
 
-def test_pipeline_removes_media_after_saving(store, project, meeting, make_pipe, tmp_path):
+def test_pipeline_removes_media_after_saving(store, project, meeting, make_pipe, tmp_path, asr_route):
     from meetflow.connectors.asr_whisper import WhisperLocalASR
 
     class Seg:
@@ -104,7 +105,9 @@ def test_pipeline_removes_media_after_saving(store, project, meeting, make_pipe,
 
     p = make_pipe()
     asr = p.plugins.get("asr", "whisper_local")
-    asr._model = type("M", (), {"transcribe": lambda *a, **k: ([Seg()], type("I", (), {"duration": 1800})())})()
+    # с 15.10.26 распознаёт назначенная точка роли asr, а не модель темы (модели по умолчанию нет)
+    model = type("M", (), {"transcribe": lambda *a, **k: ([Seg()], type("I", (), {"duration": 1800})())})()
+    asr._load_point = lambda *a: model
     f = tmp_path / "rec 01.10.2026.mp4"
     f.write_bytes(b"x")
     r = p.ingest(project, meeting, f.name, path=f)
@@ -112,9 +115,11 @@ def test_pipeline_removes_media_after_saving(store, project, meeting, make_pipe,
     assert store.get("sources", r["source_id"])["removed_reason"] == "запись распознана, файл удалён"
 
 
-def test_asr_duration_window(tmp_path):
+def test_asr_duration_window(tmp_path, asr_route):
+    # с 15.10.26 распознаёт назначенная точка роли asr, а не модель темы (модели по умолчанию нет)
     asr = WhisperLocalASR(duration_min=20, duration_max=90)
-    asr._model = type("M", (), {"transcribe": lambda *a, **k: ([], type("I", (), {"duration": 600})())})()
+    model = type("M", (), {"transcribe": lambda *a, **k: ([], type("I", (), {"duration": 600})())})()
+    asr._load_point = lambda *a: model
     f = tmp_path / "rec.mp4"
     f.write_bytes(b"x")
     with pytest.raises(ConnectorError, match="held_recording"):
@@ -245,7 +250,9 @@ def test_themes_differ_in_vocabulary_and_palette():
 
 
 def test_theme_todo_lists_placeholders():
-    assert any("llm.generator.model" in t for t in load_theme("erp_rollout").todo())
+    # перевёрнут 15.10.26 (находка стенда 25, правило владельца 13.10.26, ответ 15.10.26 — модели по умолчанию нет): 
+    # заглушек имён моделей в теме нет — модели назначаются в «Моделях», а не подставляются
+    assert not any("llm.generator.model" in t for t in load_theme("erp_rollout").todo())
 
 
 @pytest.mark.parametrize("patch,err", [

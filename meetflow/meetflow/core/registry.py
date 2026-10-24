@@ -28,16 +28,40 @@ class TaskRegistry:
 
     def add(self, project_id: int, description: str, assignee: str | None, meeting_id: int | None = None,
             quote: str = "", due_date: str | None = None, date_set: str | None = None,
-            due_kind: str | None = None) -> int:
+            due_kind: str | None = None, doubt_reason: str = "") -> int:
         if meeting_id:   # формулировка от модели — через фильтр выхода; набранное человеком не трогаем
             from .guard import filter_text
             description = filter_text(description)[0]
+        # хвост секретаря («задача с 29.09.2026 не обсуждали…») — при любом заведении (находка стенда 31, 13.10.26)
+        from .document_marks import strip_tails
+        description = strip_tails(description)[0]
         tid = self.s.insert("tasks", project_id=project_id, description=description, assignee=assignee,
                             status=TaskStatus.ACTIVE.value, due_date=due_date, due_kind=due_kind,
                             date_set=date_set or now()[:10],
-                            source_meeting_id=meeting_id, source_quote=quote)
+                            source_meeting_id=meeting_id, source_quote=quote, doubt_reason=doubt_reason[:300])
         self._history(tid, None, TaskStatus.ACTIVE.value, "meeting" if meeting_id else "web_form", quote)
         return tid
+
+    def set_description(self, task_id: int, text: str, by: str = "", note: str = "своя формулировка") -> None:
+        """Своя формулировка оператора (карточка «под вопросом», 15.10.26) — с записью в историю."""
+        text = (text or "").strip()[:2000]
+        if not text:
+            raise ValueError("формулировка пустая")
+        with self.s.tx():
+            t = self.s.get("tasks", task_id)
+            if not t:
+                raise KeyError(task_id)
+            self.s.update("tasks", task_id, description=text)
+            self._history(task_id, t["status"], t["status"], "operator", f"{note}: было «{(t['description'] or '')[:300]}»", by)
+
+    def clear_doubt(self, task_id: int, by: str = "", note: str = "подтверждена") -> None:
+        """Снять «под вопросом» (решение в карточке task_doubt, 15.10.26) — с записью в историю."""
+        with self.s.tx():
+            t = self.s.get("tasks", task_id)
+            if not t:
+                raise KeyError(task_id)
+            self.s.update("tasks", task_id, doubt_reason="")
+            self._history(task_id, t["status"], t["status"], "operator", f"под вопросом снято: {note}", by)
 
     def set_due(self, task_id: int, due: str | None, by: str = "", note: str = "") -> None:
         """Срок по решению в карточке «срок под вопросом» (владелец 12.10.26, как в Планёрке) — с записью в историю."""
@@ -73,7 +97,9 @@ class TaskRegistry:
             t = self.s.get("tasks", task_id)
             if not t:
                 raise KeyError(task_id)
-            closed = (meeting_date or now()[:10]) if status != TaskStatus.ACTIVE else None
+            if t["status"] == status.value:   # повтор той же смены (две вкладки, повтор запроса) — без записи
+                return True
+            closed =(meeting_date or now()[:10]) if status != TaskStatus.ACTIVE else None
             self.s.update("tasks", task_id, status=status.value, date_closed=closed)
             self._history(task_id, t["status"], status.value, source, quote, by)
         return True
@@ -132,9 +158,10 @@ class CardQueue:
         if days <= 0:
             return 0
         edge = (datetime.now() - timedelta(days=days)).strftime("%Y-%m-%dT%H:%M:%S")
-        # карточки выбора и подтверждения исполнителя не снимаются сами (документ 14)
+        # карточки выбора и подтверждения исполнителя не снимаются сами (документ 14); «под вопросом» — тоже:
+        # задача уже в реестре, без карточки её пометку нечем снять (15.10.26, как в Планёрке)
         rows = self.s.q("SELECT id FROM cards WHERE project_id=? AND status='open' AND created_at < ? "
-                        "AND kind NOT IN ('technical', 'assign_person', 'confirm_person')", (project_id, edge))
+                        "AND kind NOT IN ('technical', 'assign_person', 'confirm_person', 'task_doubt')", (project_id, edge))
         for r in rows:
             self.s.update("cards", r["id"], status=CardStatus.REJECTED.value, resolution="снято по сроку",
                           resolved_at=now())

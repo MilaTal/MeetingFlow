@@ -43,4 +43,8 @@ def test_protocol_truncation_keeps_tasks(store, project, make_pipe):
     p.ingest(project, mid, "t 01.10.2026.txt", TRANSCRIPT.encode())
     rep = p.run(project, mid)
     assert rep.protocol_saved and rep.tasks_added >= 1
-    assert "потолк" in store.get("meetings", mid)["protocol_md"]
+    # перевёрнут 15.10.26 (находка стенда 30, правило владельца 13.10.26): документ чистый — пометка в карточке
+    md = store.get("meetings", mid)["protocol_md"]
+    assert "потолк" not in md and "Не собрано" not in md
+    assert any("потолк" in c["payload"].get("detail", "") for c in store.q("SELECT * FROM cards WHERE kind='technical'")
+               for c in [{**c, "payload": __import__("json").loads(c["payload"] or "{}")}])

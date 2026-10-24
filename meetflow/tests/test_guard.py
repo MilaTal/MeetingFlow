@@ -122,7 +122,10 @@ def test_pipeline_marks_fact_opens_card_and_still_builds_protocol(store, project
     rep = p.run(project, meeting)
     assert rep.status == "ok" and rep.protocol_saved
     md = store.get("meetings", meeting)["protocol_md"]
-    assert "обращены к самой системе" in md and "строки 7" in md
+    # перевёрнут 15.10.26 (находка стенда 30, правило владельца 13.10.26): документ чистый — пометка в карточке
+    assert "обращены к самой системе" not in md
+    card = next(c for c in p.cards.list(project) if "обращены к самой системе" in c["title"])
+    assert card["payload"]["lines"] == "7"
     assert "тебя обучали" not in md
     assert any(c["kind"] == "suspicious_source" for c in p.cards.list(project))
     assert p.reg.list(project), "поручения встречи заведены, протокол не отказан"
@@ -157,7 +160,9 @@ def test_unsure_line_goes_to_guard_model_and_yes_hides_it(store, project, meetin
     p.ingest(project, meeting, "t.txt", (TRANSCRIPT + UNSURE).encode())
     rep = p.run(project, meeting)
     assert rep.status == "ok" and p.guard_llm.calls == 1
-    assert "обращены к самой системе" in store.get("meetings", meeting)["protocol_md"]
+    # перевёрнут 15.10.26 (находка стенда 30, правило владельца 13.10.26): документ чистый — пометка в карточке
+    assert "обращены к самой системе" not in store.get("meetings", meeting)["protocol_md"]
+    assert any("обращены к самой системе" in c["title"] for c in p.cards.list(project))
     assert any(c["title"].startswith("Досмотр пометил") for c in p.cards.list(project))
 
 

@@ -108,7 +108,8 @@ def validate(data: dict[str, Any]) -> list[str]:
     g, v = data["llm"].get("generator", {}), data["llm"].get("verifier", {})
     # сравнивается семейство (поле family, иначе профиль, иначе начало имени модели), а не имя:
     # glm-5.3 и glm-4.7-flash — одно семейство, проверка такой парой не независима (01/18)
-    if g and v and g.get("model") == v.get("model") and not data["llm"].get("allow_same_verifier"):
+    # модель не задана (по умолчанию её нет, 13.10.26) — сравнивать нечего: роль «не настроена»
+    if g and v and g.get("model") and g.get("model") == v.get("model") and not data["llm"].get("allow_same_verifier"):
         errors.append("llm: проверяющая модель совпадает с генерирующей (allow_same_verifier=false)")
     elif g and v and _family(g) == _family(v) and not data["llm"].get("allow_same_verifier"):
         errors.append(f"llm: проверяющая модель того же семейства, что генерирующая ({_family(g)}); "
@@ -121,7 +122,7 @@ def validate(data: dict[str, Any]) -> list[str]:
     orr = data["llm"].get("openrouter") or {}
     og, ov = orr.get("generator") or {}, orr.get("verifier") or {}
     if og and ov and not data["llm"].get("allow_same_verifier") and \
-            (og.get("model") == ov.get("model") or _family(og) == _family(ov)):
+            ((og.get("model") and og.get("model") == ov.get("model")) or _family(og) == _family(ov)):
         errors.append(f"llm.openrouter: проверяющая модель того же семейства, что генерирующая ({_family(og)})")
     for side, cfg in (("generator", og), ("verifier", ov)):
         if "contributor" in str(cfg.get("model", "")):

@@ -37,7 +37,7 @@ from .prompts import PromptBuilder, chunks, parse_json, profile
 from .registry import CardQueue, OperatorMemory, TaskRegistry
 from . import deadline
 from .dates import due_text, lenient_date
-from .draft_checks import run_code_checks
+from .draft_checks import clean_document, run_code_checks
 from .morph import supported_due
 from .guard import classify, filter_text, line_verdict
 from .security import injection_hits, looks_like_injection
@@ -48,13 +48,21 @@ from .units import apply as apply_units
 from .types import Person, SourceDoc, SourceKind, TaskDraft, TaskStatus
 
 
+def _as_of(rows: list[dict], meeting_date: str | None) -> list[dict]:
+    """Задачи, поставленные до даты встречи включительно. Без даты у встречи или задачи — не отсекаем."""
+    if not meeting_date:
+        return rows
+    return [r for r in rows if not (r.get("date_set") and r["date_set"][:10] > meeting_date[:10])]
+
+
 @dataclass
 class RunReport:
     meeting_id: int
-    status: str = "ok"          # ok | stopped_by_limit | no_sources | error | busy
+    status: str = "ok"          # ok | stopped_by_limit | no_sources | error | busy | not_configured | not_ready
     detail: str = ""
     tasks_added: int = 0
     tasks_held: int = 0
+    tasks_doubt: int = 0        # заведено под вопросом (15.10.26)
     tasks_closed: int = 0
     tasks_dropped: int = 0
     due_dropped: int = 0        # срок от модели, которого во встрече не было
@@ -113,6 +121,51 @@ def _int(v: Any) -> int | None:
     return v if isinstance(v, int) and not isinstance(v, bool) else None
 
 
+# Сомнительная задача — сразу в реестр «под вопросом» с карточкой (решение владельца 15.10.26, заменяет пункт
+# документа 14). Вне реестра — дубль, пустая формулировка и внедрённая инструкция: текст реестра идёт в подсказки
+# модели на следующих встречах. Уже отклонённое оператором отсекается раньше — по правилу памяти.
+# отсеиваются целиком: ни задачи, ни карточки — строкой в журнал разбора (владелец 15.10.26, вечер; Планёрка ddfa618)
+SIFTED = {"negation_in_quote", "question_not_assignment", "condition_not_assignment", "intent_not_assignment"}
+OUT_OF_REGISTRY = {"duplicate", "empty_description", "suspicious_instruction",
+                   # отрицание, вопрос, условие, намерение отсеиваются ДО «под вопросом» (владелец 15.10.26, вечер)
+                   "negation_in_quote", "question_not_assignment", "condition_not_assignment", "intent_not_assignment"}
+REASON_TEXT = {
+    "no_verbatim_quote": "нет дословной цитаты", "no_assignee": "исполнитель не назван",
+    "assignee_not_in_team": "человека нет в Команде", "assignee_not_said": "исполнитель не прозвучал",
+    "assignee_ambiguous": "неясно, о ком речь", "question_not_assignment": "это вопрос, а не поручение",
+    "negation_in_quote": "в цитате отрицание", "report_not_assignment": "похоже на отчёт о сделанном",
+    "condition_not_assignment": "условие, а не поручение", "intent_not_assignment": "намерение говорящего о себе",
+    "same_or_new": "рядом признак, что это может быть другой человек",
+    "department_without_head": "назван отдел, а руководителя у отдела нет",
+}
+
+
+def doubt_buttons(reg, project_id: int, task_id: int, description: str) -> list[dict]:
+    """Кнопки карточки «под вопросом» — общей таблицей doubt_labels (Планёрка автор, владелец 15.10.26, вечер):
+    «Это дубль» — только если в реестре есть похожая действующая задача."""
+    from ..connectors.shared.doubt_labels import кнопки
+    from .units import same_point
+    similar = any(t["id"] != task_id and same_point(description, t["description"] or "")
+                  for t in reg.list(project_id))
+    return кнопки(similar)
+
+
+def doubt_text(reasons: list[str]) -> str:
+    return "; ".join(REASON_TEXT.get(r, r) for r in reasons)
+
+
+def same_task_text(text: str, descriptions: list[str]) -> bool:
+    """Та же задача по формулировке: основы без дат покрывают друг друга на 0,7, номера совпадают (D4, D7)."""
+    mine = set(stems(_without_dates(text)))
+
+    def same(d: str) -> bool:
+        theirs = set(stems(_without_dates(d)))
+        if {t for t in theirs if t.isdigit()} != {t for t in mine if t.isdigit()}:
+            return False
+        return max(coverage(mine, theirs), coverage(theirs, mine)) >= 0.7
+    return bool(mine) and any(same(d) for d in descriptions if d)
+
+
 def noise_duplicate(reasons: list[str], unit_text: str, added_descriptions: list[str]) -> bool:
     """D4 (прогон 09.10.26): единица встречи отклонена только как дубль задачи, которую завёл этот же прогон, —
     задача не потеряна, карточка «не заведена» была бы ложной тревогой. Дубль старой задачи — по-прежнему карточка."""
@@ -161,8 +214,11 @@ class MeetingPipeline:
     @property
     def tool_info(self) -> dict:
         """Где обработана встреча: инструмент подключения и модели (письмо meeting-registry 17, п. 4)."""
-        return {"llm_tool": getattr(self.gen, "name", ""), "generator": getattr(self.gen, "model", ""),
+        info = {"llm_tool": getattr(self.gen, "name", ""), "generator": getattr(self.gen, "model", ""),
                 "verifier": getattr(self.ver, "model", "")}
+        if getattr(self.ver, "borrowed", False):        # проверяет модель черновика — в сведениях о прогоне явно
+            info["verifier_note"] = self.ver.display
+        return info
 
     @property
     def stand(self) -> bool:
@@ -203,6 +259,22 @@ class MeetingPipeline:
         with self._locks_guard:
             return self._locks.setdefault(key, threading.Lock())
 
+    def _is_own_protocol(self, project_id: int, text: str) -> bool:
+        """Свой протокол, присланный обратно (.md или выгрузка Word). Шапка без пометок (13.10.26),
+        поэтому узнаём по строкам: не меньше 60 % содержательных строк сохранённого протокола есть в файле."""
+        def lines(t: str) -> set[str]:
+            return {" ".join(ln.replace("|", " ").replace("#", " ").replace("*", " ").split()).lower()
+                    for ln in (t or "").splitlines() if len(ln.strip()) > 12}
+        got = lines(text)
+        if not got:
+            return False
+        for r in self.s.q("SELECT protocol_md FROM meetings m "
+                          "WHERE m.project_id=? AND m.protocol_md IS NOT NULL AND m.protocol_md != ''", (project_id,)):
+            own = lines(r["protocol_md"])
+            if len(own) >= 3 and len(own & got) >= 0.6 * len(own):
+                return True
+        return False
+
     # ---------------------------------------------------------------- приём
     def ingest(self, project_id: int, meeting_id: int, filename: str, data: bytes | None = None,
                path: Path | None = None) -> dict:
@@ -228,7 +300,7 @@ class MeetingPipeline:
                                 meeting_id)
                 return {"status": "held", "reason": msg}
             return {"status": "rejected", "reason": msg}
-        if doc.meta.get("own_output"):
+        if doc.meta.get("own_output") or self._is_own_protocol(project_id, doc.text):
             return {"status": "rejected", "reason": "Это выгрузка самой системы — она не может быть источником встречи."}
         dup = self.s.q("SELECT id FROM sources WHERE meeting_id=? AND digest=? AND removed_at IS NULL",
                        (meeting_id, doc.content_digest))
@@ -254,6 +326,12 @@ class MeetingPipeline:
         return {"status": "ok", "source_id": sid, "kind": doc.kind.value}
 
     # ---------------------------------------------------------------- вызов модели
+    def step_failed(self, project_id: int, meeting_id: int, step: str, e: BaseException | str) -> None:
+        """Одна точка для сбоев шагов сборки (стенд 40, ERP 9e8af1a): ошибка шага не глотается — оператор
+        получает техническую карточку с причиной; прогон и сохранённое при этом не отменяются."""
+        detail = e if isinstance(e, str) else f"{type(e).__name__}: {str(e)[:400]}"
+        self.cards.open(project_id, "technical", f"Шаг сборки не выполнен: {step}", {"detail": detail}, meeting_id)
+
     def _call(self, llm: LLMConnector, budget: RunBudget, purpose: str, system: str, user: str,
               meeting_id: int) -> Any:
         for attempt in (0, 1):
@@ -267,9 +345,16 @@ class MeetingPipeline:
                 self.journal.write(purpose=purpose, meeting_id=meeting_id, model=llm.model, error=str(e))
                 raise
             budget.add_cost(res.cost_usd, len(system) + len(user))
+            budget.answered.setdefault(purpose, []).append(res.model)
+            if isinstance(res.raw, dict) and res.raw.get("provider"):
+                budget.answered.setdefault("_external", []).append(f"{res.raw.get('route') or res.model} ({res.raw['provider']})")
+            raw = res.raw if isinstance(res.raw, dict) else {}
+            # поставщик и вид цены — для предела расхода по поставщику и «поставщик / расчёт / не задан» (стенд 46)
             self.journal.write(purpose=purpose, meeting_id=meeting_id, model=res.model, attempt=attempt,
                                prompt_tokens=res.prompt_tokens, completion_tokens=res.completion_tokens,
-                               cost_usd=res.cost_usd, seconds=round(res.seconds, 2), chars=len(system) + len(user))
+                               cost_usd=res.cost_usd, seconds=round(res.seconds, 2), chars=len(system) + len(user),
+                               **{k: raw[k] for k in ("route", "provider", "cost_source", "cached_tokens")
+                                  if raw.get(k) is not None})
             try:
                 return parse_json(res.text, self.prof.strip_think)
             except (ValueError, json.JSONDecodeError) as e:
@@ -291,6 +376,12 @@ class MeetingPipeline:
 
     def _run(self, project_id: int, meeting_id: int, limits: BudgetLimits | None) -> RunReport:
         rep = RunReport(meeting_id)
+        if getattr(self.gen, "configured", True) is False:
+            # модели по умолчанию нет (13.10.26, 15.10.26): роль не назначена — ни одного вызова, оператору карточка
+            rep.status, rep.detail = "not_configured", self.gen.not_configured_text
+            self.cards.open(project_id, "technical", "Сборка не начата: модель не настроена",
+                            {"detail": rep.detail}, meeting_id)
+            return rep
         # чистка нерешённых карточек по сроку (operator.card_cleanup_days): была написана, но не вызывалась (письмо 47)
         # порог с экрана «Параметры системы → Пороги» важнее темы (владелец 11.10.26, как в Планёрке)
         days = self.s.get_setting("card_cleanup_days")
@@ -312,25 +403,44 @@ class MeetingPipeline:
         base = transcripts[0] if transcripts else notes[0]
         source = SourceDoc(base["name"], SourceKind(base["kind"]), base["text"])
         notes_text = "\n".join(n["text"] for n in notes) if transcripts else ""
+        # пробный запрос перед сборкой (стенд 39, ERP 689c739): готова ли модель принять запрос такого размера;
+        # не готова — следующая точка; не готова ни одна — сборка не начинается, одна карточка на встречу
+        if hasattr(self.gen, "probe"):
+            ready, tries = self.gen.probe(chars=min(len(source.text) + len(notes_text), 200_000))
+            for t in tries:
+                self.journal.write(purpose="probe", meeting_id=meeting_id, point=t.get("point"), ok=t.get("ok"),
+                                   reason=t.get("reason", ""), seconds=t.get("seconds"))
+            if not ready:
+                rep.status = "not_ready"
+                rep.detail = "Модель не готова: " + "; ".join(f"{t.get('point')}: {t.get('reason')}" for t in tries)
+                title = "Сборка не начата: модель не готова"
+                if not self.s.q("SELECT id FROM cards WHERE meeting_id=? AND title=? AND status='open'",
+                                (meeting_id, title)):
+                    self.cards.open(project_id, "technical", title,
+                                    {"detail": "пробный запрос перед сборкой — ни одна точка роли генерации не ответила",
+                                     "points": [{"point": t.get("point"), "reason": t.get("reason")} for t in tries]},
+                                    meeting_id)
+                return rep
 
         people = [Person(p["full_name"], p["role"], p["department"], json.loads(p["aliases"] or "[]"),
                          bool(p["external"]), bool(p["confirmed"]), p["id"], p.get("organization") or "",
                          json.loads(p.get("known_marks") or "[]"))
                   for p in self.s.q("SELECT * FROM people WHERE project_id=?", (project_id,))]
         team = Team(people, self.theme.get("people.diminutives"), self.theme.get("people.department_heads"),
-                    tasks=self.reg.list(project_id, None), today=meeting.get("date"))
+                    tasks=_as_of(self.reg.list(project_id, None), meeting.get("date")), today=meeting.get("date"))
         gate = TaskGate(team, self.neg, GateConfig(**self.theme.get("gates", {})))
 
         planned: list[tuple[TaskDraft, Any]] = []
         due_unconfirmed: dict[int, str] = {}
         due_kinds: dict[int, str] = {}           # id черновика → вид срока: «сегодня» / «оценка» (12.10.26)     # id черновика → срок модели, не прозвучавший рядом (12.10.26)
-        held: list[tuple[TaskDraft, list[str], str]] = []
+        held: list[tuple[TaskDraft, list[str], str, Any]] = []
+        doubt = 0                         # заведено под вопросом этим прогоном (15.10.26)
         closings: list[tuple[int, str]] = []
         closing_cards: list = []          # (задача, цитата, почему[, описание])
         removals: list[tuple[int, str]] = []
         sections: dict[str, str] = {}
         stopped: BudgetExceeded | None = None     # остановка по пределу: сделанное сохраняется (01/10)
-        protocol_notes: list[str] = []            # строки-пометки в шапку протокола
+        closing_mentioned = 0                     # «названо больше 60» — в журнал прогона, не в документ (13.10)
         limited = False                           # дополнение (единицы, проверка) остановлено пределом (01/8)
         mass_closing = None
         ures = None
@@ -371,7 +481,8 @@ class MeetingPipeline:
             if cut:                               # срез не молча (01/22)
                 self.cards.open(project_id, "limit_cut", f"Модель предложила больше 40 задач на кусок — {cut} не "
                                 f"рассмотрены", {"cut": cut, "what": "поручения"}, meeting_id)
-            existing = [(r["description"], r["assignee"]) for r in self.reg.list(project_id)]
+            # реестр «на дату встречи»: поставленное позже D не делает поручение D дублем (стенд 42, 371f967)
+            existing = [(r["description"], r["assignee"]) for r in _as_of(self.reg.list(project_id), meeting.get("date"))]
             this_meeting = self.s.q("SELECT source_quote, description, assignee FROM tasks WHERE source_meeting_id=?",
                                     (meeting_id,))
             # уже заведённое этой встречей: (цитата, исполнитель, основы описания). Ключ только
@@ -423,7 +534,7 @@ class MeetingPipeline:
                     existing.append((g.description, who))
                     known.append((g.quote, who, set(stems(g.description))))
                 else:
-                    held.append((d, g.reasons, g.quote))
+                    held.append((d, g.reasons, g.quote, g))
 
             # строки, похожие на внедрённую инструкцию, не становятся основанием закрытия (01/12)
             inj_lines = {i for i, ln in enumerate(source.lines) if looks_like_injection(ln)}
@@ -443,10 +554,11 @@ class MeetingPipeline:
             # и не идут в протокол, единицы и проверку: строка заменяется пометкой, нумерация та же
             safe_text = "\n".join(HIDDEN if i in inj_lines else ln for i, ln in enumerate(source.lines))
             safe_source = SourceDoc(source.name, source.kind, safe_text) if inj_lines else source
-            if inj_lines:   # протокол не отказываем: обращение к системе — факт встречи, видный в шапке (письмо 10.10)
+            if inj_lines:   # протокол не отказываем; пометка — оператору карточкой, документ чистый (владелец 13.10.26)
                 nums = ", ".join(str(i + 1) for i in sorted(inj_lines)[:10]) + ("…" if len(inj_lines) > 10 else "")
-                protocol_notes.append(f"В записи {len(inj_lines)} реплик(и) обращены к самой системе, а не к "
-                                      f"участникам (строки {nums}); в разбор не взяты, переданы оператору.")
+                self.cards.open(project_id, "suspicious_source",
+                                f"В записи {len(inj_lines)} реплик(и) обращены к самой системе, а не к участникам",
+                                {"lines": nums, "note": "в разбор не взяты"}, meeting_id)
             try:
                 if stopped is None:
                     # 2. закрытия — код отбирает фразы-кандидаты, модель называет номер
@@ -458,9 +570,8 @@ class MeetingPipeline:
                     cstats: dict = {}
                     cands = self._closing_candidates(active, source.lines, exclude=own_lines, skip=inj_lines,
                                                      stats=cstats)
-                    if cstats.get("mentioned", 0) > 60:   # видно одной строкой в протоколе, не карточкой
-                        protocol_notes.append(f"На встрече названо {cstats['mentioned']} открытых задач; на "
-                                              f"сверку закрытий взяты 60, ближе всего к сказанному.")
+                    if cstats.get("mentioned", 0) > 60:   # в журнал прогона: не документ и не карточка (03.10, 13.10)
+                        closing_mentioned = cstats["mentioned"]
                     allowed = {(c["task_ref"], ph["n"]) for c in cands for ph in c["phrases"]}
                     titles = {t["id"]: t["description"] for t in active}
                     if cands:
@@ -507,8 +618,9 @@ class MeetingPipeline:
                     except AnswerTruncated:
                         # разделы не поместились в потолок ответа — протокол и задачи сохраняются без них
                         cap = int(self.theme.get("llm.max_answer_tokens", 4096))
-                        sections = {s: f"Не собрано: ответ модели длиннее потолка {cap} токенов." for s in
-                                    self.theme["protocol_skeleton"]}
+                        sections = {s: None for s in self.theme["protocol_skeleton"]}   # None — раздел не собран
+                        self.cards.open(project_id, "technical", "Разделы протокола не собраны",
+                                        {"detail": f"ответ модели длиннее потолка {cap} токенов"}, meeting_id)
                         limited = True
 
                     # 3а. единицы встречи (решения, договорённости, вопросы, вехи) — по флагу темы
@@ -516,9 +628,11 @@ class MeetingPipeline:
                         try:
                             ures = UnitsExtractor(self, team, gate).run(project_id, {**meeting, "id": meeting_id},
                                                                          safe_source, budget, existing)
-                            if ures["failed_ranges"]:     # неразобранный кусок виден (01/22)
+                            if ures["failed_ranges"]:     # неразобранный кусок виден (01/22) — и карточкой (стенд 40)
                                 rep.detail = (f"Единицы встречи: не разобрано кусков {len(ures['failed_ranges'])} "
                                               f"из {ures['chunks']}.")
+                                self.step_failed(project_id, meeting_id, "Единицы встречи: разбор части записи",
+                                                 rep.detail)
                         except BudgetExceeded as e:
                             # единицы — дополнение: протокол сохраняется и без них
                             rep.detail, limited = f"Единицы встречи не собраны: {e}", True
@@ -536,7 +650,7 @@ class MeetingPipeline:
             return rep
         if stopped is not None:
             rep.status, rep.detail = "stopped_by_limit", str(stopped)
-            sections = {s: "Не собрано: прогон остановлен по пределу." for s in self.theme["protocol_skeleton"]}
+            sections = {s: None for s in self.theme["protocol_skeleton"]}   # причина — в карточке ниже
             self.cards.open(project_id, "stopped_by_limit", "Прогон остановлен по пределу — протокол неполный",
                             {"detail": str(stopped), "stopped_by": budget.stopped_by}, meeting_id)
 
@@ -624,7 +738,10 @@ class MeetingPipeline:
                                          "candidates": cands}, meeting_id)
                 all_tasks = None
                 seen_held: set[tuple] = set()
-                for d, reasons, quote in held:
+                for d, reasons, quote, g in held:
+                    # уверенная близняшка этого прогона вытесняет сомнительную — без карточки (15.10.26, Планёрка b85d70f)
+                    if same_task_text(d.description, [getattr(x[2], "description", "") for x in added]):
+                        continue
                     # одна задача, исполнитель в разных падежах («Соболева» / «Соболевой») — одна карточка;
                     # сверка по основам и по карточкам этого же прогона (письма 27 и 28)
                     key = (" ".join(sorted(set(stems(d.description)))), " ".join(sorted(set(stems(d.assignee or "")))))
@@ -652,6 +769,29 @@ class MeetingPipeline:
                         all_tasks = all_tasks if all_tasks is not None else self.reg.list(project_id, None)
                         payload["candidates"] = team.candidate_hints(d.assignee or "", d.description, source.lines,
                                                                      notes_text, all_tasks)
+                    if set(reasons) & SIFTED:
+                        self.journal.write(purpose="triage", meeting_id=meeting_id, verdict="отсеяно",
+                                           reasons=sorted(set(reasons) & SIFTED), description=d.description[:300],
+                                           quote=(quote or d.quote or "")[:300])
+                        continue
+                    if not set(reasons) & OUT_OF_REGISTRY:
+                        # под вопросом: в реестр и в протокол как обычная, причина — служебная, карточка обязательна
+                        who = g.assignee.label if g.assignee else None
+                        # пересборка: та же задача этой встречи уже заведена — без цитаты повтор узнаётся по
+                        # формулировке и исполнителю (находка циклов ролей ERP и Планёрки, 15.10.26)
+                        if any((r["assignee"] or None) == who and same_task_text(g.description or d.description,
+                                                                                 [r["description"]])
+                               for r in this_meeting):
+                            continue
+                        tid = self.reg.add(project_id, g.description or d.description, who, meeting_id, quote,
+                                           d.due_date, mdate, due_kinds.get(id(d)), doubt_reason=doubt_text(reasons))
+                        added.append((tid, d, g))
+                        doubt += 1
+                        payload["task_id"] = tid
+                        payload["buttons"] = doubt_buttons(self.reg, project_id, tid, g.description or d.description)
+                        self.cards.open(project_id, "task_doubt", f"Задача под вопросом: {d.description[:120]}",
+                                        payload, meeting_id)
+                        continue
                     self.cards.open(project_id, "held_task", title, payload, meeting_id)
                 closed = 0
                 for tid, quote in closings:
@@ -695,26 +835,59 @@ class MeetingPipeline:
                                              "candidates": [{"id": p.id, "name": p.label, "hints": []}
                                                             for p in pend.get("candidates", [])]}, meeting_id)
                     for unit, g in ures["held"]:
-                        if noise_duplicate(g.reasons, unit.text, [getattr(x[2], "description", "") for x in added]):
+                        if same_task_text(unit.text, [getattr(x[2], "description", "") for x in added]):
                             continue        # D4: та же задача уже заведена этим прогоном — карточка была бы ложной тревогой
+                        if any(same_task_text(g.description or unit.text, [r["description"]]) for r in this_meeting):
+                            continue        # пересборка: эта задача встречи уже заведена
+                        if set(g.reasons) & SIFTED:                  # отсеяно — строкой в журнал разбора
+                            self.journal.write(purpose="triage", meeting_id=meeting_id, verdict="отсеяно",
+                                               reasons=sorted(set(g.reasons) & SIFTED), description=unit.text[:300])
+                            continue
+                        if not set(g.reasons) & OUT_OF_REGISTRY:     # под вопросом — и на этом пути (15.10.26)
+                            tid = self.reg.add(project_id, g.description or unit.text,
+                                               g.assignee.label if g.assignee else None, meeting_id, unit.quote,
+                                               None, mdate, doubt_reason=doubt_text(g.reasons))
+                            added.append((tid, TaskDraft(unit.text, None), g))
+                            doubt += 1
+                            self.cards.open(project_id, "task_doubt", f"Задача под вопросом: {unit.text[:120]}",
+                                            {"task_id": tid, "description": unit.text, "reasons": g.reasons,
+                                             "quote": unit.quote, "from": "единицы встречи",
+                                             "buttons": doubt_buttons(self.reg, project_id, tid, unit.text)},
+                                            meeting_id)
+                            continue
                         self.cards.open(project_id, "held_task", f"Задача из записи не заведена: {unit.text[:120]}",
                                         {"description": unit.text, "reasons": g.reasons, "quote": unit.quote,
                                          "from": "единицы встречи"}, meeting_id)
-                protocol_md = self._render_protocol(meeting, sections, added, closings, srcs, removals,
-                                                    str(stopped) if stopped else "", protocol_notes)
+                protocol_md = self._render_protocol(meeting, sections, added, closings, srcs, removals)
+                protocol_md, marks = clean_document(protocol_md)   # проверка кодом до сохранения (13.10.26)
+                if marks:
+                    self.cards.open(project_id, "technical", "Из протокола убрана системная пометка",
+                                    {"marks": marks[:10]}, meeting_id)
                 role = self.theme.get("prompts.domain_role")
                 protocol_md, filtered = filter_text(protocol_md, (role,) if isinstance(role, str) else ())
                 if filtered:   # модель пересказала служебное — заменено, оператор знает (письмо 10.10, строки 15–20)
                     self.cards.open(project_id, "suspicious_source", "В протоколе скрыт служебный текст системы",
                                     {"filter": "output"}, meeting_id)
-                self.s.update("meetings", meeting_id, protocol_md=protocol_md, protocol_built_at=now(),
+                built = now()
+                self.s.update("meetings", meeting_id, protocol_md=protocol_md, protocol_built_at=built,
                               built_from=[s["name"] for s in srcs])
+                # версия: прежняя остаётся в истории; модель — та, что написала текст (43, 47)
+                wrote = budget.answered.get("protocol") or budget.answered.get("extract_tasks") or []
+                if budget.answered.get("_external"):
+                    # собран внешней моделью — строкой в системных сообщениях, в документе пометки нет (инструкция 14.10.26)
+                    self.cards.open(project_id, "technical", f"Протокол встречи {meeting.get('date') or ''} собран внешней моделью",
+                                    {"points": sorted(set(budget.answered["_external"]))}, meeting_id)
+                n = self.s.q("SELECT COUNT(*) AS n FROM protocol_versions WHERE meeting_id=?", (meeting_id,))[0]["n"]
+                self.s.insert("protocol_versions", meeting_id=meeting_id, version=n + 1, protocol_md=protocol_md,
+                              model=", ".join(dict.fromkeys(wrote)), built_at=built)
         except Exception as e:  # всё откатилось — реестр не наполовину
             rep.status, rep.detail = "error", "Сбой при сохранении — изменения не применены."
             self.cards.open(project_id, "technical", "Сбой сохранения прогона", {"error": type(e).__name__},
                             meeting_id)
             return rep
-        rep.tasks_added, rep.tasks_held, rep.tasks_closed = len(added), len(held), closed
+        rep.tasks_added, rep.tasks_closed = len(added), closed
+        rep.tasks_held = len(held) - doubt          # вне реестра: дубли и отсечённое; под вопросом — в реестре
+        rep.tasks_doubt = doubt
         rep.closing_cards, rep.protocol_saved = len(closing_cards), True
 
         # 5. проверка после факта: замечания — справка, не шлюз. Строки, похожие на
@@ -733,8 +906,9 @@ class MeetingPipeline:
             if stopped is None:
                 rep.detail = " ".join(x for x in ("Протокол сохранён, проверка остановлена по пределу.", rep.detail)
                                       if x)
-        except Exception as e:  # любой сбой проверки не отменяет сохранённое
+        except Exception as e:  # любой сбой проверки не отменяет сохранённое; оператору — карточка (стенд 40)
             rep.findings = [{"issue": f"Проверка не выполнена: {type(e).__name__}", "severity": "minor"}]
+            self.step_failed(project_id, meeting_id, "Проверка протокола", e)
             rep.detail = " ".join(x for x in ("Протокол сохранён, проверка не выполнена.", rep.detail) if x)
         # кодовые проверки черновика — то, что модель почти не ловит (письмо meeting-registry 18):
         # оценочное слово без опоры в записи, факт из эпизода другого проекта. Справка, не шлюз.
@@ -760,7 +934,9 @@ class MeetingPipeline:
         self.journal.write(run=meeting_id, status=rep.status, calls=rep.calls, cost_usd=rep.cost_usd,
                            added=rep.tasks_added, held=rep.tasks_held, closed=rep.tasks_closed,
                            dropped=rep.tasks_dropped, skipped_by_rule=rep.skipped_by_rule,
-                           stopped_by=budget.stopped_by, stand=self.stand, **self.tool_info)
+                           stopped_by=budget.stopped_by, stand=self.stand, closing_mentioned=closing_mentioned,
+                           answered_by={k: sorted(set(v)) for k, v in budget.answered.items() if not k.startswith("_")},
+                           **self.tool_info)
         return rep
 
     # ---------------------------------------------------------------- помощники
@@ -823,29 +999,23 @@ class MeetingPipeline:
             c.pop("_score")
         return out[:max_tasks]
 
-    def _render_protocol(self, meeting: dict, sections: dict[str, str], added, closings, srcs,
-                         removals=(), stopped: str = "", notes: list[str] | tuple = ()) -> str:
+    def _render_protocol(self, meeting: dict, sections: dict[str, str | None], added, closings, srcs,
+                         removals=()) -> str:
+        """Документ для читателя — без системных пометок: модель, стенд, файлы, пределы и замечания
+        уходят в карточки и журнал (правило владельца 13.10.26 для всех систем)."""
         th = self.theme
         date_s = meeting.get("date") or datetime.now().strftime("%Y-%m-%d")
         try:
             date_h = datetime.strptime(date_s, "%Y-%m-%d").strftime(th.get("formats.date", "%d.%m.%Y"))
         except ValueError:
             date_h = date_s
-        out = [f"# {th.word('protocol')} {date_h}", "",
-               f"*{th.word('sources_line')} {datetime.now().strftime(th.get('formats.datetime', '%d.%m.%Y %H:%M'))}, "
-               f"{th.word('sources_from')}: " + ", ".join(s["name"] for s in srcs) + "*", ""]
-        if self.stand:
-            out += ["*Стенд без модели: протокол собран заглушкой, а не по смыслу встречи.*", ""]
-        else:
-            ti = self.tool_info
-            where = {"openrouter": "OpenRouter", "ollama": "локальная модель (Ollama)"}.get(ti["llm_tool"], ti["llm_tool"])
-            out += [f"*Обработано: {where}; собрала {ti['generator']}, проверяет {ti['verifier']}.*", ""]
-        if stopped:
-            out += [f"*Прогон остановлен по пределу — протокол неполный. {_cell(stopped)}*", ""]
-        for n in notes:
-            out += [f"*{n}*", ""]
+        out = [f"# {th.word('protocol')} {date_h}", ""]
         for sec in th["protocol_skeleton"]:
-            out += [f"## {sec}", sections.get(sec, "").strip() or th.word("not_discussed"), ""]
+            body = sections.get(sec, "")
+            if body is None:              # не собран (предел, потолок ответа) — пусто, причина в карточке
+                out += [f"## {sec}", ""]
+                continue
+            out += [f"## {sec}", body.strip() or th.word("not_discussed"), ""]
         out += [f"## {th.word('new_tasks')}", ""]
         if added:
             cols = th.get("vocabulary.task_table", ["№", "Задача", "Ответственный", "Срок"])

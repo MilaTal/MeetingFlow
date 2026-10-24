@@ -130,7 +130,8 @@ def test_attack_A_steps(store, project, meeting, make_pipe):
     # проходит проверки и сохраняется одной транзакцией, протокол помечен неполным,
     # карточка — оператору. Вызовов по-прежнему ровно 5: потолок не перепрыгнут.
     assert rep.calls == 5 and rep.protocol_saved
-    assert "по пределу" in store.get("meetings", meeting)["protocol_md"]
+    # перевёрнут 15.10.26 (находка стенда 30, правило владельца 13.10.26): документ чистый — пометка в карточке (ниже)
+    assert "по пределу" not in store.get("meetings", meeting)["protocol_md"]
     assert len(p.reg.list(project)) == rep.tasks_added
     assert any(c["kind"] == "stopped_by_limit" for c in p.cards.list(project, None))
 

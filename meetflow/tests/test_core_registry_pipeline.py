@@ -135,7 +135,8 @@ def test_pipeline_end_to_end(store, project, meeting, make_pipe):
     assert rep.tasks_added == 2 and rep.tasks_held == 0 and rep.tasks_closed == 1
     assert store.get("tasks", old)["status"] == "done"
     proto = store.get("meetings", meeting)["protocol_md"]
-    assert proto.startswith("# Протокол встречи 01.10.2026") and "Откуда: собран" in proto
+    # перевёрнут 15.10.26 (находка стенда 30, правило владельца 13.10.26): документ чистый — пометка «откуда собран» убрана
+    assert proto.startswith("# Протокол встречи 01.10.2026") and "Откуда: собран" not in proto
     # перевёрнут 09.10.26: срок без года — с годом встречи, «день.месяц.год» (формат владельца)
     assert "| 1 | подготовьте регламент склада до 10.10 | Петрова Анастасия | 10.10.2026 |" in proto
     cards = p.cards.list(project)

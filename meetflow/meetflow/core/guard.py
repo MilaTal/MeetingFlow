@@ -24,6 +24,7 @@ import ast
 import base64
 import binascii
 import hashlib
+import logging
 import re
 import unicodedata
 from functools import lru_cache
@@ -232,7 +233,8 @@ def classify(llm, line: str) -> bool | None:
     иначе None — решает человек."""
     try:
         res = llm.complete(GUARD_SYSTEM, f"<<<\n{line}\n>>>", json_mode=False, temperature=0.0, purpose="guard")
-    except Exception:  # noqa: BLE001 — недоступный досмотр не мешает разбору
+    except Exception as e:  # noqa: BLE001 — недоступный досмотр не мешает разбору, но не молча (стенд 33)
+        logging.getLogger(__name__).warning("Досмотр моделью не ответил: %s: %s", type(e).__name__, str(e)[:300])
         return None
     first = (re.findall(r"[A-Za-zА-Яа-яЁё]+", getattr(res, "text", "") or "") or [""])[0].upper()
     return {"ДА": True, "YES": True, "НЕТ": False, "NO": False}.get(first)

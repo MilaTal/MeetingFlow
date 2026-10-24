@@ -263,7 +263,7 @@ def parse_items(items: Any, by_n: dict[int, Line], team: Team, open_tasks: dict[
     return out
 
 
-def same_point(a: str, b: str) -> bool:
+def same_point(a: str, b: str, share: float = 0.6) -> bool:
     """Одна и та же мысль: одна формулировка покрывает другую целиком (с
     точностью до формы слова), и на общие слова приходится ≥ 0,6.
 
@@ -283,7 +283,7 @@ def same_point(a: str, b: str) -> bool:
     if only_a and only_b:
         return False
     common = len(wa) - len(only_a)
-    return common / (common + len(only_a) + len(only_b)) >= 0.6
+    return common / (common + len(only_a) + len(only_b)) >= share
 
 
 def merge(found: list[Extracted]) -> list[Extracted]:
@@ -391,7 +391,8 @@ class UnitsExtractor:
         body, _ = fence(_render(lines), "запись встречи, строки пронумерованы")
         try:
             out = self.pipe._call(self.pipe.gen, budget, "units_close", head, body, meeting["id"])
-        except (ValueError, json.JSONDecodeError, AnswerTruncated):
+        except (ValueError, json.JSONDecodeError, AnswerTruncated) as e:   # не молча (стенд 40)
+            self.pipe.step_failed(meeting.get("project_id"), meeting["id"], "Закрытие пунктов прошлых встреч", e)
             return []
         result, used_lines = [], set()
         for it in (out.get("closed") if isinstance(out, dict) and isinstance(out.get("closed"), list) else []):

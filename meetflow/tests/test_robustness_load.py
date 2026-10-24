@@ -46,7 +46,10 @@ def test_malformed_fields_are_skipped(store, project, meeting, make_pipe):
     p = make_pipe(gen=HalfJSON())
     p.ingest(project, meeting, "t.txt", TRANSCRIPT.encode())
     rep = p.run(project, meeting)
-    assert rep.status == "ok" and rep.tasks_added == 1
+    # перевёрнут 15.10.26 (находка стенда 44, решение владельца 15.10.26 заменяет пункт документа 14): 
+    # мусорное поле не роняет прогон; уверенная задача одна, мусор — разве что под вопросом с карточкой
+    sure = [t for t in p.reg.list(project) if not t["doubt_reason"]]
+    assert rep.status == "ok" and len(sure) == 1 and rep.tasks_added - rep.tasks_doubt == 1
 
 
 @pytest.mark.load
@@ -126,7 +129,9 @@ def test_concurrent_status_changes_consistent(store, project):
     [t.start() for t in ths]
     [t.join() for t in ths]
     hist = reg.history(tid)
-    assert len(hist) == 41 and store.get("tasks", tid)["status"] == hist[-1]["new_status"]
+    # находка стенда 35 (15.10.26): повтор той же смены не пишется — строк не больше 41, каждая — настоящая смена
+    assert len(hist) <= 41 and store.get("tasks", tid)["status"] == hist[-1]["new_status"]
+    assert all(h["old_status"] != h["new_status"] for h in hist[1:])
     # усилено по ревью: история — непрерывная цепочка «старый -> новый»
     assert all(hist[i]["old_status"] == hist[i - 1]["new_status"] for i in range(1, len(hist)))
 

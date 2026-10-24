@@ -37,7 +37,9 @@ def setup(tmp_path, monkeypatch):
         "roles": {"generate": ["main", "spare"], "verify": ["check", "spare"]}, "cooldown_sec": 300,
     }), encoding="utf-8")
     monkeypatch.setenv("MODEL_ROUTES_PATH", str(path))
-    monkeypatch.setattr(lr.RoutedLLM, "_down_until", {})
+    # охлаждение точек хранит общий модуль ERP и Планёрки (с 15.10.26)
+    monkeypatch.setattr(lr.mr._state, "down_until", {})
+    monkeypatch.setattr(lr.mr._state, "last_error", {})
     calls, mode = [], {}
     make = lambda side: lr.RoutedLLM(side, factory=lambda n, ep: Fake(n, mode, calls))  # noqa: E731
     return path, calls, mode, make
@@ -149,9 +151,13 @@ def test_monitoring_models_api(setup, tmp_path, monkeypatch):
 
 
 def test_monitoring_models_without_file_explains(tmp_path, monkeypatch):
+    # перевёрнут 15.10.26 (находка стенда 25, правило владельца 13.10.26, ответ 15.10.26 — модели по умолчанию нет): 
+    # файла нет — кладётся справочник заготовок без адресов и ключей, ни одна роль не назначена
     monkeypatch.setenv("MODEL_ROUTES_PATH", str(tmp_path / "нет.json"))
     d = lr.panel()
-    assert not d["switchable"] and "models.json" in d["note"]
+    assert d["switchable"] and (tmp_path / "нет.json").exists()
+    assert d["not_configured"] == ["generate", "verify", "asr"] and all(not d["roles"][r] for r in lr.ROLES)
+    assert {e["name"] for e in d["endpoints"]} >= {"deepseek", "claude", "openrouter", "qwen-local", "whisper"}
 
 
 # --- Распознавание через маршруты и ручной выбор модели (09.10.26) --------------------------------------------
@@ -182,13 +188,13 @@ def asr_plugin(tmp_path, monkeypatch):
 def test_asr_role_accepts_only_local_engines(setup):
     path, *_ = setup
     _with_asr(path, ["main"])
-    with pytest.raises(ConnectorError, match="только локальными движками"):
+    with pytest.raises(ConnectorError, match="только через faster-whisper, свой код или сервис"):   # текст общего модуля
         lr.asr_chain()
     _with_asr(path, ["whisper-cpu"])
     data = json.loads(path.read_text(encoding="utf-8"))
     data["roles"]["generate"] = ["whisper-cpu"]
     path.write_text(json.dumps(data), encoding="utf-8")
-    with pytest.raises(ConnectorError, match="не годится для языковой модели"):
+    with pytest.raises(ConnectorError, match="не может писать текст"):
         lr.asr_chain()
 
 
@@ -199,7 +205,7 @@ def test_asr_through_routes_falls_back_and_marks_point(setup, asr_plugin):
     asr = WhisperLocalASR(duration_min=20, duration_max=90)
     doc = asr.transcribe(asr_plugin)
     assert "своего движка" in doc.text and doc.meta["route"] == "свой-код"
-    assert "сломанный-код" in lr.RoutedLLM._down_until
+    assert "сломанный-код" in lr.mr._state.down_until
 
 
 def test_asr_gpu_point_hands_over_to_cpu_point(setup, asr_plugin, monkeypatch):
@@ -224,6 +230,8 @@ def test_asr_gpu_point_hands_over_to_cpu_point(setup, asr_plugin, monkeypatch):
 
 
 def test_asr_without_role_works_as_before(setup, asr_plugin):
+    # перевёрнут 15.10.26 (находка стенда 25, правило владельца 13.10.26, уточнение 15.10.26): без роли asr запись
+    # не распознаётся моделью темы — ждёт с понятной причиной, пока супер-администратор не назначит точку
     from meetflow.connectors.asr_whisper import WhisperLocalASR
     path, *_ = setup
     _with_asr(path, None)
@@ -234,7 +242,8 @@ def test_asr_without_role_works_as_before(setup, asr_plugin):
 
     asr = WhisperLocalASR()
     asr._model = type("M", (), {"transcribe": lambda *a, **k: ([Seg()], type("I", (), {"duration": 60})())})()
-    assert "модель темы" in asr.transcribe(asr_plugin).text
+    with pytest.raises(ConnectorError, match="waiting_tools: распознавание не настроено"):
+        asr.transcribe(asr_plugin)
 
 
 def test_manual_pick_options_and_new_role(setup, asr_plugin):
@@ -258,7 +267,9 @@ def test_check_all_pings_asr_without_audio(setup, asr_plugin, monkeypatch):
     data = json.loads(path.read_text(encoding="utf-8"))
     data["roles"]["asr"].append("нет-кода")
     path.write_text(json.dumps(data), encoding="utf-8")
-    monkeypatch.setattr(lr.RoutedLLM, "_make", lambda self, n, ep: Fake(n, {}, []))
+    # «Проверить связь» — тем же телом, что рабочий вызов (общий ping); у текстовых точек сеть подменена
+    real_ping = lr.mr.ping
+    monkeypatch.setattr(lr.mr, "ping", lambda r, **kw: (True, "ответ: да") if r.kind in lr.KINDS else real_ping(r, **kw))
     res = {r["name"]: r for r in lr.check_all()}
     assert res["свой-код"]["ok"] and not res["нет-кода"]["ok"] and res["main"]["ok"]
 
@@ -305,16 +316,18 @@ def test_rename_remove_delete_and_rollback(setup):
     data = json.loads(path.read_text(encoding="utf-8"))
     assert data["roles"]["generate"] == ["main", "spare-2"] and data["roles"]["verify"] == ["check", "spare-2"]
     lr.remove_from_role("generate", "spare-2")
-    with pytest.raises(ConnectorError, match="единственная"):
-        lr.remove_from_role("generate", "main")
-    with pytest.raises(ConnectorError, match="единственная"):
-        lr.delete_point("main")
+    # перевёрнут 15.10.26 (находка стенда 25, правило владельца 13.10.26, ответ 15.10.26 — модели по умолчанию нет): 
+    # последняя точка уходит — роль «не настроена», вызовов нет; удалить её подключение тоже можно
+    lr.remove_from_role("generate", "main")
+    assert not lr.configured("generate")
+    with pytest.raises(ConnectorError, match="не настроена"):
+        lr.RoutedLLM("generator").complete("s", "u")
     lr.delete_point("spare-2", by="boss")
-    for _ in range(3):
+    for _ in range(4):
         lr.rollback(by="boss")
     data = json.loads(path.read_text(encoding="utf-8"))
     assert data["roles"]["generate"] == ["main", "spare"] and "spare" in data["endpoints"]
-    assert [h["action"] for h in lr.history()][:5] == ["rollback"] * 3 + ["delete", "remove"]
+    assert [h["action"] for h in lr.history()][:6] == ["rollback"] * 4 + ["delete", "remove"]
     with pytest.raises(ConnectorError, match="откатывать нечего"):
         lr.rollback()
 
@@ -392,3 +405,16 @@ def test_models_is_a_left_menu_item():
     # 11.10.26: общий рендер принимает заголовок; прежний «Мониторинг» ведёт на «Модели» или «Мониторинг RealTime»
     assert 'async models() { return routes.monitoring("models", true, "Модели"); }' in js
     assert 'location.replace(tab === "models" ? "#models" : "#live")' in js
+
+
+def test_switch_seen_even_with_same_mtime_and_size(setup):
+    """Найдено 15.10.26 нестабильным test_switch_without_restart: файл перечитывался только по времени изменения;
+    две записи в один тик времени не видны. Теперь — по содержимому."""
+    import os
+    path, _, _, make = setup
+    llm = make("generator")
+    assert llm.complete("s", "u").text == "ответ main"
+    st = os.stat(path)
+    lr.use("generate", "spare", path)
+    os.utime(path, ns=(st.st_atime_ns, st.st_mtime_ns))       # тот же тик времени
+    assert llm.complete("s", "u").text == "ответ spare"

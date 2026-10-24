@@ -70,7 +70,8 @@ def test_limit_stop_keeps_what_was_done(store, project, make_pipe):
     rep = p.run(project, mid, BudgetLimits(max_calls=1, verify_reserve=0))
     assert rep.status == "stopped_by_limit" and rep.protocol_saved
     assert rep.tasks_added >= 1
-    assert "по пределу" in store.get("meetings", mid)["protocol_md"]
+    # перевёрнут 15.10.26 (находка стенда 30, правило владельца 13.10.26): документ чистый — пометка в карточке
+    assert "по пределу" not in store.get("meetings", mid)["protocol_md"]
     assert store.q("SELECT * FROM cards WHERE kind='stopped_by_limit'")       # оператору, не только супер-админу
 
 
@@ -187,7 +188,9 @@ def test_stand_without_model_is_visible(store, project, make_pipe, tmp_path):
     p.journal = CallJournal(tmp_path / "j.jsonl")
     p.ingest(project, mid, "t 01.10.2026.txt", TRANSCRIPT.encode())
     p.run(project, mid)
-    assert "стенд без модели" in store.get("meetings", mid)["protocol_md"].lower()
+    # перевёрнут 15.10.26 (находка стенда 30, правило владельца 13.10.26): документ чистый — пометка на экране (плашка) и в журнале
+    assert "стенд без модели" not in store.get("meetings", mid)["protocol_md"].lower()
+    assert [r for r in p.journal.records if r.get("run") == mid][-1]["stand"] is True
     rr = runs_report.runs_report(tmp_path / "j.jsonl")
     assert rr["stand_runs"] == 1 and "cost_per_success_usd" not in rr
 

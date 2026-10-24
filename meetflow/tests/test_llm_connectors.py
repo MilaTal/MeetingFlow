@@ -110,10 +110,11 @@ def test_ollama_answer_cap_and_truncation():
 def test_theme_has_both_tools_and_cap():
     th = load_theme("_default")
     assert th.get("llm.max_answer_tokens") == 4096
-    assert th.get("llm.openrouter.generator.model") == "qwen/qwen-plus"
-    assert th.get("llm.openrouter.verifier.model") == "meta/muse-spark-1.3"
-    assert th.get("llm.generator.model").startswith("PLACEHOLDER")          # локальный — заглушки
+    # перевёрнут 15.10.26 (находка стенда 25, правило владельца 13.10.26, ответ 15.10.26 — модели по умолчанию нет): 
+    assert not th.get("llm.openrouter.generator.model") and not th.get("llm.openrouter.verifier.model")
+    assert not th.get("llm.generator.model") and not th.get("llm.verifier.model")
     d = json.loads(json.dumps(th.data))
+    d["llm"]["openrouter"]["generator"]["model"] = "qwen/qwen-plus"
     d["llm"]["openrouter"]["verifier"]["model"] = "qwen/qwen-max"
     d["llm"]["openrouter"]["verifier"].pop("family", None)
     assert any("семейств" in e for e in validate(d))                       # разные семейства и у роутера
@@ -123,7 +124,17 @@ def test_theme_has_both_tools_and_cap():
 def test_tool_chosen_at_deployment(monkeypatch, key, mode, cls):
     from meetflow.web import app
     monkeypatch.setenv("MEETFLOW_LLM", mode)
-    assert type(app._llm(load_theme("_default"), "generator")).__name__ == cls
+    th = load_theme("_default")
+    # перевёрнут 15.10.26 (находка стенда 25, правило владельца 13.10.26, ответ 15.10.26 — модели по умолчанию нет): 
+    # без модели в теме — «не настроена»; модель задана явно — тот же инструмент, что раньше
+    if mode != "mock":
+        assert type(app._llm(th, "generator")).__name__ == "NotConfiguredLLM"
+        th.data["llm"]["openrouter" if mode == "openrouter" else "generator"] = {
+            **(th.data["llm"]["openrouter"]["generator"] if mode == "openrouter" else th.data["llm"]["generator"]),
+            "model": "qwen3.8:latest"}
+        if mode == "openrouter":
+            th.data["llm"]["openrouter"] = {"generator": {"model": "qwen/qwen-plus"}, "verifier": {}}
+    assert type(app._llm(th, "generator")).__name__ == cls
 
 
 def test_unknown_tool_refused(monkeypatch):
@@ -180,4 +191,5 @@ def test_tool_visible_in_run_journal_and_protocol(store, project, make_pipe, tmp
     run = [r for r in p.journal.records if r.get("run") == mid][-1]
     assert run["llm_tool"] == "openrouter" and run["generator"] == "qwen/qwen-plus" and run["verifier"] == "meta/muse-spark-1.3"
     proto = store.get("meetings", mid)["protocol_md"]
-    assert "OpenRouter" in proto and "qwen/qwen-plus" in proto and "meta/muse-spark-1.3" in proto
+    # перевёрнут 15.10.26 (находка стенда 30, правило владельца 13.10.26): документ чистый — пометка модели — в журнале (выше), не в документе
+    assert "OpenRouter" not in proto and "qwen/qwen-plus" not in proto and "meta/muse-spark-1.3" not in proto

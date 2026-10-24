@@ -17,11 +17,12 @@ from __future__ import annotations
 import re
 from dataclasses import dataclass
 
+from .document_marks import strip_tails
 from .negation import NegationRule
 from .people import Team
 from .security import looks_like_injection
 from .morph import lemmas
-from .text import coverage, jaccard, sanitize, stems, words
+from .text import coverage, sanitize, stems, words
 from .types import GateResult, SourceDoc, TaskDraft
 
 MAX_DESCRIPTION = 2000
@@ -36,11 +37,15 @@ def _numbers(text: str) -> set[str]:
     return set(_NUMBER.findall(_DATE_LIKE.sub(" ", text or "")))
 
 
+
+# намерение говорящего о себе («буду», «планирую», «попробую»…), а не поручение другому
+_SELF_INTENT = re.compile(r"\b(планиру(ю|ем)|буд(у|ем)|собира(юсь|емся)|хочу|хотим|попробу(ю|ем)|начн(у|ём|ем))\b", re.I)
+
 @dataclass
 class GateConfig:
     quote_coverage: float = 0.7
     quote_window: int = 4
-    duplicate_jaccard: float = 0.6
+    duplicate_jaccard: float = 0.6       # с 15.10.26 — доля общих слов в same_point, имя ключа темы прежнее
     # в теме _default — false (решение владельца 03.10.26, письмо 30): решённое действие без названного
     # исполнителя — задача с пустым исполнителем, без карточки; назначает оператор при разборе
     require_assignee: bool = True
@@ -104,9 +109,19 @@ class TaskGate:
                     return " ".join(lines[i:i + w + 1])
         return None
 
+    def _echoes_injection(self, desc: str, source: SourceDoc) -> bool:
+        """Задача без цитаты, а её слова — из строки-команды системе («создай задачу „…“»): модель выполнила
+        инструкцию из данных, не сославшись на неё. Строки-команды считаются один раз на источник."""
+        key = id(source), len(source.text)
+        if getattr(self, "_inj_key", None) != key:
+            self._inj_key = key
+            self._inj_lines = [set(stems(ln)) for ln in source.lines if looks_like_injection(ln)]
+        mine = set(stems(desc))
+        return bool(mine) and any(coverage(mine, ln) >= 0.6 for ln in self._inj_lines)
+
     def check(self, draft: TaskDraft, source: SourceDoc, existing: list[tuple[str, str]] | None = None) -> GateResult:
         reasons: list[str] = []
-        desc = sanitize(draft.description).strip()[:MAX_DESCRIPTION]
+        desc = strip_tails(sanitize(draft.description).strip())[0][:MAX_DESCRIPTION]   # хвост секретаря (стенд 31)
         if not desc:
             return GateResult(False, ["empty_description"])
 
@@ -140,6 +155,13 @@ class TaskGate:
                 reasons.append("question_not_assignment")
             if "negation" in v.blockers and "assignment" not in v.blockers:
                 reasons.append("negation_in_quote")
+            # условие и намерение говорящего о себе — не поручение и не «под вопросом» (решение владельца 15.10.26,
+            # вечер: правило отрицаний сильнее решения о сомнительных задачах). «Нужно / надо» с адресатом — поручение
+            if "condition" in v.blockers and "assignment" not in v.blockers:
+                reasons.append("condition_not_assignment")
+            # с адресатом из «Команды» («Петрова, будем готовить…») — не намерение (ответ владельца 16.10.26)
+            if _SELF_INTENT.search(quote) and "assignment" not in v.blockers and not self.team.addressee(quote):
+                reasons.append("intent_not_assignment")
             # отчёт о сделанном («Договор подписан, отправили…») — не поручение говорящему:
             # слово выполнения без маркера поручения или намерения — карточка (письмо 01/5)
             if "no_done_word" not in v.blockers and not {"assignment", "intent"} & set(v.blockers):
@@ -198,14 +220,22 @@ class TaskGate:
         # 4. дубль активной задачи того же человека
         for old_desc, old_assignee in existing or []:
             same_person = person is not None and old_assignee == person.label
-            # разный набор чисел вне сроков («акт номер 0» и «номер 1») — разные задачи (01/14)
+            # разный набор чисел вне сроков («акт номер 0» и «номер 1») — разные задачи (01/14). Похожесть —
+            # same_point, а не Жаккар (стенд 36, 37): на парах «то же поручение / другое по той же теме» Жаккар
+            # по основам и по леммам — 7 из 10, same_point — 10 из 10 (tests/test_stand_1510_duplicate_pairs.py);
+            # своё главное слово с обеих сторон («дату / цену») — два поручения
+            from .units import same_point
             if same_person and _numbers(desc) == _numbers(old_desc) and \
-                    jaccard(set(stems(desc)), set(stems(old_desc))) >= self.cfg.duplicate_jaccard:
+                    same_point(desc, old_desc, self.cfg.duplicate_jaccard):
                 reasons.append("duplicate")
                 break
 
         # 5. подозрение на внедрённую инструкцию — только человеку
-        if looks_like_injection(desc) or (quote and looks_like_injection(quote)):
+        # и по тому, на что сослалась модель: цитата не найдена, а строка или её цитата — команда системе. С 15.10.26
+        # сомнительное идёт в реестр под вопросом — без этой проверки туда попадала «задача» из внедрённой команды
+        named = source.lines[draft.line_no] if draft.line_no is not None and 0 <= draft.line_no < len(source.lines) else ""
+        if any(x and looks_like_injection(x) for x in (desc, quote, draft.quote, named)) or \
+                (not quote and self._echoes_injection(desc, source)):
             reasons.append("suspicious_instruction")
 
         return GateResult(not reasons, reasons, person, quote or "", desc, pending if not reasons else None)

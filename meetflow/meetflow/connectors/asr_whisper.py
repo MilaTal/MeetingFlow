@@ -17,12 +17,18 @@
 """
 from __future__ import annotations
 
+import importlib.util
+import logging
 import os
 from pathlib import Path
 
 from ..core.types import SourceDoc, SourceKind
 from .base import ASRConnector, ConnectorError
 from . import llm_routes
+from .shared import model_routes as _mr
+from .shared import recognition_lease
+
+log = logging.getLogger(__name__)
 
 os.environ.setdefault("HF_HUB_OFFLINE", "1")
 os.environ.setdefault("PYANNOTE_METRICS_ENABLED", "false")
@@ -50,15 +56,17 @@ class WhisperLocalASR(ASRConnector):
         self.last_route = ""
 
     def available(self) -> bool:
+        """Установлен ли faster-whisper — поиском модуля, без импорта: импорт тянет torch, тысячи модулей и
+        секунды на первом запросе мониторинга (находка стенда 13, ERP 8020). Импорт — только при распознавании."""
         try:
-            import faster_whisper  # noqa: F401
-            return True
-        except Exception:
+            return importlib.util.find_spec("faster_whisper") is not None
+        except (ImportError, ValueError):
             return False
 
     def health(self) -> dict:
-        return {"name": self.name, "ok": self.available(), "offline": os.environ.get("HF_HUB_OFFLINE") == "1",
-                "detail": "" if self.available() else "faster-whisper не установлен: записи ждут (waiting_tools)"}
+        ok = self.available()
+        return {"name": self.name, "ok": ok, "offline": os.environ.get("HF_HUB_OFFLINE") == "1",
+                "detail": "" if ok else "faster-whisper не установлен: записи ждут (waiting_tools)"}
 
     def _load(self):
         if self._model is None:
@@ -68,7 +76,9 @@ class WhisperLocalASR(ASRConnector):
             try:
                 self._model = WhisperModel(self.model_name, device="cuda", compute_type="int8_float16",
                                            local_files_only=True)
-            except Exception:
+            except Exception as e:     # не молча (находка стенда 33): откат на процессор — в журнал с причиной
+                log.warning("Распознавание: видеокарта недоступна (%s: %s) — модель %s на процессоре",
+                            type(e).__name__, e, self.model_name)
                 self._model = WhisperModel(self.model_name, device="cpu", compute_type="int8",
                                            local_files_only=True)
         return self._model
@@ -86,9 +96,11 @@ class WhisperLocalASR(ASRConnector):
             else:
                 try:
                     m = WhisperModel(model, device="cuda", compute_type="int8_float16", local_files_only=True)
-                except Exception:
+                except Exception as e:
                     if device == "cuda":
                         raise
+                    log.warning("Распознавание: видеокарта недоступна (%s: %s) — модель %s на процессоре",
+                                type(e).__name__, e, model)
                     m = WhisperModel(model, device="cpu", compute_type="int8", local_files_only=True)
             self._models[key] = m
         return self._models[key]
@@ -128,6 +140,18 @@ class WhisperLocalASR(ASRConnector):
         meta = raw.get("meta") or {}
         return [x for x in str(raw.get("text") or "").splitlines() if x.strip()], float(meta.get("duration") or 0)
 
+    def _run_service_shared(self, name: str, ep: dict, path: Path):
+        """Сервис распознавания во внутренней сети — общим кодом ERP и Планёрки (model_routes._asr_service): прежний
+        протокол (wav телом) или multipart (поле form у точки). Строки «ЧЧ:ММ:СС<TAB>текст» — в строки расшифровки."""
+        text, meta = _mr.asr_callable(_mr._route(name, ep))(str(path), language=self.language)
+        lines = []
+        for ln in str(text or "").splitlines():
+            if not ln.strip():
+                continue
+            ts, tab, rest = ln.partition("\t")
+            lines.append(f"[{ts}] {rest.strip()}" if tab and ts.count(":") == 2 else ln)
+        return lines, float((meta or {}).get("duration") or (meta or {}).get("media_seconds") or 0)
+
     def transcribe(self, path: Path) -> SourceDoc:
         path = Path(path)
         if not path.exists():
@@ -135,20 +159,27 @@ class WhisperLocalASR(ASRConnector):
         routes = llm_routes.asr_chain()
         self.last_route = ""
         if routes is None:
-            lines, duration = self._run(self._load(), path)
-        else:
-            points, cooldown = routes
+            # модели по умолчанию нет (13.10.26, ответ владельца 15.10.26): роль не назначена — запись ждёт, а не
+            # распознаётся моделью темы
+            raise ConnectorError("waiting_tools: распознавание не настроено — назначьте точку роли «Распознавание "
+                                 "речи» в «Моделях»; запись ждёт")
+        points, cooldown = routes
+        # очередь распознавания на одну машину — общая аренда ERP, Планёрки и MeetFlow (recognition_lease.py):
+        # пока распознаёт другой продукт, запись ждёт на месте и берётся на следующем проходе
+        with recognition_lease.держит_аренду("meetflow", path.name) as lease:
+            if not lease.взято:
+                raise ConnectorError(f"waiting_tools: очередь распознавания на машине — {lease.причина}; запись ждёт")
             errors = []
             for name, ep in points:
                 try:
                     if ep["kind"] == "python":
                         lines, duration = self._run_code(ep["callable"], path, ep.get("path", ""))
                     elif ep["kind"] == "asr-service":
-                        lines, duration = self._run_service(ep["url"], path)
+                        lines, duration = self._run_service_shared(name, ep, path)
                     else:
                         lines, duration = self._run(self._load_point(ep["model"], ep.get("device", "auto")), path)
                 except Exception as e:  # noqa: BLE001 — любой сбой точки ведёт на следующую
-                    llm_routes.mark_down(name, cooldown)
+                    llm_routes.mark_down(name, cooldown, str(e))
                     errors.append(f"{name}: {str(e)[:150]}")
                     continue
                 llm_routes.mark_up(name)
@@ -170,18 +201,8 @@ class WhisperLocalASR(ASRConnector):
 def asr_ping(ep: dict) -> tuple[bool, str]:
     """Проверка точки распознавания без записи: движок установлен, модель на диске, код находится."""
     if ep.get("kind") == "asr-service":
-        import urllib.error
-        import urllib.request
-        url = str(ep.get("url", ""))
-        if not llm_routes.internal_url(url):
-            return False, "адрес не во внутренней сети — голос туда не уйдёт"
-        try:
-            with urllib.request.urlopen(urllib.request.Request(url, method="GET"), timeout=10) as r:
-                return True, f"сервис отвечает (HTTP {r.status})"
-        except urllib.error.HTTPError as e:
-            return True, f"сервис отвечает (HTTP {e.code} на проверочный GET)"
-        except Exception as e:  # noqa: BLE001
-            return False, f"сервис не отвечает: {str(e)[:150]}"
+        # тем же путём, что работа: пробный запрос с крошечной тишиной (общий ping ERP и Планёрки, 12.10.26)
+        return _mr.ping(_mr._route("проверка", ep))
     if ep.get("kind") == "python":
         import importlib
         import sys
