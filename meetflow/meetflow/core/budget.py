@@ -27,6 +27,7 @@ class BudgetExceeded(RuntimeError):
 @dataclass
 class BudgetLimits:
     max_calls: int = 14
+    max_calls_per_step: int = 12       # потолок шага: все вызовы шага, переспросы включены (25.10.2026)
     verify_reserve: int = 1
     max_cost_usd: float = 0.40
     max_chars_per_call: int = 400_000
@@ -37,6 +38,7 @@ class BudgetLimits:
 class RunBudget:
     limits: BudgetLimits = field(default_factory=BudgetLimits)
     calls: int = 0
+    steps: dict = field(default_factory=dict)   # назначение шага → вызовов, переспросы считаются
     cost_usd: float = 0.0
     max_call_cost: float = 0.0
     max_price_per_char: float = 0.0     # самая высокая цена знака запроса из сделанных вызовов
@@ -51,6 +53,9 @@ class RunBudget:
             limit = self.limits.max_calls + (self.limits.verify_reserve if purpose == "verify" else 0)
             if self.calls >= limit:
                 self._stop("calls", f"вызовов {self.calls} из {limit}")
+            if purpose and self.steps.get(purpose, 0) >= self.limits.max_calls_per_step:
+                self._stop("step", f"шаг {purpose}: вызовов {self.steps[purpose]} из "
+                                   f"{self.limits.max_calls_per_step}")
             # прогноз: следующий вызов не дешевле самого дорогого из сделанных (атака Б) и
             # не дешевле своего размера по самой высокой цене знака — крупный запрос после
             # мелких перепрыгивал потолок: 0,05 + 0,05 + 0,35 при пределе 0,40 (письмо 01/9)
@@ -69,6 +74,8 @@ class RunBudget:
             if time.monotonic() - self.started > self.limits.max_seconds:
                 self._stop("time", f"время прогона больше {self.limits.max_seconds:.0f} с")
             self.calls += 1
+            if purpose:
+                self.steps[purpose] = self.steps.get(purpose, 0) + 1
 
     @property
     def deadline(self) -> float:
@@ -96,6 +103,7 @@ class CallJournal:
         self._lock = threading.Lock()
         self.records: list[dict] = []
         self.bad: list[dict] = []
+        self.run_id: str | None = None     # признак сборки: по нему считаются вызовы (25.10.2026)
 
     def bad_answer(self, purpose: str, meeting_id: int | None, model: str, raw: str, error: str) -> None:
         """Сырой ответ модели при сбое формата — в bad_answers.jsonl рядом с журналом, только локально и обрезанным
@@ -112,6 +120,8 @@ class CallJournal:
 
     def write(self, **rec) -> None:
         rec.setdefault("ts", time.strftime("%Y-%m-%dT%H:%M:%S"))
+        if self.run_id and "run_id" not in rec:
+            rec["run_id"] = self.run_id
         with self._lock:
             self.records.append(rec)
             if self.path:

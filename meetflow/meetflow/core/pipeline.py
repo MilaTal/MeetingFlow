@@ -73,6 +73,8 @@ class RunReport:
     units_closed: int = 0
     units_tasks: int = 0
     findings: list[dict] = field(default_factory=list)
+    run_id: str = ""            # признак сборки: по нему считаются вызовы (25.10.2026)
+    step_calls: dict = field(default_factory=dict)
     calls: int = 0
     cost_usd: float = 0.0
     protocol_saved: bool = False
@@ -377,6 +379,9 @@ class MeetingPipeline:
 
     def _run(self, project_id: int, meeting_id: int, limits: BudgetLimits | None) -> RunReport:
         rep = RunReport(meeting_id)
+        # признак сборки: номер встречи повторяется (стенд, удаление), по нему счёт вызовов не складывается
+        self.journal.run_id = f"{meeting_id}-{datetime.now():%Y%m%dT%H%M%S}-{threading.get_ident()}"
+        rep.run_id = self.journal.run_id
         if getattr(self.gen, "configured", True) is False:
             # модели по умолчанию нет (13.10.26, 15.10.26): роль не назначена — ни одного вызова, оператору карточка
             rep.status, rep.detail = "not_configured", self.gen.not_configured_text
@@ -962,9 +967,11 @@ class MeetingPipeline:
                             {"issue": f["issue"], "quote": f.get("quote", ""), "severity": "major", "by": by,
                              "source_line": f.get("source_line", "")}, meeting_id)
         rep.calls, rep.cost_usd = budget.calls, round(budget.cost_usd, 4)
+        rep.step_calls = dict(budget.steps)
         if rep.status == "ok" and limited:
             rep.status = "ok_limited"         # сохранено, но часть остановлена пределом — не «успешный» (01/8)
-        self.journal.write(run=meeting_id, status=rep.status, calls=rep.calls, cost_usd=rep.cost_usd,
+        self.journal.write(run=meeting_id, status=rep.status, calls=rep.calls, step_calls=rep.step_calls,
+                           cost_usd=rep.cost_usd,
                            added=rep.tasks_added, held=rep.tasks_held, closed=rep.tasks_closed,
                            dropped=rep.tasks_dropped, skipped_by_rule=rep.skipped_by_rule,
                            stopped_by=budget.stopped_by, stand=self.stand, closing_mentioned=closing_mentioned,
