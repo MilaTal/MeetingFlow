@@ -115,6 +115,29 @@ class BuildQueue:
             status = "failed"
         self.s.update("build_queue", row["id"], status=status, finished_at=now(),
                       result=json.dumps(result, ensure_ascii=False, default=str)[:20000])
+        # Пункт 2 правил 25.10.2026: проходящий сбой (модель недоступна, сеть, таймаут) — повтор через 10 минут,
+        # затем через час, не больше двух. Непроходящий — без слепого повтора, карточка с «Пересобрать».
+        attempts = int(row.get("attempts") or 0)
+        if status == "failed" and result.get("retryable") and attempts < 2:
+            delay = 10 if attempts == 0 else 60
+            nb = (datetime.now() + timedelta(minutes=delay)).strftime("%Y-%m-%dT%H:%M:%S")
+            self.s.update("build_queue", row["id"], status="queued", attempts=attempts + 1, not_before=nb,
+                          finished_at=None, pid=None)
+            self.pipe.journal.write(purpose="retry", meeting_id=row["meeting_id"], attempt=attempts + 1,
+                                    delay_min=delay, not_before=nb, run_id=result.get("run_id"),
+                                    detail=result.get("detail", "")[:300])
+            return True
+        if status == "failed" and not result.get("retryable"):
+            detail = str(result.get("detail") or "причина в «Разборе»")[:120]
+            # одна карточка на сбой: если прогон уже завёл техническую — дописываем действие, второй не плодим
+            rows = self.s.q("SELECT id, payload FROM cards WHERE project_id=? AND kind='technical' AND status='open' "
+                            "AND (meeting_id=? OR meeting_id IS NULL) ORDER BY id DESC LIMIT 1",
+                            (row["project_id"], row["meeting_id"]))
+            if not rows:
+                self.pipe.cards.open(row["project_id"], "technical",
+                                     f"Сборка не удалась: {detail} — пересоберите",
+                                     {"action": "Пересобрать", "detail": result.get("detail", "")},
+                                     row["meeting_id"])
         self._done.setdefault(row["id"], threading.Event()).set()
         return True
 

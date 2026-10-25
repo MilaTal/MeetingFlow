@@ -46,7 +46,7 @@ SCHEMA: dict[str, dict[str, str]] = {
     "build_queue": {"id": "INTEGER PRIMARY KEY", "project_id": "INTEGER", "meeting_id": "INTEGER",
                     "meeting_date": "TEXT DEFAULT ''", "status": "TEXT", "reason": "TEXT DEFAULT ''",
                     "not_before": "TEXT", "created_at": "TEXT", "started_at": "TEXT", "finished_at": "TEXT",
-                    "pid": "INTEGER", "result": "TEXT", "by": "TEXT DEFAULT ''"},
+                    "pid": "INTEGER", "result": "TEXT", "by": "TEXT DEFAULT ''", "attempts": "INTEGER DEFAULT 0"},
     "task_history": {"id": "INTEGER PRIMARY KEY", "task_id": "INTEGER", "old_status": "TEXT",
                      "new_status": "TEXT", "source": "TEXT", "evidence_quote": "TEXT DEFAULT ''",
                      "changed_by": "TEXT DEFAULT ''", "at": "TEXT"},

@@ -75,12 +75,36 @@ class RunReport:
     findings: list[dict] = field(default_factory=list)
     run_id: str = ""            # признак сборки: по нему считаются вызовы (25.10.2026)
     step_calls: dict = field(default_factory=dict)
+    retryable: bool = False     # проходящий сбой: повтор ставит очередь (25.10.2026, п. 2)
+    source_choice: str = ""     # какой источник стал текстом сборки (п. 4)
+    source_reason: str = ""
     calls: int = 0
     cost_usd: float = 0.0
     protocol_saved: bool = False
 
 
 HIDDEN = "[строка скрыта: похожа на инструкцию для модели]"
+
+
+def choose_transcript(transcripts: list[dict]) -> tuple[dict | None, str]:
+    """Одна расшифровка текстом сборки (правило 25.10.2026): своя локальная; выгрузка ВКС — только если своя пустая
+    или знаков меньше половины выгрузки. Выбор и причина идут в итог сборки. Покрытие по времени не считается:
+    длительность записи MeetFlow не хранит."""
+    if not transcripts:
+        return None, ""
+    local = next((s for s in transcripts if s.get("local_asr")), None)
+    other = next((s for s in transcripts if s is not local), None)
+    if local is None:
+        return transcripts[0], "своей локальной расшифровки нет — текстом первая доступная"
+    text = (local.get("text") or "").strip()
+    if not text:
+        return other or local, "своя расшифровка пустая — текстом выгрузка"
+    if other is not None:
+        olen = len((other.get("text") or "").strip())
+        if olen and len(text) * 2 < olen:
+            return other, (f"своя явно неполная ({len(text)} из {olen} знаков выгрузки) — "
+                           "текстом выгрузка, своя остаётся источником имён")
+    return local, ""
 
 
 def _takes_deadline(llm) -> bool:
@@ -406,7 +430,10 @@ class MeetingPipeline:
         if not transcripts and not notes:
             rep.status, rep.detail = "no_sources", "У встречи нет читаемых источников — протокол не собирается."
             return rep
-        base = transcripts[0] if transcripts else notes[0]
+        base, rep.source_reason = choose_transcript(transcripts) if transcripts else (None, "")
+        if base is None:
+            base = notes[0]
+        rep.source_choice = base.get("name") or ""
         source = SourceDoc(base["name"], SourceKind(base["kind"]), base["text"])
         notes_text = "\n".join(n["text"] for n in notes) if transcripts else ""
         # пробный запрос перед сборкой (стенд 39, ERP 689c739): готова ли модель принять запрос такого размера;
@@ -658,6 +685,8 @@ class MeetingPipeline:
                 stopped = e
         except Exception as e:  # сбой модели, ответ не той формы, любой сбой коннектора — не наружу (01/7)
             model_err = isinstance(e, (ConnectorError, ValueError, json.JSONDecodeError))
+            # проходящий сбой — недоступность модели и сети; формат, потолок и обрыв ответа сами не пройдут
+            rep.retryable = isinstance(e, ConnectorError) and not isinstance(e, (AnswerTruncated, BudgetExceeded))
             rep.status = "error"
             rep.detail = f"Сбой при обращении к модели: {e}" if model_err else f"Сбой прогона: {type(e).__name__}"
             rep.calls, rep.cost_usd = budget.calls, round(budget.cost_usd, 4)
