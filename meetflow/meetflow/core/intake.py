@@ -25,7 +25,7 @@ from pathlib import Path
 from typing import Any
 
 from ..connectors.base import ConnectorError
-from ..connectors.watch_folder import (DONE_DIR, MARKER, SKIP_WORDS, STOPPED_DIR, FolderIntake, check_folder_path,
+from ..connectors.watch_folder import (DONE_DIR, MARKER, SKIP_WORDS, STOPPED_DIR, FolderIntake, check_folder_path, is_marker,
                                        single_date)
 from .store import now
 
@@ -82,7 +82,7 @@ def preview_folder(p: Path) -> dict[str, Any]:
     files, take, no_date = [], [], []
     for f in sorted(p.rglob("*")):
         parts = f.relative_to(p).parts
-        if (not f.is_file() or DONE_DIR in parts or STOPPED_DIR in parts or f.name in (MARKER, HINT_FILE)
+        if (not f.is_file() or DONE_DIR in parts or STOPPED_DIR in parts or is_marker(f.name) or f.name == HINT_FILE
                 or f.suffix.lower() == ".md" or any(w in f.name.lower() for w in SKIP_WORDS)):
             continue
         files.append(f.name)
@@ -218,10 +218,10 @@ class IntakeService:
         if path:
             p = Path(path)
             info["exists"] = p.is_dir()
-            info["marker"] = (p / MARKER).exists()
+            info["marker"] = p.is_dir() and any(f.is_file() and is_marker(f.name) for f in p.iterdir())
             if p.is_dir():
                 files = [f for f in p.rglob("*") if f.is_file() and DONE_DIR not in f.relative_to(p).parts
-                         and f.name not in (MARKER, HINT_FILE)]
+                         and not is_marker(f.name) and f.name != HINT_FILE]
                 info["files_waiting"] = len(files)
         return info
 
