@@ -57,6 +57,10 @@ class MockLLM(LLMConnector):
             out = self._units(data)
         elif purpose == "units_close":
             out = self._units_close(system, data)
+        elif purpose == "plan":
+            head = system[system.find("РАЗДЕЛЫ:"):] if "РАЗДЕЛЫ:" in system else ""
+            names = re.findall(r"^- (.+)$", head, re.M)
+            out = {"sections": {n: f"Заглушка плана: {n}." for n in names}}
         else:
             out = {"echo": purpose}
         return LLMResult(json.dumps(out, ensure_ascii=False), self.model, len(user) // 3, 50,

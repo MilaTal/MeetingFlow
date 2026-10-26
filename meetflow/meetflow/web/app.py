@@ -28,6 +28,7 @@ from pydantic import BaseModel, Field, field_validator
 from ..connectors.base import ConnectorError
 from ..connectors.export import DocxOutput
 from ..core.draft_checks import clean_document
+from ..core.budget import BudgetExceeded
 from ..connectors.llm_mock import MockLLM
 from ..connectors.llm_ollama import OllamaLLM
 from ..connectors.llm_openrouter import OpenRouterLLM
@@ -92,6 +93,10 @@ class FolderIn(BaseModel):
     confirm: bool = False
     login: str = Field("", max_length=100)            # в тестовом режиме — чья учётная запись подтверждает
     current_password: str = Field("", max_length=200)
+
+
+class TopicIn(BaseModel):
+    topic: str = Field("", max_length=300)
 
 
 class LoginIn(BaseModel):
@@ -472,6 +477,47 @@ def create_app(theme_name: str | None = None, db_path: str | None = None, journa
     def create_meeting(pid: int, m: MeetingIn, u: dict = Depends(admin)):
         project_or_404(pid)
         return {"id": store.insert("meetings", project_id=pid, date=m.date, label=m.label)}
+
+    @app.get("/api/projects/{pid}/prep")
+    def prep(pid: int):
+        """«Подготовка встречи»: ближайшая встреча, план, материалы, протокол."""
+        project_or_404(pid)
+        rows = store.q("SELECT m.id, m.date, m.label, m.topic, m.plan_built_at, m.protocol_built_at, "
+                       "(SELECT COUNT(*) FROM sources s WHERE s.meeting_id=m.id AND s.removed_at IS NULL) AS sources "
+                       "FROM meetings m WHERE m.project_id=? ORDER BY m.date DESC", (pid,))
+        for r in rows:
+            r["has_plan"] = bool(r.pop("plan_built_at"))
+            r["has_protocol"] = bool(r.pop("protocol_built_at"))
+        return rows
+
+    @app.get("/api/meetings/{mid}/plan")
+    def get_plan(mid: int):
+        m = store.get("meetings", mid)
+        if not m:
+            raise HTTPException(404, "Встреча не найдена.")
+        return {"meeting_id": mid, "date": m.get("date"), "topic": m.get("topic") or "",
+                "markdown": m.get("plan_md") or "", "built_at": m.get("plan_built_at")}
+
+    @app.post("/api/meetings/{mid}/plan/build")
+    def build_plan(mid: int, u: dict = Depends(admin)):
+        m = store.get("meetings", mid)
+        if not m:
+            raise HTTPException(404, "Встреча не найдена.")
+        try:
+            return pipe.build_plan(m["project_id"], mid)
+        except BudgetExceeded as exc:
+            raise HTTPException(422, str(exc)) from exc
+        except ConnectorError as exc:
+            raise HTTPException(422, f"Модель не ответила: {exc}") from exc
+
+    @app.post("/api/meetings/{mid}/topic")
+    def set_topic(mid: int, body: TopicIn, u: dict = Depends(admin)):
+        m = store.get("meetings", mid)
+        if not m:
+            raise HTTPException(404, "Встреча не найдена.")
+        topic = body.topic.strip()[:300]
+        store.update("meetings", mid, topic=topic)
+        return {"ok": True, "topic": topic}
 
     @app.get("/api/projects/{pid}/agreements")
     def agreements(pid: int, kind: str = "", status: str = "open", since: str = "", till: str = ""):

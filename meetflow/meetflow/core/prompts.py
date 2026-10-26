@@ -144,6 +144,14 @@ class PromptBuilder:
             body = f"{body}\n\n{nb}"
         return self._system(task), body + self.p.no_think_suffix
 
+    def plan(self, sections: list[str], source_text: str) -> tuple[str, str]:
+        """План встречи до её начала: только из прошлого протокола, открытых пунктов, задач и материалов."""
+        task = ("ЗАДАЧА: составь план предстоящей встречи по разделам. Используй только переданные материалы; "
+                "чего в них нет — не придумывай. Коротко, деловым языком, по пунктам.\nРАЗДЕЛЫ:\n"
+                + "\n".join(f"- {s}" for s in sections) + '\n\nСхема: {"sections":{"<раздел>":str}}')
+        body, _ = fence(source_text, "материалы к встрече")
+        return self._system(task), body + self.p.no_think_suffix
+
     def verify(self, protocol_md: str, source_text: str) -> tuple[str, str]:
         task = ("ЗАДАЧА: независимо проверь протокол по тексту встречи. Ищи утверждения без опоры, "
                 "перепутанных людей, «решено» поданное как «сделано». Цитируй дословно.\n"

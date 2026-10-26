@@ -24,7 +24,9 @@ SCHEMA: dict[str, dict[str, str]] = {
                  "created_at": "TEXT"},
     "meetings": {"id": "INTEGER PRIMARY KEY", "project_id": "INTEGER", "date": "TEXT", "label": "TEXT",
                  "protocol_md": "TEXT", "protocol_built_at": "TEXT", "built_from": "TEXT DEFAULT '[]'",
-                 "leader": "TEXT", "review_notes": "TEXT DEFAULT '[]'"},
+                 "leader": "TEXT", "review_notes": "TEXT DEFAULT '[]'",
+                 # план встречи — как в ERP: готовится до встречи из прошлого протокола, задач и материалов
+                 "plan_md": "TEXT", "plan_built_at": "TEXT", "topic": "TEXT DEFAULT ''"},
     "sources": {"id": "INTEGER PRIMARY KEY", "meeting_id": "INTEGER", "name": "TEXT", "kind": "TEXT",
                 "text": "TEXT", "digest": "TEXT", "removed_at": "TEXT", "removed_reason": "TEXT",
                 "created_at": "TEXT", "local_asr": "INTEGER DEFAULT 0",

@@ -207,6 +207,49 @@ const routes = {
       <p class="sub">Вопросы — администратору проекта.</p></div>`;
   },
 
+  async prep() { // «Подготовка встречи» — как в ERP: ближайшая встреча, план, материалы, протокол
+    const rows = await api(`/api/projects/${S.project}/prep`);
+    const today = new Date().toISOString().slice(0, 10);
+    const future = rows.find((r) => (r.date || "") >= today);
+    const nearest = future || rows[0] || null;
+    const nearestWord = future ? "Ближайшая встреча" : "Последняя встреча";
+    const form = isAdmin() ? `<div class="card stack"><h2 style="margin:0">Новая встреча</h2>
+      <div class="row"><input id="p-date" type="date" required><input id="p-label" placeholder="Название (необязательно)">
+      <button class="btn btn-primary" id="p-add">Создать</button></div></div>` : "";
+    const row = (m) => `<tr><td><a href="#plan/${m.id}">${fmtDate(m.date)}</a>${m.has_protocol ? ` <a class="sub" href="#meeting/${m.id}">протокол →</a>` : ' <span class="sub">протокола нет</span>'}</td><td>${esc(m.label || m.topic || "—")}</td>
+      <td>${m.has_plan ? "план собран" : `<span class="sub">плана нет</span>`}</td>
+      <td>${esc(m.sources || 0)}</td><td><a class="btn btn-ghost" href="#plan/${m.id}">Открыть план</a></td></tr>`;
+    $("#main").innerHTML = `<h1>Подготовка встречи</h1>
+      <p class="page-sub">Ближайшая встреча и её план. Новая встреча заводится здесь — одна на дату.</p>
+      ${nearest ? `<div class="card stack"><h2 style="margin:0">${nearestWord}: ${fmtDate(nearest.date)}${nearest.label ? " — " + esc(nearest.label) : ""}</h2>
+        <p class="sub">${nearest.has_plan ? "план собран" : "плана пока нет"} · материалов ${esc(nearest.sources || 0)}${nearest.topic ? ` · тема: ${esc(nearest.topic)}` : ""}</p>
+        <div class="row"><a class="btn btn-primary" href="#plan/${nearest.id}">${nearest.has_plan ? "Открыть план" : "Собрать план"}</a>
+        ${nearest.has_protocol ? `<a class="btn" href="#meeting/${nearest.id}">Протокол</a>` : ""}</div></div>` : `<p class="empty">Встреч пока нет — заведите первую.</p>`}
+      ${form}
+      <div class="card-output"><table><tr><th>Дата</th><th>Название</th><th>План</th><th>Материалов</th><th></th></tr>
+      ${rows.length ? rows.map(row).join("") : `<tr><td colspan="5" class="empty">Встреч пока нет.</td></tr>`}</table></div>`;
+    const add = $("#p-add");
+    if (add) add.onclick = async () => { try { await api(`/api/projects/${S.project}/meetings`, { method: "POST", json: { date: $("#p-date").value, label: $("#p-label").value } }); render(); } catch (e) { toast(e.message); } };
+  },
+
+  async plan(id) { // план встречи до её начала — разделы пишет модель, шапку — код
+    const p = await api(`/api/meetings/${id}/plan`);
+    const srcs = await api(`/api/meetings/${id}/sources`);
+    $("#main").innerHTML = `<p><a href="#prep">← Подготовка встречи</a></p>
+      <div class="row" style="align-items:baseline"><h1 style="margin:0">План встречи ${fmtDate(p.date)}</h1>
+        <a class="btn" href="#meeting/${id}">Протокол</a></div>
+      <div class="card stack"><label class="sub">Тема встречи<input id="pl-topic" value="${esc(p.topic || "")}" placeholder="без темы"></label>
+        ${isAdmin() ? `<div class="row"><button class="btn btn-primary" id="pl-build">${p.markdown ? "Пересобрать план" : "Собрать план"}</button><button class="btn" id="pl-topic-save">Сохранить тему</button><span class="sub" id="pl-state"></span></div>` : ""}
+        ${srcs.length ? `<div class="sub">Материалы: ${srcs.map((s) => esc(s.name)).join("; ")}</div>` : `<div class="sub">Материалов к встрече пока нет.</div>`}</div>
+      ${p.markdown ? `<article class="doc-content">${md(p.markdown)}</article>` : `<p class="empty">Плана пока нет.${isAdmin() ? " Нажмите «Собрать план»." : ""}</p>`}`;
+    const saveTopic = async () => { try { await api(`/api/meetings/${id}/topic`, { method: "POST", json: { topic: $("#pl-topic").value } }); toast("Тема сохранена."); render(); } catch (e) { toast(e.message); } };
+    const ts = $("#pl-topic-save"); if (ts) ts.onclick = saveTopic;
+    const build = $("#pl-build");
+    if (build) build.onclick = async () => { const st = $("#pl-state"); build.disabled = true; st.textContent = "собираю…";
+      try { const r = await api(`/api/meetings/${id}/plan/build`, { method: "POST" }); toast(`План собран, вызовов ${r.calls}, ${String(r.cost_usd).replace(".", ",")} $`); render(); }
+      catch (e) { build.disabled = false; st.textContent = ""; toast(e.message); } };
+  },
+
   async meeting(id) {
     const srcs = await api(`/api/meetings/${id}/sources`);
     const rec = await api(`/api/meetings/${id}/recognition`).catch(() => null);
@@ -216,6 +259,7 @@ const routes = {
     const ST = { active: "в работе", done: "выполнена", dropped: "снята" };
     $("#main").innerHTML = `<p><a href="#meetings">← ${esc(S.theme.vocabulary.meetings)}</a></p>
       <h1>${esc(S.theme.vocabulary.protocol)}</h1>
+      <div class="row" style="margin-bottom:8px"><a class="btn" href="#plan/${id}">План встречи</a><a class="btn" href="#meetings">Все встречи</a></div>
       <div class="card stack"><div class="dropzone" id="drop">Перетащите файлы встречи сюда или <label style="text-decoration:underline;cursor:pointer">выберите<input type="file" id="file" multiple hidden></label></div>
       ${srcs.length ? `<div>${srcs.map((s) => `<span class="badge">${esc({ transcript: "расшифровка", notes: "заметки", other: "материал" }[s.kind] || s.kind)}</span> ${esc(s.name)}${s.local_asr ? ` <a class="btn-link" href="/api/meetings/${encodeURIComponent(id)}/sources/${encodeURIComponent(s.id)}/export" title="Расшифровка распознана здесь — выгрузить в Word">.docx</a>` : ""}`).join("<br>")}</div>` : ""}
       ${rec && (rec.route || rec.error) ? `<p class="sub" id="asr-line">Распознавание: ${rec.error ? esc(rec.error) : `${esc(rec.route || rec.model || "точка не записана")} · реплик ${esc(rec.segments ?? "—")} · говорящих ${esc(rec.speakers ?? "—")} · подписано строк ${esc(rec.signed_lines ?? "—")}${rec.diarization_seconds != null ? ` · разделение ${esc(rec.diarization_seconds)} с` : ""}${rec.voice_samples ? ` · отпечатков в общую базу ${esc(rec.voice_samples)}` : ""}`}</p>` : ""}

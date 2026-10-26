@@ -38,7 +38,7 @@ from .people import Team
 from .prompts import PromptBuilder, chunks, parse_json, profile
 from .registry import CardQueue, OperatorMemory, TaskRegistry
 from . import deadline
-from . import asr_journal, voice_step
+from . import asr_journal, plan as plan_mod, voice_step
 from .team_sync import sync_people
 from ..connectors.team_shared import team_shared_state
 from .dates import due_text, lenient_date
@@ -506,6 +506,24 @@ class MeetingPipeline:
         raise AssertionError("unreachable")
 
     # ---------------------------------------------------------------- прогон
+    def build_plan(self, project_id: int, meeting_id: int) -> dict:
+        """План встречи до её начала — один вызов модели, как «Подготовка встречи» в ERP."""
+        meeting = self.s.get("meetings", meeting_id)
+        if not meeting or meeting.get("project_id") != project_id:
+            raise ValueError("Встреча не найдена.")
+        data = plan_mod.collect(self.s, meeting)
+        source = plan_mod.source_text(data)
+        if not source.strip():
+            source = "Прошлого протокола, открытых пунктов, задач и материалов пока нет."
+        budget = RunBudget(BudgetLimits(**self.theme.get("budget", {})))
+        sysm, user = self.pb.plan(plan_mod.SECTIONS, source)
+        out = self._call(self.gen, budget, "plan", sysm, user, meeting_id)
+        sections = {name: str(_dict(out, "sections").get(name) or "") for name in plan_mod.SECTIONS}
+        markdown = plan_mod.render(meeting, sections)
+        self.s.update("meetings", meeting_id, plan_md=markdown, plan_built_at=now())
+        return {"markdown": markdown, "sections": sections, "calls": budget.calls,
+                "cost_usd": round(budget.cost_usd, 4), "model": self.gen.model}
+
     def run(self, project_id: int, meeting_id: int, limits: BudgetLimits | None = None) -> RunReport:
         lock = self._meeting_lock(meeting_id)
         if not lock.acquire(blocking=False):
