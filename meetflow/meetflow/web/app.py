@@ -156,6 +156,12 @@ class ResolveIn(BaseModel):
     new_role: str = Field("", max_length=200)
 
 
+class VoiceDecisionIn(BaseModel):
+    ids: list[int] = Field(default_factory=list)
+    decision: Literal["yes", "no", "other", "noise"] = "yes"
+    name: str = Field("", max_length=200)
+
+
 LLM_TOOLS = ("mock", "ollama", "openrouter", "routes")
 
 
@@ -481,8 +487,20 @@ def create_app(theme_name: str | None = None, db_path: str | None = None, journa
 
     @app.get("/api/meetings/{mid}/sources")
     def sources(mid: int):
-        return store.q("SELECT id, name, kind, created_at, local_asr FROM sources WHERE meeting_id=? AND removed_at IS NULL",
-                       (mid,))
+        rows = store.q("SELECT id, name, kind, created_at, local_asr, meta FROM sources "
+                       "WHERE meeting_id=? AND removed_at IS NULL", (mid,))
+        for r in rows:
+            try:
+                r["meta"] = json.loads(r.get("meta") or "{}")
+            except (TypeError, ValueError):
+                r["meta"] = {}
+        return rows
+
+    @app.get("/api/meetings/{mid}/recognition")
+    def recognition(mid: int):
+        """Последняя запись журнала распознавания по встрече: точка, модель, реплики, говорящие."""
+        from ..core import asr_journal
+        return asr_journal.last_for_meeting(pipe.asr_journal_path, mid)
 
     @app.get("/api/meetings/{mid}/sources/{sid}/export")
     def source_docx(mid: int, sid: int):
@@ -892,6 +910,56 @@ def create_app(theme_name: str | None = None, db_path: str | None = None, journa
     @app.get("/api/monitoring/voice-base")
     def mon_voice(u: dict = Depends(super_admin)):
         return voice_base_state(store.get_setting("voice_base_path"))
+
+    def _voice_base() -> str:
+        return store.get_setting("voice_base_path") or os.environ.get("VOICE_BASE_PATH") or ""
+
+    @app.get("/api/monitoring/voice-review")
+    def voice_review_state(tab: str = "queue", u: dict = Depends(super_admin)):
+        """«Разбор голосов»: очередь новых отпечатков и решённые — как в ERP (задание 26.10.2026)."""
+        from ..core import voice_review
+        base = _voice_base()
+        if not base:
+            return {"error": "Путь к общей базе голосов не задан.", "gruppy": [], "klastery": []}
+        try:
+            return voice_review.reshennye(base) if tab == "done" else voice_review.ochered(base)
+        except (voice_review.RazborNeTot, OSError) as exc:
+            return {"error": str(exc), "gruppy": [], "klastery": []}
+
+    @app.get("/api/monitoring/voice-review/clip/{sid}")
+    def voice_review_clip(sid: int, u: dict = Depends(super_admin)):
+        from ..core import voice_review
+        base = _voice_base()
+        path = voice_review.put_otryvka(base, sid) if base else None
+        if not path or not path.is_file():
+            why = voice_review.pochemu_net_otryvka(base, sid) if base else "путь к базе не задан"
+            raise HTTPException(404, why or "Отрывка нет.")
+        return Response(path.read_bytes(), media_type="audio/wav")
+
+    @app.post("/api/monitoring/voice-review/apply")
+    def voice_review_apply(body: VoiceDecisionIn, u: dict = Depends(super_admin)):
+        from ..core import voice_review
+        base = _voice_base()
+        if not base:
+            raise HTTPException(422, "Путь к общей базе голосов не задан.")
+        if not body.ids:
+            raise HTTPException(422, "Не выбран ни один говорящий.")
+        if body.decision == "yes" and not body.name.strip():
+            raise HTTPException(422, "Для решения «Это он» нужно имя.")
+        try:
+            return voice_review.primenit(base, body.ids, body.decision, body.name.strip(),
+                                         kto=u.get("name") or u.get("role") or "")
+        except (voice_review.RazborNeTot, OSError) as exc:
+            raise HTTPException(422, str(exc)) from exc
+
+    @app.post("/api/monitoring/voice-review/dismiss")
+    def voice_review_dismiss(body: VoiceDecisionIn, u: dict = Depends(super_admin)):
+        """«Не он» для принятого правилом (auto_rule): вернуть говорящего в очередь «не узнан»."""
+        from ..core import voice_review
+        base = _voice_base()
+        if not base:
+            raise HTTPException(422, "Путь к общей базе голосов не задан.")
+        return voice_review.ne_po_pravilu(base, body.ids, kto=u.get("name") or u.get("role") or "")
 
     @app.get("/api/monitoring/team-shared")
     def mon_team(u: dict = Depends(super_admin)):

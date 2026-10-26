@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import inspect
 import json
+import os
 import re
 import threading
 from dataclasses import dataclass, field, replace
@@ -37,6 +38,8 @@ from .people import Team
 from .prompts import PromptBuilder, chunks, parse_json, profile
 from .registry import CardQueue, OperatorMemory, TaskRegistry
 from . import deadline
+from . import asr_journal, voice_step
+from ..connectors.team_shared import team_shared_state
 from .dates import due_text, lenient_date
 from .draft_checks import clean_document, run_code_checks
 from .morph import supported_due
@@ -248,6 +251,11 @@ class MeetingPipeline:
         self.cards = CardQueue(store)
         self.memory = OperatorMemory(store, theme.get("operator.confirmations", 2))
         self.journal = CallJournal(journal_path)
+        # Журнал распознавания — рядом с журналом вызовов модели, отдельным файлом: распознавание не входит
+        # в потолок вызовов и не тратит денег модели, но точка и её результат должны быть видны. Без пути
+        # журнала (тесты, разовые прогоны) не пишем в рабочий файл вовсе.
+        self.asr_journal_path = (Path(journal_path).with_name("asr_journal.jsonl")
+                                 if journal_path else None)
         self.prof = profile(getattr(generator, "profile", "generic"))
         self.pb = PromptBuilder(theme.get("prompts.domain_role", ""), self.prof)
         self._configure_connectors()
@@ -317,6 +325,72 @@ class MeetingPipeline:
         return False
 
     # ---------------------------------------------------------------- приём
+    def _voice_step(self, project_id: int, meeting_id: int, wav_path: Path | None, doc, filename: str) -> None:
+        """Разделение по голосам, ФИО по общей базе и вклад в базу — с записью в журнал распознавания.
+
+        Всё, что известно о распознавании, пишется всегда, даже если голоса не разобрались: оператор должен
+        видеть точку, длительность и число реплик (замечание к тестовой встрече 26.10.2026).
+        """
+        meta = doc.meta
+        record = {
+            "meeting_id": meeting_id, "file": filename, "route": meta.get("route") or meta.get("model") or "",
+            "model": meta.get("model") or "", "device": meta.get("device") or "",
+            "media_seconds": meta.get("media_seconds"), "segments": len(meta.get("segment_lines") or []),
+            "text_chars": len(doc.text or ""),
+        }
+        try:
+            if wav_path is None or not Path(wav_path).is_file():
+                meta["voice_error"] = "записи нет на диске — голоса не разобраны"
+                return
+            if not meta.get("segment_lines") or not meta.get("segment_times"):
+                meta["voice_error"] = "точка распознавания не вернула времена реплик — голоса не разобраны"
+                return
+            row = self.s.q("SELECT date FROM meetings WHERE id=?", (meeting_id,))
+            meeting_date = (row[0]["date"] if row else "") or ""
+            base = self.s.get_setting("voice_base_path") or os.environ.get("VOICE_BASE_PATH") or None
+            team: list[str] = []
+            try:
+                st = team_shared_state(voice_base_path=base)
+                team = [p.get("full_name") or "" for p in (st.get("people_list") or [])]
+            except Exception:  # noqa: BLE001 — без «Команды» имена не подставляются, разбор продолжается
+                team = []
+            result = voice_step.process(
+                wav_path, doc.text, meta, meeting_id=meeting_id, meeting_date=meeting_date,
+                base_path=base, team=team, settings=None)
+            doc.text = result["text"]
+            meta.update({
+                "speakers": result.get("speakers"), "signed_lines": result.get("signed_lines"),
+                "voice_names": result.get("names") or {}, "voice_base": result.get("base") or {},
+                "voice_contribution": result.get("contribution") or {}, "voice_clips": result.get("clips"),
+                "diarization_seconds": (result.get("diarization") or {}).get("seconds"),
+                "diarization_device": (result.get("diarization") or {}).get("device"),
+                "voice_notes": result.get("notes") or [],
+            })
+            record.update({
+                "speakers": result.get("speakers"), "signed_lines": result.get("signed_lines"),
+                "voice_total": (result.get("base") or {}).get("lyudey"),
+                "voice_samples": (result.get("contribution") or {}).get("samples"),
+                "voice_hinted": (result.get("contribution") or {}).get("hinted"),
+                "clips": result.get("clips"),
+                "diarization_seconds": (result.get("diarization") or {}).get("seconds"),
+                "diarization_device": (result.get("diarization") or {}).get("device"),
+                "notes": result.get("notes") or [],
+            })
+        except voice_step.VoiceStepError as exc:
+            meta["voice_error"] = str(exc)
+            record["error"] = str(exc)
+            self.cards.open(project_id, "technical",
+                            f"Голоса не разобраны: запись «{filename}»", {"detail": str(exc)[:400]}, meeting_id)
+        except Exception as exc:  # noqa: BLE001 — шаг голосов не отменяет распознавание
+            meta["voice_error"] = f"{type(exc).__name__}: {str(exc)[:300]}"
+            record["error"] = meta["voice_error"]
+            self.cards.open(project_id, "technical",
+                            f"Голоса не разобраны: запись «{filename}»",
+                            {"detail": meta["voice_error"][:400]}, meeting_id)
+        finally:
+            meta["asr"] = record
+            asr_journal.write(self.asr_journal_path, **record)
+
     def ingest(self, project_id: int, meeting_id: int, filename: str, data: bytes | None = None,
                path: Path | None = None) -> dict:
         """Ручная загрузка / папка-приёмник. Возвращает {"status", ...}."""
@@ -343,12 +417,17 @@ class MeetingPipeline:
             return {"status": "rejected", "reason": msg}
         if doc.meta.get("own_output") or self._is_own_protocol(project_id, doc.text):
             return {"status": "rejected", "reason": "Это выгрузка самой системы — она не может быть источником встречи."}
+        if isinstance(c, ASRConnector):
+            # Голоса — до сохранения и до удаления записи: разделению и отрывкам нужен звук. Сбой шага не
+            # отменяет распознанный текст, причина уходит в журнал и карточку.
+            self._voice_step(project_id, meeting_id, path, doc, filename)
         dup = self.s.q("SELECT id FROM sources WHERE meeting_id=? AND digest=? AND removed_at IS NULL",
                        (meeting_id, doc.content_digest))
         if dup:
             return {"status": "duplicate", "source_id": dup[0]["id"]}
         sid = self.s.insert("sources", meeting_id=meeting_id, name=doc.name, kind=doc.kind.value, text=doc.text,
-                            digest=doc.content_digest, created_at=now(), local_asr=int(isinstance(c, ASRConnector)))
+                            digest=doc.content_digest, created_at=now(), local_asr=int(isinstance(c, ASRConnector)),
+                            meta=json.dumps(doc.meta, ensure_ascii=False))
         media = doc.meta.get("media_path")
         if media and not doc.meta.get("keep_media"):
             try:  # запись удаляется только после сохранения расшифровки

@@ -107,8 +107,20 @@ class WhisperLocalASR(ASRConnector):
 
     def _run(self, model, path: Path):
         segments, info = model.transcribe(str(path), language=self.language, vad_filter=True, beam_size=5)
-        lines = [f"[{_fmt(s.start)}] Говорящий: {s.text.strip()}" for s in segments if s.text.strip()]
-        return lines, getattr(info, "duration", 0) or 0
+        lines, texts, times = [], [], []
+        for s in segments:
+            text = s.text.strip()
+            if not text:
+                continue
+            start = float(getattr(s, "start", 0) or 0)
+            # Конец реплики: у настоящего faster-whisper он есть; в тестовых заглушках бывает только начало.
+            end = float(getattr(s, "end", start + 2.0) or (start + 2.0))
+            lines.append(f"[{_fmt(start)}] {text}")
+            # Для разбора по голосам: чистый текст и границы реплики. Метку «Говорящий N» ставит `diarize` —
+            # здесь её быть не должно, иначе каждая строка выглядит подписанной без номера.
+            texts.append(text)
+            times.append([round(start, 2), round(end, 2)])
+        return lines, getattr(info, "duration", 0) or 0, {"segment_lines": texts, "segment_times": times}
 
     def _run_code(self, ref: str, path: Path, folder: str = ""):
         """Свой движок: функция(путь, language=…) возвращает текст или (текст, сведения с duration в секундах).
@@ -123,7 +135,7 @@ class WhisperLocalASR(ASRConnector):
         mod, fn = ref.split(":", 1)
         res = getattr(importlib.import_module(mod), fn)(str(path), language=self.language)
         text, meta = res if isinstance(res, tuple) else (res, {})
-        return [x for x in str(text).splitlines() if x.strip()], float((meta or {}).get("duration") or 0)
+        return [x for x in str(text).splitlines() if x.strip()], float((meta or {}).get("duration") or 0), dict(meta or {})
 
     def _run_service(self, url: str, path: Path):
         """Сервис распознавания во внутренней сети: POST wav (audio/wav), язык в строке запроса, ответ JSON
@@ -141,16 +153,18 @@ class WhisperLocalASR(ASRConnector):
         return [x for x in str(raw.get("text") or "").splitlines() if x.strip()], float(meta.get("duration") or 0)
 
     def _run_service_shared(self, name: str, ep: dict, path: Path):
-        """Сервис распознавания во внутренней сети — общим кодом ERP и Планёрки (model_routes._asr_service): прежний
-        протокол (wav телом) или multipart (поле form у точки). Строки «ЧЧ:ММ:СС<TAB>текст» — в строки расшифровки."""
-        text, meta = _mr.asr_callable(_mr._route(name, ep))(str(path), language=self.language)
+        """Сервис распознавания во внутренней сети — свой вызов (`asr_service.call`): общий код ERP и Планёрки
+        оставляет только строки «ЧЧ:ММ:СС<TAB>текст», а нам нужны времена реплик для разделения по голосам.
+        Протокол ответа тот же: текст — строки расшифровки, сводка — `segment_lines`/`segment_times`."""
+        from . import asr_service
+        text, meta = asr_service.call(_mr._route(name, ep), path, language=self.language)
         lines = []
         for ln in str(text or "").splitlines():
             if not ln.strip():
                 continue
             ts, tab, rest = ln.partition("\t")
             lines.append(f"[{ts}] {rest.strip()}" if tab and ts.count(":") == 2 else ln)
-        return lines, float((meta or {}).get("duration") or (meta or {}).get("media_seconds") or 0)
+        return lines, float((meta or {}).get("duration") or (meta or {}).get("media_seconds") or 0), dict(meta or {})
 
     def transcribe(self, path: Path) -> SourceDoc:
         path = Path(path)
@@ -170,14 +184,16 @@ class WhisperLocalASR(ASRConnector):
             if not lease.взято:
                 raise ConnectorError(f"waiting_tools: очередь распознавания на машине — {lease.причина}; запись ждёт")
             errors = []
+            segment_meta: dict = {}
             for name, ep in points:
                 try:
                     if ep["kind"] == "python":
-                        lines, duration = self._run_code(ep["callable"], path, ep.get("path", ""))
+                        lines, duration, segment_meta = self._run_code(ep["callable"], path, ep.get("path", ""))
                     elif ep["kind"] == "asr-service":
-                        lines, duration = self._run_service_shared(name, ep, path)
+                        lines, duration, segment_meta = self._run_service_shared(name, ep, path)
                     else:
-                        lines, duration = self._run(self._load_point(ep["model"], ep.get("device", "auto")), path)
+                        lines, duration, segment_meta = self._run(
+                            self._load_point(ep["model"], ep.get("device", "auto")), path)
                 except Exception as e:  # noqa: BLE001 — любой сбой точки ведёт на следующую
                     llm_routes.mark_down(name, cooldown, str(e))
                     errors.append(f"{name}: {str(e)[:150]}")
@@ -193,9 +209,16 @@ class WhisperLocalASR(ASRConnector):
             raise ConnectorError(f"held_recording: длительность {dur_min:.0f} мин вне окна темы.")
         # запись удаляет конвейер ПОСЛЕ сохранения расшифровки (находка ревью:
         # удаление до записи в БД теряло встречу при сбое) — см. Pipeline.ingest
-        return SourceDoc(f"{path.stem} (распознано локально).txt", SourceKind.TRANSCRIPT, "\n".join(lines),
-                         {"connector": self.name, "media_seconds": duration or None, "route": self.last_route,
-                          "local": True, "media_path": str(path), "keep_media": self.keep_media})
+        meta = {"connector": self.name, "media_seconds": duration or None, "route": self.last_route,
+                "local": True, "media_path": str(path), "keep_media": self.keep_media}
+        # Времена реплик и их текст — для разбора по голосам. Пустые не кладём, чтобы не выглядело,
+        # будто разбор был и ничего не нашёл.
+        for key in ("segment_lines", "segment_times", "segments", "speakers", "model", "device"):
+            value = (segment_meta or {}).get(key)
+            if value not in (None, [], ""):
+                meta[key] = value
+        meta.setdefault("model", self.last_route)
+        return SourceDoc(f"{path.stem} (распознано локально).txt", SourceKind.TRANSCRIPT, "\n".join(lines), meta)
 
 
 def asr_ping(ep: dict) -> tuple[bool, str]:

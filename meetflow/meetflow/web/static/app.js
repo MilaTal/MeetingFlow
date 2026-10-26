@@ -167,6 +167,7 @@ const routes = {
 
   async meeting(id) {
     const srcs = await api(`/api/meetings/${id}/sources`);
+    const rec = await api(`/api/meetings/${id}/recognition`).catch(() => null);
     let proto = null; try { proto = await api(`/api/meetings/${id}/protocol`); } catch { /* ещё нет */ }
     const notes = (proto && proto.review_notes) || [];
     const mtasks = await api(`/api/meetings/${id}/tasks`);   // задачи этой встречи (стенд 5)
@@ -175,6 +176,7 @@ const routes = {
       <h1>${esc(S.theme.vocabulary.protocol)}</h1>
       <div class="card stack"><div class="dropzone" id="drop">Перетащите файлы встречи сюда или <label style="text-decoration:underline;cursor:pointer">выберите<input type="file" id="file" multiple hidden></label></div>
       ${srcs.length ? `<div>${srcs.map((s) => `<span class="badge">${esc({ transcript: "расшифровка", notes: "заметки", other: "материал" }[s.kind] || s.kind)}</span> ${esc(s.name)}${s.local_asr ? ` <a class="btn-link" href="/api/meetings/${encodeURIComponent(id)}/sources/${encodeURIComponent(s.id)}/export" title="Расшифровка распознана здесь — выгрузить в Word">.docx</a>` : ""}`).join("<br>")}</div>` : ""}
+      ${rec && (rec.route || rec.error) ? `<p class="sub" id="asr-line">Распознавание: ${rec.error ? esc(rec.error) : `${esc(rec.route || rec.model || "точка не записана")} · реплик ${esc(rec.segments ?? "—")} · говорящих ${esc(rec.speakers ?? "—")} · подписано строк ${esc(rec.signed_lines ?? "—")}${rec.diarization_seconds != null ? ` · разделение ${esc(rec.diarization_seconds)} с` : ""}${rec.voice_samples ? ` · отпечатков в общую базу ${esc(rec.voice_samples)}` : ""}`}</p>` : ""}
       ${isAdmin() ? `<div class="row" style="gap:10px;align-items:center"><button class="btn btn-primary" id="run">${proto ? "Пересобрать протокол" : "Сформировать протокол"}</button><span class="sub" id="build-state" role="status"></span></div>` : ""}</div>
       ${proto ? `<div class="doc-with-notes"><div><div class="row" style="justify-content:flex-end;margin-bottom:8px"><a class="btn" href="/api/meetings/${encodeURIComponent(id)}/protocol.docx">Скачать .docx</a></div>
       <article class="doc-content">${md(proto.markdown)}</article></div>
@@ -324,6 +326,45 @@ const routes = {
       ${S.auth ? "" : '<input id="vb-login" placeholder="Логин супер-администратора">'}<input id="vb-pass" type="password" placeholder="Пароль супер-администратора" autocomplete="current-password">
       <button class="btn btn-primary" id="vb-save">Сохранить путь</button></div>`);
     $("#vb-save").onclick = async () => { try { await api("/api/settings/voice-base", { method: "POST", json: { path: $("#vb-path").value, path_repeat: $("#vb-repeat").value, login: ($("#vb-login") || {}).value || "", current_password: $("#vb-pass").value } }); toast("Путь к базе голосов сохранён."); render(); } catch (e) { toast(e.message); } };
+  },
+
+  async "voice-review"(tab) { // «Разбор голосов» 1:1 с ERP: очередь новых отпечатков и решённые
+    const done = tab === "done";
+    const d = await api(`/api/monitoring/voice-review?tab=${done ? "done" : "queue"}`);
+    const err = d.error ? `<p class="overdue">${esc(d.error)}</p>` : "";
+    const tabs = `<div class="row"><a class="btn ${done ? "" : "btn-primary"}" href="#voice-review">На проверку${d.klasterov != null && !done ? ` · ${esc(d.klasterov)}` : ""}</a>
+      <a class="btn ${done ? "btn-primary" : ""}" href="#voice-review/done">Опознанные и решённые${done ? ` · ${esc(d.klasterov || 0)}` : ""}</a></div>`;
+    const rule = d.pravilo ? `Правило: «опознан» при близости не ниже ${String(d.pravilo.porog).replace(".", ",")} и отрыве от второго кандидата не ниже ${String(d.pravilo.otryv).replace(".", ",")}, «вероятно» — от ${String(d.pravilo.podskazka).replace(".", ",")}; речи у говорящего — не меньше ${esc(d.pravilo.min_sek)} с.` : "";
+    const etalon = d.etalon ? ` Эталон сейчас: людей ${esc(d.etalon.lyudey)}, отпечатков ${esc(d.etalon.otpechatkov)}.` : "";
+    const head = done
+      ? `<h1>Разбор голосов</h1><p class="page-sub">Принятые правилом и решённые человеком — только просмотр. «Не он» у принятого правилом возвращает говорящего в очередь.</p>${tabs}
+         <p class="sub">Кластеров ${esc(d.klasterov || 0)}, отпечатков ${esc(d.otpechatkov || 0)}; по правилу ${esc(d.po_pravilu || 0)}, человеком ${esc(d.lyudmi || 0)}.</p>`
+      : `<h1>Разбор голосов</h1><p class="page-sub">Новые отпечатки общей базы голосов — кто говорит. «Это он» и «Другой человек» кладут отпечатки в центр человека; «Не он» и «Шум» больше не предлагаются. Отрывок хранится только до решения.</p>${tabs}
+         <p class="sub">Ждут разбора: ${esc(d.klasterov || 0)} говорящих, отпечатков ${esc(d.otpechatkov || 0)}, с отрывком ${esc(d.s_otryvkom || 0)}. ${rule}${etalon} Без материала для проверки: ${esc(d.bez_materiala || 0)}.</p>`;
+    const clip = (o) => o.otryvok
+      ? `<audio controls preload="none" style="width:100%;max-width:420px" src="/api/monitoring/voice-review/clip/${encodeURIComponent(o.id)}"></audio>`
+      : "";
+    const speaker = (k) => `<div class="card-output"><div class="row" style="justify-content:space-between;align-items:baseline">
+        <b>${esc(k.label || "Говорящий")}</b><span class="sub">${esc(k.data || k.ref || "")}${k.meeting_key ? ` · встреча ${esc(k.meeting_key)}` : ""} · ${esc(k.vsego || 0)} отп.${k.seconds != null ? ` · ${esc(k.seconds)} с` : ""}</span></div>
+      ${k.prichina ? `<div class="sub">${esc(k.prichina)}</div>` : ""}
+      ${(k.otpechatki || []).map((o) => `<div class="note"><span class="meta">${esc(o.vremya || "")}</span> ${esc(o.phrase || "")}${clip(o)}</div>`).join("")}
+      <div class="row" style="margin-top:8px">${k.ids && k.ids.length ? `<button class="btn btn-primary" data-vr-yes="${k.ids.join(",")}" data-vr-name="${esc(k.kandidat || "")}">Это он${k.kandidat ? ` — ${esc(k.kandidat)}` : ""}</button>
+        ${k.dva_kandidata && k.second ? `<button class="btn" data-vr-yes="${k.ids.join(",")}" data-vr-name="${esc(k.second)}">Это ${esc(k.second)}</button>` : ""}
+        <button class="btn" data-vr-other="${k.ids.join(",")}">Другой человек</button>
+        <button class="btn btn-ghost" data-vr-no="${k.ids.join(",")}">Не он</button>
+        <button class="btn btn-ghost" data-vr-noise="${k.ids.join(",")}">Шум / не голос</button>` : `<span class="sub">решение уже принято</span>`}</div></div>`;
+    const groups = (d.gruppy || []).map((g) => `<h2>${esc(g.imya || "Похоже на кого-то")}</h2>${(g.klastery || []).map(speaker).join("")}`).join("");
+    const decided = (d.klastery || []).map((k) => `<div class="card-output"><div class="row" style="justify-content:space-between;align-items:baseline">
+        <b>${esc(k.label || "Говорящий")}</b><span class="sub">${esc(k.data || k.ref || "")} · ${esc(k.vsego || 0)} отп. · ${esc(k.reshenie_tekst || k.reshenie || "")}</span></div>
+      <div>${k.imya ? `<b>${esc(k.imya)}</b>` : "—"}${k.pravilo ? `<span class="sub"> · ${esc(k.pravilo)}</span>` : ""}${k.kto ? `<span class="sub"> · решил ${esc(k.kto)} ${esc(k.kogda || "")}</span>` : ""}</div>
+      ${k.ne_on && k.ids && k.ids.length ? `<div class="row"><button class="btn btn-ghost" data-vr-dismiss="${k.ids.join(",")}">Не он</button></div>` : ""}</div>`).join("");
+    $("#main").innerHTML = `${head}${err}${done ? (decided || '<p class="empty">Решённых пока нет.</p>') : (groups || '<p class="empty">Непонятных голосов нет — разбирать нечего.</p>')}`;
+    const act = async (ids, decision, name = "") => { try { await api("/api/monitoring/voice-review/apply", { method: "POST", json: { ids: ids.split(",").map(Number), decision, name } }); toast("Решение записано."); render(); } catch (e) { toast(e.message); } };
+    $("#main").querySelectorAll("[data-vr-yes]").forEach((b) => b.onclick = () => act(b.dataset.vrYes, "yes", b.dataset.vrName || ""));
+    $("#main").querySelectorAll("[data-vr-no]").forEach((b) => b.onclick = () => act(b.dataset.vrNo, "no"));
+    $("#main").querySelectorAll("[data-vr-noise]").forEach((b) => b.onclick = () => act(b.dataset.vrNoise, "noise"));
+    $("#main").querySelectorAll("[data-vr-other]").forEach((b) => b.onclick = () => { const n = prompt("ФИО из «Команды», кем оказался говорящий:"); if (n && n.trim()) act(b.dataset.vrOther, "other", n.trim()); });
+    $("#main").querySelectorAll("[data-vr-dismiss]").forEach((b) => b.onclick = async () => { try { await api("/api/monitoring/voice-review/dismiss", { method: "POST", json: { ids: b.dataset.vrDismiss.split(",").map(Number) } }); toast("Возвращён в очередь."); render(); } catch (e) { toast(e.message); } });
   },
 
   async teamshared() { // общая «Команда» Планёрки и ERP — только чтение (задание 24.10.2026, раздел 0)

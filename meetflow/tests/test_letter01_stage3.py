@@ -199,14 +199,14 @@ def test_api_reports_stand(client):  # noqa: F811
     assert client.get("/api/theme").json()["stand"] is True
 
 
-# 01/20 — сервер на внешнем адресе без входа не стартует
-def test_serve_refuses_non_loopback(monkeypatch):
+# 01/20 — сервер на внешнем адресе без входа: с 26.10.2026 разрешён по слову владелицы (8005), с предупреждением
+def test_serve_allows_non_loopback_with_warning(monkeypatch):
     import uvicorn
 
     from meetflow.__main__ import main
     started = []
     monkeypatch.setattr(uvicorn, "run", lambda *a, **k: started.append(k.get("host")))   # не поднимать сервер
-    assert main(["serve", "--host", "0.0.0.0", "--port", "8019"]) == 2 and not started
+    assert main(["serve", "--host", "0.0.0.0", "--port", "8019"]) == 0 and started == ["0.0.0.0"]
 
 
 # 01/21 — 4xx от Ollama не повторяется, причина видна
