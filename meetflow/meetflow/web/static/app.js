@@ -146,11 +146,27 @@ const routes = {
   },
 
   async roadmap() {
-    const r = await api(`/api/projects/${S.project}/roadmap`);
-    $("#main").innerHTML = `<div class="row" style="justify-content:flex-start;gap:12px;align-items:baseline"><h1>${esc(S.theme.vocabulary.roadmap || "Дорожная карта")}</h1>
-      <a class="btn" href="/api/projects/${encodeURIComponent(S.project)}/roadmap.docx">Скачать .docx</a></div>
-      <p class="page-sub">Собирается из реестра задач и записей встреч при каждом открытии — всегда актуальна. Решено не значит сделано: решения стоят в «Действует».</p>
-      <article class="doc-content">${md(r.markdown.split("\n").slice(1).join("\n"))}</article>`;
+    const tab = S.statusTab || "summary";
+    const s = await api(`/api/projects/${S.project}/summary`);
+    const r = tab === "roadmap" ? await api(`/api/projects/${S.project}/roadmap`) : null;
+    const tabs = `<div class="row" style="margin-bottom:10px"><button class="btn ${tab === "summary" ? "btn-primary" : ""}" data-status-tab="summary">Сводка</button>
+      <button class="btn ${tab === "roadmap" ? "btn-primary" : ""}" data-status-tab="roadmap">Дорожная карта</button></div>`;
+    const card = (t, v, sub = "") => `<div class="card-output"><div class="sub">${esc(t)}</div><div style="font-size:24px;font-weight:600">${esc(v)}</div>${sub ? `<div class="sub">${esc(sub)}</div>` : ""}</div>`;
+    const summary = `<div class="card-output"><h2 style="margin-top:0">Задачи</h2>
+        <div class="row" style="gap:12px;flex-wrap:wrap">${card("В работе", s.tasks_active, `просрочено ${s.tasks_overdue} · без срока ${s.tasks_no_due}`)}
+        ${card("Выполнено", s.tasks_done)}${card("Снято", s.tasks_dropped)}</div></div>
+      <div class="card-output"><h2 style="margin-top:0">Решения и вопросы</h2>
+        <div class="row" style="gap:12px;flex-wrap:wrap">${card("Действует решений", s.decisions)}${card("Договорённостей", s.agreements)}
+        ${card("Открытых вопросов", s.questions)}${card("Вех", s.milestones)}</div></div>
+      <div class="card-output"><h2 style="margin-top:0">Встречи</h2>
+        <div class="row" style="gap:12px;flex-wrap:wrap">${card("Всего", s.meetings)}${card("С протоколом", s.with_protocol)}
+        ${card("Последняя", s.last_meeting ? fmtDate(s.last_meeting) : "—")}</div></div>`;
+    $("#main").innerHTML = `<h1>Статус проекта</h1>
+      ${tabs}
+      ${r ? `<div class="row" style="margin-bottom:8px"><a class="btn" href="/api/projects/${encodeURIComponent(S.project)}/roadmap.docx">Скачать .docx</a></div>` : ""}
+      ${tab === "roadmap" ? `<p class="page-sub">Собирается из реестра задач и записей встреч при каждом открытии — всегда актуальна. Решено не значит сделано: решения стоят в «Действует».</p>
+      <article class="doc-content">${md(r.markdown.split("\n").slice(1).join("\n"))}</article>` : `<p class="page-sub">Цифры по проекту на сейчас; «Дорожная карта» — тот же срез текстом.</p>${summary}`}`;
+    $("#main").querySelectorAll("[data-status-tab]").forEach((b) => b.onclick = () => { S.statusTab = b.dataset.statusTab; render(); });
   },
 
   async meetings() {

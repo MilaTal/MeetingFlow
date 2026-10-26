@@ -519,6 +519,28 @@ def create_app(theme_name: str | None = None, db_path: str | None = None, journa
         store.update("meetings", mid, topic=topic)
         return {"ok": True, "topic": topic}
 
+    @app.get("/api/projects/{pid}/summary")
+    def project_summary(pid: int):
+        """«Сводка» статуса проекта — как вкладка ERP: цифры по задачам, решениям, вопросам и вехам."""
+        project_or_404(pid)
+        today = date_cls.today().isoformat()
+        tasks = store.q("SELECT status, due_date FROM tasks WHERE project_id=?", (pid,))
+        units = store.q("SELECT kind, status FROM units WHERE project_id=?", (pid,))
+        meetings = store.q("SELECT date, protocol_built_at FROM meetings WHERE project_id=?", (pid,))
+        active = [t for t in tasks if t["status"] == "active"]
+        overdue = [t for t in active if t["due_date"] and t["due_date"] < today]
+        return {
+            "tasks_active": len(active), "tasks_done": sum(1 for t in tasks if t["status"] == "done"),
+            "tasks_dropped": sum(1 for t in tasks if t["status"] == "dropped"),
+            "tasks_overdue": len(overdue), "tasks_no_due": sum(1 for t in active if not t["due_date"]),
+            "decisions": sum(1 for u in units if u["kind"] == "decision" and u["status"] in ("open", "active")),
+            "agreements": sum(1 for u in units if u["kind"] == "agreement" and u["status"] in ("open", "active")),
+            "questions": sum(1 for u in units if u["kind"] == "open_question" and u["status"] in ("open", "active")),
+            "milestones": sum(1 for u in units if u["kind"] == "milestone" and u["status"] in ("open", "active")),
+            "meetings": len(meetings), "with_protocol": sum(1 for m in meetings if m["protocol_built_at"]),
+            "last_meeting": max((m["date"] or "" for m in meetings), default=""),
+        }
+
     @app.get("/api/projects/{pid}/agreements")
     def agreements(pid: int, kind: str = "", status: str = "open", since: str = "", till: str = ""):
         """«Договорённости»: решения, договорённости, открытые вопросы, вехи — как отдельный экран ERP."""
