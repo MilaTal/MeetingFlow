@@ -39,6 +39,7 @@ from .prompts import PromptBuilder, chunks, parse_json, profile
 from .registry import CardQueue, OperatorMemory, TaskRegistry
 from . import deadline
 from . import asr_journal, plan as plan_mod, voice_step
+from . import petlya_raspoznavaniya as petlya, polnota_rasshifrovki as polnota
 from .team_sync import sync_people
 from ..connectors.team_shared import team_shared_state
 from .dates import due_text, lenient_date
@@ -85,6 +86,7 @@ class RunReport:
     calls: int = 0
     cost_usd: float = 0.0
     protocol_saved: bool = False
+    completeness: str = ""      # полнота расшифровки — строка итога сборки, в документ не идёт (26.10.2026, как ERP)
 
 
 HIDDEN = "[строка скрыта: похожа на инструкцию для модели]"
@@ -359,6 +361,12 @@ class MeetingPipeline:
             "media_seconds": meta.get("media_seconds"), "segments": len(meta.get("segment_lines") or []),
             "text_chars": len(doc.text or ""),
         }
+        # петли распознавания и доля распознанного — в журнал распознавания (как ERP, 26.10.2026)
+        if meta.get("asr_loops"):
+            record["loops"] = meta["asr_loops"].get("петель", 0)
+            record["loops_line"] = meta.get("asr_loops_line", "")
+        if meta.get("recognized_share") is not None:
+            record["recognized_share"] = meta["recognized_share"]
         try:
             if wav_path is None or not Path(wav_path).is_file():
                 meta["voice_error"] = "записи нет на диске — голоса не разобраны"
@@ -412,6 +420,56 @@ class MeetingPipeline:
             meta["asr"] = record
             asr_journal.write(self.asr_journal_path, **record)
 
+    def _podpis(self, meeting_id: int) -> str:
+        """«Встреча 22.10.2026» — подпись карточек «Система» (слово встречи — из темы)."""
+        row = self.s.get("meetings", meeting_id) or {}
+        d = lenient_date(row.get("date"))
+        return f"{self.theme.get('vocabulary.meeting', 'Встреча')} {d:%d.%m.%Y}" if d else \
+            str(self.theme.get("vocabulary.meeting", "Встреча"))
+
+    def _petli(self, project_id: int, meeting_id: int, doc) -> dict:
+        """Петли распознавания: текст и строки сегментов чистятся (`petlya_raspoznavaniya`, близнец ERP), итог — в
+        сводку и журнал распознавания; доля распознанного записи — туда же; карточка «Система» — по доле петель."""
+        doc.text, итог = petlya.очистить(doc.text)
+        meta = petlya.очистить_сводку(doc.meta, итог)
+        if итог.get("петель"):
+            meta["asr_loops_line"] = petlya.строка_итога(итог)
+        мера = polnota.по_записи(doc.text, meta.get("media_seconds"))
+        if мера is not None:
+            meta["recognized_share"] = мера["доля"]
+        doc.meta.clear()
+        doc.meta.update(meta)
+        try:
+            petlya.отметить(self.s, self.cards, project_id, meeting_id, self._podpis(meeting_id), итог)
+        except Exception as exc:  # noqa: BLE001 — карточка не отменяет распознанный текст
+            self.step_failed(project_id, meeting_id, "Карточка петель распознавания", exc)
+        return итог
+
+    def _polnota(self, project_id: int, meeting_id: int, meeting: dict, base: dict) -> str:
+        """Полнота расшифровки сборки (`polnota_rasshifrovki`, близнец ERP): последняя метка против длительности
+        записи; меньше 80 % — карточка «Система», снова полная — открытая карточка закрывается сама. Длительности нет —
+        длина против медианы последних встреч проекта того же дня недели, только строка итога. В документ — ничего."""
+        try:
+            meta = json.loads(base.get("meta") or "{}")
+        except (TypeError, ValueError):
+            meta = {}
+        мера = polnota.по_записи(base.get("text") or "", meta.get("media_seconds"))
+        if мера is not None:
+            polnota.отметить(self.s, self.cards, project_id, meeting_id, self._podpis(meeting_id), мера)
+            return polnota.строка_итога(мера)
+        d = lenient_date(meeting.get("date"))
+        if d is None:
+            return ""
+        обычные = []
+        for r in self.s.q("SELECT m.date, s.text FROM sources s JOIN meetings m ON m.id = s.meeting_id "
+                          "WHERE m.project_id=? AND s.meeting_id != ? AND s.kind=? AND s.removed_at IS NULL "
+                          "ORDER BY m.date DESC, s.id", (project_id, meeting_id, SourceKind.TRANSCRIPT.value)):
+            md = lenient_date(r["date"])
+            if md is not None and md.isoweekday() == d.isoweekday():
+                обычные.append(len(r["text"] or ""))
+        return polnota.короче_обычной(len(base.get("text") or ""), обычные,
+                                      polnota.основа_сравнения(None, d.isoweekday()))
+
     def ingest(self, project_id: int, meeting_id: int, filename: str, data: bytes | None = None,
                path: Path | None = None) -> dict:
         """Ручная загрузка / папка-приёмник. Возвращает {"status", ...}."""
@@ -439,6 +497,9 @@ class MeetingPipeline:
         if doc.meta.get("own_output") or self._is_own_protocol(project_id, doc.text):
             return {"status": "rejected", "reason": "Это выгрузка самой системы — она не может быть источником встречи."}
         if isinstance(c, ASRConnector):
+            # Петли распознавания — сразу после распознавания, до голосов и до сохранения (как ERP, 26.10.2026):
+            # повторы сверх двух убираются, строки и их времена остаются; доля убранного больше 1 % — карточка.
+            self._petli(project_id, meeting_id, doc)
             # Голоса — до сохранения и до удаления записи: разделению и отрывкам нужен звук. Сбой шага не
             # отменяет распознанный текст, причина уходит в журнал и карточку.
             self._voice_step(project_id, meeting_id, path, doc, filename)
@@ -566,6 +627,11 @@ class MeetingPipeline:
         if base is None:
             base = notes[0]
         rep.source_choice = base.get("name") or ""
+        if base.get("kind") == SourceKind.TRANSCRIPT.value:
+            try:
+                rep.completeness = self._polnota(project_id, meeting_id, meeting, base)
+            except Exception as exc:  # noqa: BLE001 — мера полноты не останавливает сборку
+                self.step_failed(project_id, meeting_id, "Полнота расшифровки", exc)
         source = SourceDoc(base["name"], SourceKind(base["kind"]), base["text"])
         notes_text = "\n".join(n["text"] for n in notes) if transcripts else ""
         # пробный запрос перед сборкой (стенд 39, ERP 689c739): готова ли модель принять запрос такого размера;
@@ -1141,6 +1207,7 @@ class MeetingPipeline:
                            added=rep.tasks_added, held=rep.tasks_held, closed=rep.tasks_closed,
                            dropped=rep.tasks_dropped, skipped_by_rule=rep.skipped_by_rule,
                            stopped_by=budget.stopped_by, stand=self.stand, closing_mentioned=closing_mentioned,
+                           **({"polnota_rasshifrovki": rep.completeness} if rep.completeness else {}),
                            answered_by={k: sorted(set(v)) for k, v in budget.answered.items() if not k.startswith("_")},
                            **self.tool_info)
         return rep

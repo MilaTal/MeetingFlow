@@ -409,7 +409,7 @@ const routes = {
     const rows = await api(`/api/projects/${S.project}/cards`);
     // Категории — как вкладки ERP «Разбор»; норма открытых — 15.
     const CAT = { tasks: ["assign_person", "task_doubt", "due_unconfirmed"],
-      people: ["assign_person"], projects: [], agreements: ["review_finding"], system: ["technical"] };
+      people: ["assign_person"], projects: [], agreements: ["review_finding"], system: ["technical", "transcript_incomplete", "transcript_loop"] };
     const cur = S.cardsTab || "all";
     const visible = cur === "all" ? rows : rows.filter((c) => (CAT[cur] || []).includes(c.kind));
     const count = (key) => key === "all" ? rows.length : rows.filter((c) => (CAT[key] || []).includes(c.kind)).length;
@@ -425,6 +425,9 @@ const routes = {
     const st = { done: "выполнено", dropped: "снято" };
     const body = (c) => {
       const p = c.payload;
+      // неполная расшифровка и петля распознавания — карточки «Система», один ответ (как ERP, 26.10.2026)
+      if (c.kind === "transcript_incomplete" || c.kind === "transcript_loop") return `<span class="sub">${esc(p.text || "")}</span>
+        <div class="row"><button class="btn btn-primary" data-r="${c.id}" data-s="rejected">Понятно, закрыть</button></div>`;
       // срок модели не прозвучал рядом с поручением: задача без срока, «Подтвердить» ставит предложенный (12.10.26)
       if (c.kind === "due_unconfirmed") return `<span class="sub">${esc(p.evidence_quote || "")}</span>
         <div class="row"><button class="btn btn-primary" data-r="${c.id}" data-s="accepted">Поставить срок ${esc(p.proposed_text || "")}</button>
