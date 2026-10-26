@@ -473,6 +473,33 @@ def create_app(theme_name: str | None = None, db_path: str | None = None, journa
         project_or_404(pid)
         return {"id": store.insert("meetings", project_id=pid, date=m.date, label=m.label)}
 
+    @app.get("/api/projects/{pid}/agreements")
+    def agreements(pid: int, kind: str = "", status: str = "open", since: str = "", till: str = ""):
+        """«Договорённости»: решения, договорённости, открытые вопросы, вехи — как отдельный экран ERP."""
+        project_or_404(pid)
+        where, args = ["u.project_id=?"], [pid]
+        if kind:
+            where.append("u.kind=?")
+            args.append(kind)
+        if status == "open":
+            where.append("u.status IN ('open','active')")
+        elif status:
+            where.append("u.status=?")
+            args.append(status)
+        if since:
+            where.append("COALESCE(m.date,'') >= ?")
+            args.append(since)
+        if till:
+            where.append("COALESCE(m.date,'') <= ?")
+            args.append(till)
+        rows = store.q("SELECT u.id, u.kind, u.text, u.quote, u.status, u.planned_date, u.ts, u.meeting_id, "
+                       "m.date AS meeting_date FROM units u LEFT JOIN meetings m ON m.id=u.meeting_id "
+                       "WHERE " + " AND ".join(where) + " ORDER BY COALESCE(m.date,'') DESC, u.line_from, u.id",
+                       tuple(args))
+        for r in rows:
+            r["kind_ru"] = units_mod.KIND_RU.get(r["kind"], r["kind"])
+        return rows
+
     @app.post("/api/meetings/{mid}/sources")
     async def upload(mid: int, file: UploadFile = File(...), u: dict = Depends(user)):
         m = store.get("meetings", mid)

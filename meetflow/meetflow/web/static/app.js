@@ -165,6 +165,48 @@ const routes = {
     if (add) add.onclick = async () => { try { await api(`/api/projects/${S.project}/meetings`, { method: "POST", json: { date: $("#m-date").value, label: $("#m-label").value } }); render(); } catch (e) { toast(e.message); } };
   },
 
+  async agreements() { // «Договорённости» — отдельный экран, как в ERP: решения, договорённости, вопросы, вехи
+    const K = { decision: "Решение", agreement: "Договорённость", open_question: "Открытый вопрос",
+      milestone: "Веха", clarification: "Уточнение" };
+    const st = S.agr || (S.agr = { kind: "", status: "open", since: "", till: "" });
+    const q = new URLSearchParams();
+    if (st.kind) q.set("kind", st.kind);
+    q.set("status", st.status);
+    if (st.since) q.set("since", st.since);
+    if (st.till) q.set("till", st.till);
+    const rows = await api(`/api/projects/${S.project}/agreements?${q}`);
+    const opts = [["", "Все виды"], ...Object.entries(K)].map(([v, t]) => `<option value="${v}"${st.kind === v ? " selected" : ""}>${t}</option>`).join("");
+    const list = rows.length ? rows.map((r) => `<div class="card-output"><div class="row" style="justify-content:space-between;align-items:baseline">
+        <span><span class="badge">${esc(r.kind_ru)}</span> ${r.meeting_date ? `<a class="sub" href="#meeting/${r.meeting_id}">${fmtDate(r.meeting_date)} — протокол</a>` : ""}</span>
+        <span class="sub">${esc({ open: "открыто", active: "действует", closed: "закрыто", replaced: "заменено", removed: "убрано" }[r.status] || r.status)}${r.planned_date ? ` · срок ${fmtDate(r.planned_date)}` : ""}</span></div>
+      <div>${esc(r.text)}</div>${r.quote ? `<q class="sub">${esc(r.quote)}</q>` : ""}</div>`).join("")
+      : `<p class="empty">По этим условиям договорённостей нет.</p>`;
+    $("#main").innerHTML = `<h1>Договорённости</h1>
+      <p class="page-sub">Решения, договорённости, открытые вопросы и вехи из записей встреч. Договорённость с понятным действием и исполнителем — задача, она в реестре задач.</p>
+      <div class="card"><div class="row" style="gap:10px;align-items:end">
+        <label class="sub">Вид<select id="agr-kind" style="min-width:190px">${opts}</select></label>
+        <label class="sub">Открытые<select id="agr-status" style="min-width:190px"><option value="open"${st.status === "open" ? " selected" : ""}>Открытые и действующие</option><option value="all"${st.status === "all" ? " selected" : ""}>Все</option></select></label>
+        <label class="sub">С<input id="agr-since" type="date" value="${esc(st.since)}"></label>
+        <label class="sub">По<input id="agr-till" type="date" value="${esc(st.till)}"></label>
+        <button class="btn btn-ghost" id="agr-reset">Сбросить</button></div></div>
+      <p class="sub">Найдено: ${rows.length}.</p>${list}`;
+    const upd = () => { S.agr = { kind: $("#agr-kind").value, status: $("#agr-status").value,
+      since: $("#agr-since").value, till: $("#agr-till").value }; render(); };
+    $("#agr-kind").onchange = upd; $("#agr-status").onchange = upd;
+    $("#agr-since").onchange = upd; $("#agr-till").onchange = upd;
+    $("#agr-reset").onclick = () => { S.agr = { kind: "", status: "open", since: "", till: "" }; render(); };
+  },
+
+  async help() { // «Как пользоваться» — короткая памятка, как в ERP
+    $("#main").innerHTML = `<h1>Как пользоваться</h1>
+      <div class="card stack"><p>Около трёх минут: свои задачи и отметка по ним, встречи и протоколы, реестр задач, «Статус проекта» и поиск.</p>
+      <p><b>Задачи.</b> «Реестр задач по проекту» — вкладки «В работе», «Выполненные», «Снятые». Свою задачу можно закрыть кнопкой «Выполнено».</p>
+      <p><b>Встречи.</b> «Встречи по проекту» — дата и протокол. На встрече видно источники, протокол, замечания проверки и задачи встречи.</p>
+      <p><b>Голоса.</b> Запись распознаётся локально; говорящие подписываются «Говорящий N», а подтверждённые голоса — ФИО из «Команды». Спорные голоса разбирает супер-администратор в «Разборе голосов».</p>
+      <p><b>Договорённости.</b> Решения, договорённости, открытые вопросы и вехи — отдельным экраном с отбором по виду и дате.</p>
+      <p class="sub">Вопросы — администратору проекта.</p></div>`;
+  },
+
   async meeting(id) {
     const srcs = await api(`/api/meetings/${id}/sources`);
     const rec = await api(`/api/meetings/${id}/recognition`).catch(() => null);
