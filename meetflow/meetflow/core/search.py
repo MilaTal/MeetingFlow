@@ -184,8 +184,16 @@ def search(store, project_id: int, query: str, limit: int = 50, raw_speech: bool
     def add(kind, ref, mdate, text, s, title):
         res.append({"type": kind, "id": ref, "meeting_date": mdate, "title": title, "snippet": snippet(text, q),
                     "_s": s})
+    from .tablica_zadach import без_снятых
+    _t = store.q("SELECT description, status FROM tasks WHERE project_id=?", (project_id,))
+    _dropped = {r["description"] for r in _t if r["status"] == "dropped"}
+    _alive = {r["description"] for r in _t if r["status"] != "dropped"}
+
+    def shown_md(md):
+        return без_снятых(md, _dropped, _alive)
     for m in store.q("SELECT id, date, label, protocol_md FROM meetings WHERE project_id=? AND protocol_md IS NOT NULL",
                      (project_id,)):
+        m = {**m, "protocol_md": shown_md(m["protocol_md"])}     # строки снятых задач не ищутся (26.10.2026)
         s = score(m["protocol_md"], m["date"], q)
         if s is not None:
             add("protocol", m["id"], m["date"], m["protocol_md"], s, "Протокол")
@@ -196,14 +204,15 @@ def search(store, project_id: int, query: str, limit: int = 50, raw_speech: bool
         s = score(src["text"], src["date"], q)
         if s is not None:
             add("source", src["meeting_id"], src["date"], src["text"], s - 10, f"Источник: {src['name']}")
+    # снятые задачи в поиске не показываются (решение владелицы 26.10.2026, как ERP)
     for t in store.q("SELECT t.*, m.date AS mdate FROM tasks t LEFT JOIN meetings m ON m.id = t.source_meeting_id "
-                     "WHERE t.project_id=?", (project_id,)):
+                     "WHERE t.project_id=? AND t.status<>'dropped'", (project_id,)):
         best = None
         for text in (t["assignee"] or "", t["description"] or "", t["last_comment"] or ""):
             s = score(text, t["mdate"], q) if text else None
             best = s if s is not None and (best is None or s > best) else best
         if best is not None:
-            st = {"active": "в работе", "done": "выполнено", "dropped": "снято"}.get(t["status"], t["status"])
+            st = {"active": "в работе", "done": "выполнено"}.get(t["status"], t["status"])
             add("task", t["id"], t["mdate"], f"{t['description']} — {t['assignee'] or 'не назначен'} — {st}",
                 best + 20, "Задача")
     for u in store.q("SELECT u.*, m.date AS mdate FROM units u JOIN meetings m ON m.id = u.meeting_id "

@@ -76,3 +76,29 @@ def drop_missing(store, reg, meeting_id: int | None, meeting_date: str | None, k
         reg.set_status(t["id"], TaskStatus.DROPPED, "rebuild", причина(when), meeting_date=meeting_date)
         out["dropped"].append(dict(t))
     return out
+
+
+# --- возврат снятой пересборкой задачи (перенос из ERP 27.10.2026, DECISIONS ERP 26.10.2026 «пересборка без задач») ---
+#
+# Задача своей встречи, снятая правилом пересборки (последняя строка истории — «не вошла в пересборку» источника
+# `rebuild`, без человека), которую новая сборка нашла снова, возвращается в работу с прежним номером — история, срок и
+# ссылки людей остаются у задачи (как `peresborka.вернуть` ERP и Планёрки). Снятая человеком (реестр, карточка, голос
+# встречи) и выполненная не возвращаются: решение человека и сделанная работа пересборкой не отменяются.
+ВОЗВРАТ = "снова найдена в пересборке ({when}) — возвращена в работу с прежним номером"
+
+
+def снята_пересборкой(store, task_id: int) -> bool:
+    t = store.get("tasks", task_id)
+    if not t or t.get("status") != TaskStatus.DROPPED.value:
+        return False
+    last = store.q("SELECT source, new_status FROM task_history WHERE task_id=? AND new_status IS NOT NULL "
+                   "ORDER BY id DESC LIMIT 1", (task_id,))
+    return bool(last) and last[0]["source"] == "rebuild" and last[0]["new_status"] == TaskStatus.DROPPED.value
+
+
+def вернуть(store, reg, task_id: int, when: str | None = None) -> bool:
+    """Вернуть в работу задачу, снятую прежней пересборкой; номер тот же. Возвращает, вернули ли."""
+    if not снята_пересборкой(store, task_id):
+        return False
+    reg.set_status(task_id, TaskStatus.ACTIVE, "rebuild", ВОЗВРАТ.format(when=when or когда_сейчас()))
+    return True

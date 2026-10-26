@@ -40,7 +40,7 @@ from .registry import CardQueue, OperatorMemory, TaskRegistry
 from . import deadline
 from . import asr_journal, plan as plan_mod, voice_step
 from . import petlya_raspoznavaniya as petlya, polnota_rasshifrovki as polnota
-from . import korotkiy_protokol, tablica_zadach, tekst_po_zapisi
+from . import korotkiy_protokol, schet_zadach, tablica_zadach, tekst_po_zapisi
 from .team_sync import sync_people
 from ..connectors.team_shared import team_shared_state
 from .dates import due_text, lenient_date
@@ -90,6 +90,8 @@ class RunReport:
     completeness: str = ""      # полнота расшифровки — строка итога сборки, в документ не идёт (26.10.2026, как ERP)
     text_check: str = ""        # текст по записи: проверено, убрано по причинам (26.10.2026, как ERP)
     text_removed: list = field(default_factory=list)     # убранные предложения (до 40) — в журнал, не в документ
+    tasks_returned: int = 0     # возвращены в работу после снятия прежней пересборкой (26.10.2026, как ERP)
+    tasks_by_steps: str = ""    # «задачи по шагам: от модели → после стражей → … » — итог сборки, не документ
 
 
 HIDDEN = "[строка скрыта: похожа на инструкцию для модели]"
@@ -729,6 +731,14 @@ class MeetingPipeline:
             known = [(r["id"], r["source_quote"], r["assignee"] or "", set(stems(r["description"])))
                      for r in this_meeting]
             kept_ids: set[int] = set()      # задачи прежней сборки, которые новая сборка подтвердила
+            back_ids: set[int] = set()      # снятые прежней пересборкой и найденные снова — вернуть с прежним номером
+            repeats = 0                     # поручения, которые сборка узнала как свою прежнюю задачу
+
+            def hit_kept(tid: int) -> None:
+                """Узнали задачу этой встречи: в работе — подтверждена; снята пересборкой — вернуть (26.10.2026)."""
+                kept_ids.add(tid)
+                if rebuild_mod.снята_пересборкой(self.s, tid):
+                    back_ids.add(tid)
 
             def already_set(quote: str, who: str, desc: str) -> int | None:
                 """Номер уже заведённой задачи этой встречи или -1, если совпала с заведённой в этом же прогоне;
@@ -746,7 +756,8 @@ class MeetingPipeline:
                 who = g.assignee.label if g.assignee else ""
                 if g.quote and (hit := already_set(g.quote, who, g.description)) is not None:
                     if hit > 0:
-                        kept_ids.add(hit)
+                        hit_kept(hit)
+                    repeats += 1
                     continue  # повторный прогон той же встречи: эта задача уже заведена
                 if d.due_date:            # срок — только если прозвучал рядом с цитатой (01/6)
                     said = supported_due(d.due_date, self._window(source.lines, g.quote or d.quote), meeting.get("date"))
@@ -1038,7 +1049,7 @@ class MeetingPipeline:
                                     if (r["assignee"] or None) == who
                                     and same_task_text(g.description or d.description, [r["description"]])), None)
                         if hit is not None:
-                            kept_ids.add(hit)
+                            hit_kept(hit)
                             continue
                         tid = self.reg.add(project_id, g.description or d.description, who, meeting_id, quote,
                                            d.due_date, mdate, due_kinds.get(id(d)), doubt_reason=doubt_text(reasons))
@@ -1097,7 +1108,7 @@ class MeetingPipeline:
                         hit = next((r["id"] for r in this_meeting
                                     if same_task_text(g.description or unit.text, [r["description"]])), None)
                         if hit is not None:
-                            kept_ids.add(hit)
+                            hit_kept(hit)
                             continue        # пересборка: эта задача встречи уже заведена
                         if set(g.reasons) & SIFTED:                  # отсеяно — строкой в журнал разбора
                             self.journal.write(purpose="triage", meeting_id=meeting_id, verdict="отсеяно",
@@ -1118,6 +1129,12 @@ class MeetingPipeline:
                         self.cards.open(project_id, "held_task", f"Задача из записи не заведена: {unit.text[:120]}",
                                         {"description": unit.text, "reasons": g.reasons, "quote": unit.quote,
                                          "from": "единицы встречи"}, meeting_id)
+                # Снятая прежней пересборкой и найденная снова — в работу с прежним номером (ERP 26.10.2026); до
+                # снятия «не вошедших» и до сборки таблицы: строка задачи в документе не теряется.
+                when_rb = rebuild_mod.когда_сейчас()
+                for tid in sorted(back_ids):
+                    if rebuild_mod.вернуть(self.s, self.reg, tid, when_rb):
+                        rep.tasks_returned += 1
                 # Пересборка снимает задачи прежней сборки, которых нет в новой (решение владелицы 21.10.2026).
                 # Неполное извлечение (остановка по пределу) ничего не снимает: «не найдена» не доказано.
                 res = rebuild_mod.drop_missing(self.s, self.reg, meeting_id, mdate,
@@ -1141,6 +1158,16 @@ class MeetingPipeline:
                                                     people=[p.full_name for p in team.people], rep=rep,
                                                     base_kind=source.kind.value)
                 protocol_md, marks = clean_document(protocol_md)   # проверка кодом до сохранения (13.10.26)
+                # задачи по шагам — одной строкой итога сборки (schet_zadach, близнец ERP 26.10.2026). Шага «после
+                # фильтра опоры» у MeetFlow нет: таблица документа строится из реестра, а не из таблицы черновика.
+                mine = self.s.q("SELECT id FROM tasks WHERE source_meeting_id=? AND status='active'", (meeting_id,))
+                md_h = lenient_date(mdate)
+                rep.tasks_by_steps = schet_zadach.строка({
+                    "от модели": len(drafts), "после стражей": len(planned) + doubt + repeats,
+                    "заведено в реестр": len(mine),
+                    "строк в таблице документа": schet_zadach.строк_задач(
+                        protocol_md, f"{md_h:%d.%m.%Y}" if md_h else None),
+                    "пояснение": f"новых {len(added)}, возвращено {rep.tasks_returned}"})
                 if marks:
                     self.cards.open(project_id, "technical", "Из протокола убрана системная пометка",
                                     {"marks": marks[:10]}, meeting_id)
@@ -1167,6 +1194,9 @@ class MeetingPipeline:
                             meeting_id)
             return rep
         rep.tasks_added, rep.tasks_closed = len(added), closed
+        if stopped is None and "ноль на шаге" in rep.tasks_by_steps:
+            self.cards.open(project_id, "technical", "Сборка: задачи пропали между шагами",
+                            {"detail": rep.tasks_by_steps}, meeting_id)
         rep.tasks_held = len(held) - doubt          # вне реестра: дубли и отсечённое; под вопросом — в реестре
         rep.tasks_doubt = doubt
         rep.closing_cards, rep.protocol_saved = len(closing_cards), True
@@ -1221,6 +1251,7 @@ class MeetingPipeline:
                            **({"polnota_rasshifrovki": rep.completeness} if rep.completeness else {}),
                            **({"tekst_po_zapisi": rep.text_check, "tekst_ubrano": rep.text_removed}
                               if rep.text_check else {}),
+                           **({"zadachi_po_shagam": rep.tasks_by_steps} if rep.tasks_by_steps else {}),
                            answered_by={k: sorted(set(v)) for k, v in budget.answered.items() if not k.startswith("_")},
                            **self.tool_info)
         return rep

@@ -282,3 +282,46 @@ def отметить_по_секретарю(store, строки: list[str], *, 
         лучшая["operational"] = 1
         итог["отмечено"].append(лучшая["id"])
     return итог
+
+
+# --- снятые задачи в хранимом документе не показываются (решение владелицы 26.10.2026) ---------------------------------
+
+def _ключ(текст: str | None) -> str:
+    return " ".join(str(текст or "").replace("\\|", "|").replace("ё", "е").replace("Ё", "Е").lower().split())
+
+
+def без_снятых(md: str | None, снятые: set[str], живые: set[str]) -> str:
+    """Строки таблиц задач документа, чья формулировка — формулировка снятой задачи проекта (и не задачи в работе или
+    выполненной), при показе и в Word не идут; «№» пересчитывается без пропуска. Хранимый текст не переписывается:
+    вызывается в двери показа (как ERP `pravka_polotno.без_снятых`; связь строки с задачей — по формулировке, как у
+    Планёрки, потому что «№» в документе MeetFlow — порядковый)."""
+    if not md or not снятые:
+        return md or ""
+    снятые_к = {_ключ(x) for x in снятые} - {_ключ(x) for x in живые}
+    if not снятые_к:
+        return md
+    out: list[str] = []
+    колонка, номер = None, 0
+    for ln in md.split("\n"):
+        s = ln.strip()
+        if not s.startswith("|"):
+            колонка, номер = None, 0
+            out.append(ln)
+            continue
+        ячейки = [c.strip() for c in re.split(r"(?<!\\)\|", s.strip("|"))]
+        if колонка is None:
+            низ = [c.lower() for c in ячейки]
+            колонка = next((i for i, c in enumerate(низ) if c.startswith(("задача", "описание"))), -1)
+            out.append(ln)
+            continue
+        if all(set(c) <= set(":- ") for c in ячейки) or колонка < 0 or колонка >= len(ячейки):
+            out.append(ln)
+            continue
+        if _ключ(ячейки[колонка]) in снятые_к:
+            continue
+        номер += 1
+        if ячейки and ячейки[0].isdigit():
+            ячейки[0] = str(номер)
+            ln = "| " + " | ".join(ячейки) + " |"
+        out.append(ln)
+    return "\n".join(out)

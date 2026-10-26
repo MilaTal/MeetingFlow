@@ -89,8 +89,10 @@ def test_card_actions(env):
     run(env, [LINE], [{**QUESTION[0], "description": "Подготовить график инвентаризации"}], d="2026-10-02")
     c2 = cards(env, "task_doubt")[0]
     env.post(f"/api/cards/{c2['id']}/resolve", json={"status": "rejected"}, headers=H)   # «Не задача» — снята
-    dropped = [t for t in tasks(env, status="dropped") if "инвентаризации" in t["description"]]
+    # перевёрнут 27.10.2026 (ERP 26.10.2026: снятые не показываются нигде, API их не отдаёт): проверка — по базе
+    dropped = [t for t in env.store.q("SELECT * FROM tasks WHERE status='dropped'") if "инвентаризации" in t["description"]]
     assert dropped, "«Не задача» снимает задачу, а не удаляет"
+    assert not [t for t in tasks(env, status="dropped") if "инвентаризации" in t["description"]]
 
 
 def test_duplicates_stay_out_of_registry(env):

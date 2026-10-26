@@ -92,15 +92,15 @@ function md(mdText) { // минимальный markdown: заголовки, т
 
 const routes = {
   async tasks() {
-    const view = store.get("tasks-view", "active");
+    const view = store.get("tasks-view", "active") === "done" ? "done" : "active";
     const rows = await api(`/api/projects/${S.project}/tasks?status=${view}`);
-    const tabs = ["active", "done", "dropped"].map((v) => `<button class="btn ${v === view ? "btn-primary" : ""}" data-view="${v}">${
-      { active: "В работе", done: "Выполненные", dropped: "Снятые" }[v]}</button>`).join("");
+    const tabs = ["active", "done"].map((v) => `<button class="btn ${v === view ? "btn-primary" : ""}" data-view="${v}">${
+      { active: "В работе", done: "Выполненные" }[v]}</button>`).join("");
     const body = rows.length ? `<div class="table-wrap" id="tasks-frame"><table><tr><th>№</th><th>Задача</th><th>Ответственный</th><th>Срок</th><th>Комментарий</th><th></th></tr>${
       rows.map((t) => {
         const mine = S.name && S.name === t.assignee;
         const can = isAdmin() || S.role === "director" || mine;
-        return `<tr><td class="no" title="Внутренний номер: ${esc(t.id)}">${esc(t.no)}<small>${fmtDate(t.date_set)}</small></td>
+        return `<tr data-row="t${esc(t.id)}"><td class="no" title="Внутренний номер: ${esc(t.id)}">${esc(t.no)}<small>${fmtDate(t.date_set)}</small></td>
           <td>${esc(t.description)}${t.operational ? ' <span class="badge">оперативная</span>' : ""}${t.doubt_reason ? `<span class="doubt-dot" title="под вопросом: ${esc(t.doubt_label || t.doubt_reason)} — карточка в «Конфликтах»" aria-label="под вопросом"></span>` : ""}${t.source_quote ? `<span class="sub">«${esc(t.source_quote.slice(0, 160))}»</span>` : ""}${t.source_meeting_id ? `<a class="sub task-meeting" href="#meeting/${esc(t.source_meeting_id)}">встреча ${fmtDate(t.meeting_date)} — протокол</a>` : ""}${isAdmin() && view === "active" ? `<button class="btn-link sub" data-op="${t.id}" data-op-on="${t.operational ? 0 : 1}" title="Пометка «оперативная» — задача идёт в раздел «Оперативные задачи» протокола">${t.operational ? "оперативная ✓ — снять" : t.operational_hint ? "похоже на оперативную — отметить?" : "в оперативные"}</button>` : ""}</td>
           <td>${esc(t.assignee || "Не назначен")}</td><td${t.overdue ? ' class="overdue" title="Просрочено: порог в «Параметры системы → Пороги»"' : ""}>${esc(t.due_text || t.due_date || "—")}</td><td>${esc(t.last_comment || "")}</td>
           <td>${can && view === "active" ? `<button class="btn" data-done="${t.id}">Выполнено</button>` : ""}
@@ -156,7 +156,7 @@ const routes = {
     const card = (t, v, sub = "") => `<div class="card-output"><div class="sub">${esc(t)}</div><div style="font-size:24px;font-weight:600">${esc(v)}</div>${sub ? `<div class="sub">${esc(sub)}</div>` : ""}</div>`;
     const summary = `<div class="card-output"><h2 style="margin-top:0">Задачи</h2>
         <div class="row" style="gap:12px;flex-wrap:wrap">${card("В работе", s.tasks_active, `просрочено ${s.tasks_overdue} · без срока ${s.tasks_no_due}`)}
-        ${card("Выполнено", s.tasks_done)}${card("Снято", s.tasks_dropped)}</div></div>
+        ${card("Выполнено", s.tasks_done)}</div></div>
       <div class="card-output"><h2 style="margin-top:0">Решения и вопросы</h2>
         <div class="row" style="gap:12px;flex-wrap:wrap">${card("Действует решений", s.decisions)}${card("Договорённостей", s.agreements)}
         ${card("Открытых вопросов", s.questions)}${card("Вех", s.milestones)}</div></div>
@@ -264,7 +264,7 @@ const routes = {
   async help() { // «Как пользоваться» — короткая памятка, как в ERP
     $("#main").innerHTML = `<h1>Как пользоваться</h1>
       <div class="card stack"><p>Около трёх минут: свои задачи и отметка по ним, встречи и протоколы, реестр задач, «Статус проекта» и поиск.</p>
-      <p><b>Задачи.</b> «Реестр задач по проекту» — вкладки «В работе», «Выполненные», «Снятые». Свою задачу можно закрыть кнопкой «Выполнено».</p>
+      <p><b>Задачи.</b> «Реестр задач по проекту» — вкладки «В работе» и «Выполненные»; снятые задачи не показываются. Свою задачу можно закрыть кнопкой «Выполнено».</p>
       <p><b>Встречи.</b> «Встречи по проекту» — дата и протокол. На встрече видно источники, протокол, замечания проверки и задачи встречи.</p>
       <p><b>Голоса.</b> Запись распознаётся локально; говорящие подписываются «Говорящий N», а подтверждённые голоса — ФИО из «Команды». Спорные голоса разбирает супер-администратор в «Разборе голосов».</p>
       <p><b>Договорённости.</b> Решения, договорённости, открытые вопросы и вехи — отдельным экраном с отбором по виду и дате.</p>
@@ -463,7 +463,7 @@ const routes = {
     $("#main").innerHTML = `<h1>Разбор</h1><p class="page-sub">Здесь только то, что система не решила сама. «Подтвердить» выполняет предложенное: заводит задачу или применяет закрытие.</p>
       <p class="sub">Открыто ${rows.length} (норма ≤ 15)${rows.length > 15 ? ' <span class="overdue">— больше нормы</span>' : ""}.</p>
       <div class="row" style="margin-bottom:10px">${tabs}</div>
-      ${visible.length ? moreItems(visible, (c) => `<div class="card-output stack"><strong>${esc(c.title)}</strong>
+      ${visible.length ? moreItems(visible, (c) => `<div class="card-output stack" data-row="c${esc(c.id)}"><strong>${esc(c.title)}</strong>
         ${c.payload.reasons ? `<span class="sub">Почему: ${c.payload.reasons.map((r) => esc(why[r] || r)).join(", ")}</span>` : ""}
         ${c.payload.quote ? `<q class="sub">${esc(c.payload.quote)}</q>` : ""}
         ${body(c)}</div>`) : `<p class="empty">${rows.length ? "В этой вкладке пусто." : "Очередь пуста."}</p>`}`;
@@ -915,9 +915,41 @@ function undoable(btn, id, status) { // «Выполнено через 2 с —
 }
 window.addEventListener("pagehide", () => flushChanges(true));
 
+// Прокрутка на месте после действия по строке (решение владелицы 26.10.2026, как ERP и Планёрка): перерисовка того же
+// экрана держит высоту, возвращает прокрутку окна и рамок, раскрытые «Показать ещё» и строку действия на её место
+// экрана; исчезнувшая строка (выполнена, убрана) отдаёт место следующей; фокус — на ту же строку.
+document.addEventListener("click", (e) => { const r = e.target.closest && e.target.closest("[data-row]"); if (r) S.lastRow = r.dataset.row; }, true);
+function snapshotScroll() {
+  const main = $("#main");
+  const frames = [...main.querySelectorAll(".table-wrap, .ribbon")].map((el) => el.scrollTop);
+  const open = [...main.querySelectorAll("details")].map((d) => d.open);
+  let anchor = null;
+  const el = S.lastRow ? main.querySelector(`[data-row="${CSS.escape(S.lastRow)}"]`) : null;
+  if (el) { const next = el.nextElementSibling; anchor = { key: S.lastRow, top: el.getBoundingClientRect().top, next: next && next.dataset ? next.dataset.row || null : null }; }
+  main.style.minHeight = main.offsetHeight + "px";
+  return { y: window.scrollY, frames, open, anchor };
+}
+function restoreScroll(k) {
+  const main = $("#main");
+  const det = [...main.querySelectorAll("details")];
+  k.open.forEach((o, i) => { if (o && det[i]) det[i].open = true; });
+  const fr = [...main.querySelectorAll(".table-wrap, .ribbon")];
+  k.frames.forEach((top, i) => { if (fr[i]) fr[i].scrollTop = top; });
+  window.scrollTo(0, k.y);
+  if (k.anchor) {
+    const row = main.querySelector(`[data-row="${CSS.escape(k.anchor.key)}"]`) || (k.anchor.next && main.querySelector(`[data-row="${CSS.escape(k.anchor.next)}"]`));
+    if (row) { window.scrollBy(0, row.getBoundingClientRect().top - k.anchor.top);
+      const f = row.querySelector("button, a, input, select");
+      if (f && !main.contains(document.activeElement)) f.focus({ preventScroll: true }); }
+  }
+  main.style.minHeight = "";
+  S.lastRow = null;
+}
+
 async function render() {
   // защита от гонки: медленный ответ прошлого экрана не перерисовывает новый
   const seq = ++renderSeq;
+  const keep = S.shownHash === location.hash ? snapshotScroll() : null;   // тот же экран — место сохраняется
   if (pendingChange.size) await flushChanges();   // уход с экрана — отложенная смена отправляется сразу (стенд 11)
   const main = $("#main");
   const realSet = Object.getOwnPropertyDescriptor(Element.prototype, "innerHTML").set;
@@ -936,6 +968,8 @@ async function render() {
     if (e instanceof Stale || seq !== renderSeq) return;
     $("#main").innerHTML = `<h1>Не получилось открыть раздел</h1><p class="page-sub">${esc(e.message)}</p>`; }
   if (seq !== renderSeq) return;      // экран уже другой — плашку и обработчики не трогаем
+  if (keep) restoreScroll(keep); else $("#main").style.minHeight = "";
+  S.shownHash = location.hash;
   // стенд без модели виден на каждом экране (письмо meeting-registry 01/19)
   if (S.theme && S.theme.stand) $("#main").insertAdjacentHTML("afterbegin",
     `<p class="stand-banner" role="status">Стенд без модели: протоколы собирает заглушка, а не модель. Для работы нужен MEETFLOW_LLM=routes, ollama или openrouter.</p>`);

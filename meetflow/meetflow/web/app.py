@@ -583,7 +583,6 @@ def create_app(theme_name: str | None = None, db_path: str | None = None, journa
         overdue = [t for t in active if t["due_date"] and t["due_date"] < today]
         return {
             "tasks_active": len(active), "tasks_done": sum(1 for t in tasks if t["status"] == "done"),
-            "tasks_dropped": sum(1 for t in tasks if t["status"] == "dropped"),
             "tasks_overdue": len(overdue), "tasks_no_due": sum(1 for t in active if not t["due_date"]),
             "decisions": sum(1 for u in units if u["kind"] == "decision" and u["status"] in ("open", "active")),
             "agreements": sum(1 for u in units if u["kind"] == "agreement" and u["status"] in ("open", "active")),
@@ -708,8 +707,17 @@ def create_app(theme_name: str | None = None, db_path: str | None = None, journa
         """Задачи встречи (стенд 5): у каждой встречи — её задачи; «под вопросом» — только администраторам."""
         if not store.get("meetings", mid):
             raise HTTPException(404, "Встреча не найдена.")
-        rows = store.q("SELECT * FROM tasks WHERE source_meeting_id=? ORDER BY id", (mid,))
+        rows = store.q("SELECT * FROM tasks WHERE source_meeting_id=? AND status<>'dropped' ORDER BY id", (mid,))
         return [task_out({k: v for k, v in r.items() if k != "project_id"}, u) for r in rows]
+
+    def shown(md: str | None, project_id: int | None) -> str:
+        """Дверь показа документа: строки снятых задач не показываются (хранимый текст не меняется, 26.10.2026)."""
+        from ..core.tablica_zadach import без_снятых
+        if not md or project_id is None:
+            return md or ""
+        rows = store.q("SELECT description, status FROM tasks WHERE project_id=?", (project_id,))
+        return без_снятых(md, {r["description"] for r in rows if r["status"] == "dropped"},
+                          {r["description"] for r in rows if r["status"] != "dropped"})
 
     @app.get("/api/meetings/{mid}/protocol")
     def protocol(mid: int, u: dict = Depends(user)):
@@ -719,7 +727,8 @@ def create_app(theme_name: str | None = None, db_path: str | None = None, journa
         # служебные поля (замечания проверки, когда собран) — только администраторам; участнику — документ
         # (находка циклов ролей ERP и Планёрки 15.10.26: Планёрка GET /meetings/{id}/minutes отдавала их всем)
         staff = u["role"] in admin_roles
-        return {"markdown": m["protocol_md"], "built_at": m["protocol_built_at"] if staff else None,
+        return {"markdown": shown(m["protocol_md"], m["project_id"]),
+                "built_at": m["protocol_built_at"] if staff else None,
                 "topic": m.get("topic") or "", "leader": m.get("leader") or "",
                 "review_notes": json.loads(m["review_notes"] or "[]") if staff else [], "units": meeting_units(mid)}
 
@@ -820,7 +829,7 @@ def create_app(theme_name: str | None = None, db_path: str | None = None, journa
         out = DocxOutput(theme.get("design.document_font", "Times New Roman"),
                          int(theme.get("design.document_size_pt", 12)))
         # проверка кодом до передачи: старые протоколы хранят шапку с пометками; сам документ не переписывается
-        return Response(out.render(clean_document(m["protocol_md"])[0], "protocol"),
+        return Response(out.render(clean_document(shown(m["protocol_md"], m["project_id"]))[0], "protocol"),
                         media_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
                         headers={"Content-Disposition": "attachment; filename*=UTF-8''"
                                  + quote(f"protocol_{m['date']}.docx")})
@@ -828,8 +837,11 @@ def create_app(theme_name: str | None = None, db_path: str | None = None, journa
     @app.get("/api/projects/{pid}/tasks")
     def tasks(pid: int, status: Literal["active", "done", "dropped", "all"] = "active", u: dict = Depends(user)):
         project_or_404(pid)
+        # снятые не показываются нигде (решение владелицы 26.10.2026, как ERP): ни по «all», ни по просьбе «dropped»
         st = None if status == "all" else TaskStatus(status)
-        rows = pipe.reg.list(pid, st)
+        rows = [] if st == TaskStatus.DROPPED else [r for r in pipe.reg.list(pid, st) if r["status"] != "dropped"]
+        for i, r in enumerate(rows, 1):
+            r["no"] = i
         # задача связана со встречей (стенд 5): дата встречи — для ссылки «встреча дд.мм.гггг — протокол»
         mdates = {m["id"]: m["date"] for m in store.q("SELECT id, date FROM meetings WHERE project_id=?", (pid,))}
         n = int(store.get_setting("overdue_highlight_working_days", None, 7) or 7)
@@ -1595,10 +1607,11 @@ def create_app(theme_name: str | None = None, db_path: str | None = None, journa
                             "SELECT s.kind, COUNT(*) AS n FROM sources s JOIN meetings m ON m.id=s.meeting_id "
                             "WHERE m.project_id=? AND s.removed_at IS NULL GROUP BY s.kind", (pid,))},
                         "tasks": {r["status"]: r["n"] for r in store.q(
-                            "SELECT status, COUNT(*) AS n FROM tasks WHERE project_id=? GROUP BY status", (pid,))},
+                            "SELECT status, COUNT(*) AS n FROM tasks WHERE project_id=? AND status<>'dropped' "
+                            "GROUP BY status", (pid,))},
                         "closed_by": {r["source"]: r["n"] for r in store.q(
                             "SELECT h.source, COUNT(*) AS n FROM task_history h JOIN tasks t ON t.id=h.task_id WHERE "
-                            "t.project_id=? AND h.new_status IN ('done','dropped') GROUP BY h.source", (pid,))},
+                            "t.project_id=? AND h.new_status='done' GROUP BY h.source", (pid,))},
                         "people": one("SELECT COUNT(*) AS n FROM people WHERE project_id=?"),
                         "people_unconfirmed": one("SELECT COUNT(*) AS n FROM people WHERE project_id=? AND confirmed=0"),
                         "people_external": one("SELECT COUNT(*) AS n FROM people WHERE project_id=? AND external=1"),
