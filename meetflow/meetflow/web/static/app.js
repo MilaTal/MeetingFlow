@@ -273,19 +273,25 @@ const routes = {
     const pl = await api(`/api/meetings/${id}/plan`).catch(() => null);
     let proto = null; try { proto = await api(`/api/meetings/${id}/protocol`); } catch { /* ещё нет */ }
     const notes = (proto && proto.review_notes) || [];
+    const versions = isAdmin() ? await api(`/api/meetings/${id}/protocol/versions`).catch(() => []) : [];
+    const editing = S.protoEditId === Number(id);
+    const editor = proto && editing ? `<div class="card stack"><div class="sub">Правка текста протокола. «Готово» сохранит новую версию, прежняя останется в истории.</div>
+      <textarea id="proto-md" style="width:100%;min-height:420px;font-family:inherit;font-size:14px">${esc(proto.markdown)}</textarea>
+      <div class="row"><button class="btn btn-primary" id="proto-save">Готово</button><button class="btn" id="proto-cancel">Отменить</button></div></div>` : "";
     const mtasks = await api(`/api/meetings/${id}/tasks`);   // задачи этой встречи (стенд 5)
     const ST = { active: "в работе", done: "выполнена", dropped: "снята" };
     $("#main").innerHTML = `<p><a href="#meetings">← ${esc(S.theme.vocabulary.meetings)}</a></p>
       <h1>${esc(S.theme.vocabulary.protocol)}</h1>
-      <div class="row" style="margin-bottom:8px"><a class="btn" href="#plan/${id}">План</a><a class="btn btn-primary" href="#meeting/${id}">Протокол</a><a class="btn btn-ghost" href="#meetings">Все встречи</a></div>
+      <div class="row" style="margin-bottom:8px"><a class="btn" href="#plan/${id}">План</a><a class="btn btn-primary" href="#meeting/${id}">Протокол</a>${isAdmin() && proto ? `<button class="btn" id="proto-edit-toggle">${editing ? "Просмотр" : "Правка"}</button>` : ""}<a class="btn btn-ghost" href="#meetings">Все встречи</a></div>
       <p class="sub">${pl && pl.topic ? `Тема: ${esc(pl.topic)} · ` : ""}${proto && proto.leader ? `Вёл встречу: ${esc(proto.leader)} · ` : ""}${proto && proto.built_at ? `собран ${esc(String(proto.built_at).slice(0, 16).replace("T", " "))} · ` : ""}материалов ${srcs.length}</p>
       <div class="card stack"><div class="dropzone" id="drop">Перетащите файлы встречи сюда или <label style="text-decoration:underline;cursor:pointer">выберите<input type="file" id="file" multiple hidden></label></div>
       ${srcs.length ? `<div>${srcs.map((s) => `<span class="badge">${esc({ transcript: "расшифровка", notes: "заметки", other: "материал" }[s.kind] || s.kind)}</span> ${esc(s.name)}${s.local_asr ? ` <a class="btn-link" href="/api/meetings/${encodeURIComponent(id)}/sources/${encodeURIComponent(s.id)}/export" title="Расшифровка распознана здесь — выгрузить в Word">.docx</a>` : ""}`).join("<br>")}</div>` : ""}
       ${rec && (rec.route || rec.error) ? `<p class="sub" id="asr-line">Распознавание: ${rec.error ? esc(rec.error) : `${esc(rec.route || rec.model || "точка не записана")} · реплик ${esc(rec.segments ?? "—")} · говорящих ${esc(rec.speakers ?? "—")} · подписано строк ${esc(rec.signed_lines ?? "—")}${rec.diarization_seconds != null ? ` · разделение ${esc(rec.diarization_seconds)} с` : ""}${rec.voice_samples ? ` · отпечатков в общую базу ${esc(rec.voice_samples)}` : ""}`}</p>` : ""}
       ${isAdmin() ? `<div class="row" style="gap:10px;align-items:center"><button class="btn btn-primary" id="run">${proto ? "Пересобрать протокол" : "Сформировать протокол"}</button><span class="sub" id="build-state" role="status"></span></div>` : ""}</div>
-      ${proto ? `<div class="doc-with-notes"><div><div class="row" style="justify-content:flex-end;margin-bottom:8px"><a class="btn" href="/api/meetings/${encodeURIComponent(id)}/protocol.docx">Скачать .docx</a></div>
+      ${proto ? `${editor || `<div class="doc-with-notes"><div><div class="row" style="justify-content:flex-end;margin-bottom:8px"><a class="btn" href="/api/meetings/${encodeURIComponent(id)}/protocol.docx">Скачать .docx</a></div>
       <article class="doc-content">${md(proto.markdown)}</article></div>
-      ${isAdmin() ? `<aside class="notes-panel"><h2 style="margin-top:0">Замечания проверки · ${notes.length}</h2>${notes.length ? notes.map((n) => `<div class="note">${n.by === "код" ? `<span class="badge">проверка кодом</span> ` : ""}${esc(n.issue)}${n.quote ? `<q>${esc(n.quote)}</q>` : ""}</div>`).join("") : `<p class="empty">Замечаний нет.</p>`}</aside>` : ""}</div>` : `<p class="empty">Протокола пока нет.</p>`}
+      ${isAdmin() ? `<aside class="notes-panel"><h2 style="margin-top:0">Замечания проверки · ${notes.length}</h2>${notes.length ? notes.map((n) => `<div class="note">${n.by === "код" ? `<span class="badge">проверка кодом</span> ` : ""}${esc(n.issue)}${n.quote ? `<q>${esc(n.quote)}</q>` : ""}</div>`).join("") : `<p class="empty">Замечаний нет.</p>`}</aside>` : ""}</div>`}
+      ${versions.length ? `<details class="more-list"><summary class="disclosure-summary">Версии · ${versions.length}</summary><div class="ribbon">${versions.map((v) => `<div class="note">вер. ${esc(v.version)} · ${esc(v.model || "")} · ${esc(String(v.built_at || "").slice(0, 16))}${isAdmin() ? ` <button class="btn-link" data-proto-restore="${esc(v.version)}">Вернуть</button>` : ""}</div>`).join("")}</div></details>` : ""}` : `<p class="empty">Протокола пока нет.</p>`}
       ${mtasks.length ? `<div class="card-output"><h2 style="margin-top:0">Задачи встречи · ${mtasks.length}</h2>${moreItems(mtasks, (t) => `<div class="note">${esc(t.description)} <span class="sub">— ${esc(t.assignee || "не назначен")} · ${esc(ST[t.status] || t.status)}</span>${t.doubt_reason ? `<span class="doubt-dot" title="под вопросом: ${esc(t.doubt_reason)} — карточка в «Конфликтах»" aria-label="под вопросом"></span>` : ""} <a class="sub" href="#tasks">в реестре →</a></div>`)}</div>` : ""}
       ${proto && proto.units && proto.units.length ? `<div class="card-output"><h2 style="margin-top:0">${esc(S.theme.vocabulary.units || "Из записи встречи")}: решения, договорённости, вопросы, вехи</h2>
         <p class="sub">Собрано из записи с цитатой. Протокол при этом не меняется. Убранное можно вернуть.</p>
@@ -303,6 +309,13 @@ const routes = {
     document.ondrop = (e) => { e.preventDefault(); dz.classList.remove("drag-over"); upload(e.dataTransfer.files); };
     $("#main").querySelectorAll("[data-uremove]").forEach((b) => b.onclick = async () => { try { await api(`/api/units/${b.dataset.uremove}/remove`, { method: "POST" }); toast("Пункт убран. Его можно вернуть."); render(); } catch (e) { toast(e.message); } });
     $("#main").querySelectorAll("[data-ureturn]").forEach((b) => b.onclick = async () => { try { await api(`/api/units/${b.dataset.ureturn}/return`, { method: "POST" }); toast("Пункт возвращён."); render(); } catch (e) { toast(e.message); } });
+    const et = $("#proto-edit-toggle");
+    if (et) et.onclick = () => { S.protoEditId = editing ? null : Number(id); render(); };
+    const ps = $("#proto-save");
+    if (ps) ps.onclick = async () => { try { const r = await api(`/api/meetings/${id}/protocol/edit`, { method: "POST", json: { markdown: $("#proto-md").value } }); S.protoEditId = null; toast(`Сохранено, версия ${r.version}.`); render(); } catch (e) { toast(e.message); } };
+    const pc = $("#proto-cancel");
+    if (pc) pc.onclick = () => { S.protoEditId = null; render(); };
+    $("#main").querySelectorAll("[data-proto-restore]").forEach((b) => b.onclick = async () => { try { const r = await api(`/api/meetings/${id}/protocol/restore`, { method: "POST", json: { version: Number(b.dataset.protoRestore) } }); toast(`Версия ${b.dataset.protoRestore} возвращена, новая версия ${r.version}.`); render(); } catch (e) { toast(e.message); } });
     // Состояние сборки — одной строкой рядом с кнопкой, из очереди в базе (находки стенда 3, 4, 41): «в очереди, N-я»
     // или «идёт с чч:мм», без счётчика секунд; видно и после перезагрузки страницы. Кнопка ставит сборку в очередь.
     const run = $("#run"), bst = $("#build-state");

@@ -99,6 +99,14 @@ class TopicIn(BaseModel):
     topic: str = Field("", max_length=300)
 
 
+class ProtocolEditIn(BaseModel):
+    markdown: str = Field(min_length=1, max_length=2_000_000)
+
+
+class ProtocolVersionIn(BaseModel):
+    version: int
+
+
 class LoginIn(BaseModel):
     login: str = Field(min_length=1, max_length=100)
     password: str = Field(min_length=1, max_length=200)
@@ -670,6 +678,37 @@ def create_app(theme_name: str | None = None, db_path: str | None = None, journa
         return {"markdown": m["protocol_md"], "built_at": m["protocol_built_at"] if staff else None,
                 "topic": m.get("topic") or "", "leader": m.get("leader") or "",
                 "review_notes": json.loads(m["review_notes"] or "[]") if staff else [], "units": meeting_units(mid)}
+
+    @app.get("/api/meetings/{mid}/protocol/versions")
+    def protocol_versions(mid: int, u: dict = Depends(admin)):
+        return store.q("SELECT id, version, model, built_at FROM protocol_versions WHERE meeting_id=? "
+                       "ORDER BY version DESC", (mid,))
+
+    @app.post("/api/meetings/{mid}/protocol/edit")
+    def edit_protocol(mid: int, body: ProtocolEditIn, u: dict = Depends(admin)):
+        """Правка текста протокола с новой версией: прежняя не затирается."""
+        m = store.get("meetings", mid)
+        if not m:
+            raise HTTPException(404, "Встреча не найдена.")
+        last = store.q("SELECT MAX(version) AS v FROM protocol_versions WHERE meeting_id=?", (mid,))
+        version = int((last[0]["v"] if last and last[0]["v"] is not None else 0) or 0) + 1
+        store.insert("protocol_versions", meeting_id=mid, version=version, protocol_md=body.markdown,
+                     model="правка", built_at=now())
+        store.update("meetings", mid, protocol_md=body.markdown)
+        return {"ok": True, "version": version}
+
+    @app.post("/api/meetings/{mid}/protocol/restore")
+    def restore_protocol(mid: int, body: ProtocolVersionIn, u: dict = Depends(admin)):
+        row = store.q("SELECT protocol_md FROM protocol_versions WHERE meeting_id=? AND version=?",
+                      (mid, body.version))
+        if not row:
+            raise HTTPException(404, "Версия не найдена.")
+        last = store.q("SELECT MAX(version) AS v FROM protocol_versions WHERE meeting_id=?", (mid,))
+        version = int((last[0]["v"] if last and last[0]["v"] is not None else 0) or 0) + 1
+        store.insert("protocol_versions", meeting_id=mid, version=version, protocol_md=row[0]["protocol_md"],
+                     model=f"восстановлена версия {body.version}", built_at=now())
+        store.update("meetings", mid, protocol_md=row[0]["protocol_md"])
+        return {"ok": True, "version": version}
 
     def meeting_units(mid: int) -> list[dict]:
         """Единицы встречи показываются отдельно от протокола: протокол задним
