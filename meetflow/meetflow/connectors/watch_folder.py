@@ -21,7 +21,27 @@ from pathlib import Path
 from ..core.dates import single_date
 from .base import ConnectorError
 
-MARKER = "ЭТО ПАПКА-ПРИЁМНИК.txt"
+MARKER = "ЭТО ПАПКА-ПРИЕМНИК.txt"  # основное имя с «е» (правило владелицы 26.10.2026)
+# Принимаются оба имени Планёрки и ERP («…ПРИЕМНИК.txt», «…ПРИЕМНИК ЗАПИСЕЙ.txt») с «е» или «ё» и в любом регистре:
+# метку пишет человек руками, отказ по одной букве стоит ему рабочего времени (Планёрка 07.10.26, MeetFlow 26.10.26).
+MARKER_NAMES = (MARKER, "ЭТО ПАПКА-ПРИЕМНИК ЗАПИСЕЙ.txt")
+# Служебные файлы проводника и офиса папку «непустой» не делают.
+SLUZHEBNYE = {"desktop.ini", "thumbs.db", ".ds_store"}
+
+
+def _norm(name: str) -> str:
+    return name.strip().casefold().replace("ё", "е")
+
+
+_METKI = {_norm(n) for n in MARKER_NAMES}
+
+
+def is_marker(name: str) -> bool:
+    return _norm(name) in _METKI
+
+
+def _sluzhebnyy(f: Path) -> bool:
+    return f.name.casefold() in SLUZHEBNYE or f.name.startswith("~$")
 DONE_DIR = "обработано"
 STOPPED_DIR = "остановлено"   # прогон остановлен по пределу: повтор — решение человека (01/11)
 SKIP_WORDS = ("не брать",)
@@ -36,8 +56,10 @@ def check_folder_path(path: Path, home: Path | None = None) -> None:
         raise ConnectorError(f"Папку «{p}» нельзя назначить приёмником: это системная или общая папка.")
     if p.exists() and not p.is_dir():
         raise ConnectorError(f"«{p}» — это файл, а не папка.")
-    if p.exists() and any(p.iterdir()) and not (p / MARKER).exists():
-        raise ConnectorError(f"Папка «{p}» не пустая и без файла-метки «{MARKER}».")
+    if p.exists():
+        vse = [f for f in p.iterdir() if not _sluzhebnyy(f)]
+        if vse and not any(f.is_file() and is_marker(f.name) for f in vse):
+            raise ConnectorError(f"Папка «{p}» не пустая и без файла-метки «{MARKER}» (подходит и «ЭТО ПАПКА-ПРИЕМНИК ЗАПИСЕЙ.txt», с «е» или «ё»).")
 
 
 @dataclass
@@ -69,7 +91,7 @@ class FolderIntake:
         res = ScanResult()
         for f in sorted(self.folder.rglob("*")):
             parts = f.relative_to(self.folder).parts
-            if (not f.is_file() or DONE_DIR in parts or STOPPED_DIR in parts or f.name == MARKER
+            if (not f.is_file() or DONE_DIR in parts or STOPPED_DIR in parts or is_marker(f.name) or _sluzhebnyy(f)
                     or f.suffix.lower() == ".md"):
                 continue
             if any(w in f.name.lower() for w in SKIP_WORDS):
