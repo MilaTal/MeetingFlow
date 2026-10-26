@@ -563,6 +563,10 @@ const routes = {
     } else if (cur === "voices") {
       const v = await api("/api/monitoring/voice-base");
       const dict = (d) => d ? Object.entries(d).map(([k, n]) => `${esc(k)}: ${esc(n)}`).join(" · ") : "—";
+      const rec = v.last_recognition || {};
+      const people = v.people_list || [];
+      const recs = v.recordings || [];
+      const writers = Object.entries(v.by_project || {});
       body = `<div class="card-output">${kv([["Файл базы", v.path ? `<span class="meta">${esc(v.path)}</span>` : "не задан — укажите ниже"],
         ["Состояние", v.ok ? "доступна, только чтение" : `<span class="overdue">${esc(v.detail || "недоступна")}</span>`],
         ...(v.ok ? [["Отпечатков голоса", esc(v.samples)], ["Из них привязаны к человеку", esc(v.samples_linked)],
@@ -570,7 +574,23 @@ const routes = {
           ["Модели отпечатка", dict(v.embedding_models)], ["По проектам", dict(v.by_project)],
           ["Последний отпечаток", v.last_sample_at ? `<span class="meta">${esc(v.last_sample_at)}</span>` : "—"],
           ["Размер", `${esc(v.size_kb)} КБ · журнал ${esc(v.journal_mode)}`]] : [])])}
-        <p class="sub">База общая для проектов и здесь только читается. Голос не покидает машину.</p></div>`;
+        <p class="sub">База общая для проектов и здесь только читается. Голос не покидает машину.</p></div>
+      <div class="card-output"><h2 style="margin-top:0">Протокол последнего распознавания</h2>
+        ${rec.route || rec.error ? `<table><tr><th>Запись</th><th>Точка</th><th>Итог</th></tr>
+          <tr><td class="meta">${esc(rec.file || "—")}</td><td class="meta">${esc(rec.route || rec.model || "точка не записана")}</td>
+          <td>${rec.error ? `<span class="overdue">${esc(rec.error)}</span>` : `реплик ${esc(rec.segments ?? "—")} · говорящих ${esc(rec.speakers ?? "—")} · подписано ${esc(rec.signed_lines ?? "—")} · отпечатков ${esc(rec.voice_samples ?? 0)}${rec.diarization_seconds != null ? ` · разделение ${esc(rec.diarization_seconds)} с` : ""}`}</td></tr></table>
+          <p class="sub">${esc(rec.ts || "")}</p>` : `<p class="empty">Распознаваний ещё не было.</p>`}</div>
+      <div class="card-output"><h2 style="margin-top:0">Кто пишет в базу</h2>
+        ${writers.length ? `<table><tr><th>Проект</th><th>Отпечатков</th></tr>${writers.map(([k, n]) => `<tr><td class="meta">${esc(k)}</td><td>${esc(n)}</td></tr>`).join("")}</table>` : `<p class="empty">Пока никто.</p>`}
+        <p class="sub">Планёрка, ERP и MeetFlow пишут в одну базу; людей заводит и подтверждает оператор.</p></div>
+      <div class="card-output"><h2 style="margin-top:0">Подтверждённые люди · ${people.length}</h2>
+        ${people.length ? moreRows("<tr><th>ФИО</th><th>Написания</th><th>Подтверждён</th></tr>", people,
+          (p) => `<tr><td>${esc(p.full_name)}</td><td class="sub">${esc(p.aliases || "—")}</td><td class="meta">${esc(p.confirmed_at || "—")}</td></tr>`)
+          : `<p class="empty">Никого не подтвердили.</p>`}</div>
+      <div class="card-output"><h2 style="margin-top:0">С каких записей</h2>
+        ${recs.length ? moreRows("<tr><th>Проект · запись</th><th>Отпечатков</th><th>Речи</th><th>Снято</th></tr>", recs,
+          (r) => `<tr><td class="meta">${esc(r.project)} · ${esc(r.ref)}</td><td>${esc(r.samples)}</td><td>${esc(Math.round((r.seconds || 0) / 60))} мин</td><td class="meta">${esc(String(r.last || "").slice(0, 16))}</td></tr>`)
+          : `<p class="empty">Записей с отпечатками пока нет.</p>`}</div>`;
     } else if (cur === "runs" || cur === "cost") {
       const days = Number(store.get("runs-days", "7"));
       const r = await api(`/api/monitoring/runs?days=${days}`);

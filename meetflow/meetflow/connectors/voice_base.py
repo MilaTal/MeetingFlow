@@ -46,6 +46,7 @@ def voice_base_state(path: str | None) -> dict[str, Any]:
     st["size_kb"] = round(p.stat().st_size / 1024, 1)
     try:
         con = sqlite3.connect(f"{p.resolve().as_uri()}?mode=ro", uri=True, timeout=5)
+        con.row_factory = sqlite3.Row
     except sqlite3.Error as e:
         st["detail"] = f"База не открывается: {type(e).__name__}"
         return st
@@ -70,6 +71,18 @@ def voice_base_state(path: str | None) -> dict[str, Any]:
         st["people"] = one("SELECT COUNT(*) FROM voice_person")
         st["people_confirmed"] = one("SELECT COUNT(*) FROM voice_person WHERE confirmed = 1")
         st["people_waiting"] = st["people"] - st["people_confirmed"]
+        # Списки — для экрана «База голосов» как в ERP: люди, записи, откуда отпечатки.
+        pc = _cols(con, "voice_person")
+        aliases_sql = "aliases" if "aliases" in pc else "''"
+        confirmed_sql = "confirmed_at" if "confirmed_at" in pc else "NULL"
+        try:
+            st["people_list"] = [{"id": r["id"], "full_name": r["full_name"], "aliases": r["aliases"] or "",
+                                  "confirmed_at": r["confirmed_at"]}
+                                 for r in con.execute(
+                                     f"SELECT id, full_name, {aliases_sql} AS aliases, {confirmed_sql} AS confirmed_at "
+                                     "FROM voice_person WHERE confirmed = 1 ORDER BY full_name LIMIT 500")]
+        except sqlite3.Error:
+            st["people_list"] = []
         sc = _cols(con, "voice_sample")
         if "embedding_model" in sc:
             st["embedding_models"] = {m or "не указана": n for m, n in con.execute(
@@ -79,6 +92,15 @@ def voice_base_state(path: str | None) -> dict[str, Any]:
                 "SELECT origin_project, COUNT(*) FROM voice_sample GROUP BY origin_project")}
         if "created_at" in sc:
             st["last_sample_at"] = one("SELECT MAX(created_at) FROM voice_sample")
+        if {"origin_project", "origin_ref", "seconds", "created_at"} <= sc:
+            st["recordings"] = [
+                {"project": r["origin_project"] or "", "ref": r["origin_ref"] or "", "samples": r["n"],
+                 "seconds": round(float(r["sec"] or 0), 1), "last": r["last"]}
+                for r in con.execute("SELECT origin_project, origin_ref, COUNT(*) AS n, SUM(seconds) AS sec, "
+                                     "MAX(created_at) AS last FROM voice_sample "
+                                     "GROUP BY origin_project, origin_ref ORDER BY MAX(created_at) DESC LIMIT 50")]
+        else:
+            st["recordings"] = []
         st["ok"] = True
         st["detail"] = "База доступна, только чтение."
     except sqlite3.Error as e:

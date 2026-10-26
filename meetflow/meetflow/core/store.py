@@ -99,6 +99,7 @@ class Store:
         self._conn.execute("PRAGMA foreign_keys=ON")
         self._lock = threading.RLock()
         self._depth = 0
+        self._closed = False
         self._ensure_schema()
 
     # --- служебное -------------------------------------------------------
@@ -120,6 +121,8 @@ class Store:
         """Вложенные tx не коммитят: commit/rollback делает только внешний
         уровень (находка ревью: вложенный insert коммитил раньше времени)."""
         with self._lock:
+            if self._closed:
+                raise RuntimeError("база уже закрыта")
             self._depth += 1
             try:
                 yield self._conn
@@ -135,6 +138,10 @@ class Store:
 
     def q(self, sql: str, args: tuple = ()) -> list[dict[str, Any]]:
         with self._lock:
+            # Фоновый поток очереди может проснуться после закрытия базы (тесты, остановка): отвечаем пусто,
+            # а не лезем в закрытое соединение — это давало падение процесса на уровне C.
+            if self._closed:
+                return []
             return [dict(r) for r in self._conn.execute(sql, args).fetchall()]
 
     def insert(self, table: str, **vals: Any) -> int:
@@ -186,4 +193,6 @@ class Store:
                 self.insert("settings", project_id=project_id, key=key, value=val, updated_at=now(), updated_by=by)
 
     def close(self) -> None:
-        self._conn.close()
+        with self._lock:
+            self._closed = True
+            self._conn.close()

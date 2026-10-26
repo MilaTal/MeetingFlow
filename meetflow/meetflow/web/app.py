@@ -1009,7 +1009,16 @@ def create_app(theme_name: str | None = None, db_path: str | None = None, journa
 
     @app.get("/api/monitoring/voice-base")
     def mon_voice(u: dict = Depends(super_admin)):
-        return voice_base_state(store.get_setting("voice_base_path"))
+        st = voice_base_state(store.get_setting("voice_base_path"))
+        from ..core import asr_journal
+        recent = asr_journal.read_recent(pipe.asr_journal_path, 1)
+        st["last_recognition"] = recent[-1] if recent else {}
+        try:
+            st["team_count"] = team_shared_state(
+                voice_base_path=store.get_setting("voice_base_path")).get("people_confirmed", 0)
+        except Exception:  # noqa: BLE001
+            st["team_count"] = 0
+        return st
 
     def _voice_base() -> str:
         return store.get_setting("voice_base_path") or os.environ.get("VOICE_BASE_PATH") or ""
