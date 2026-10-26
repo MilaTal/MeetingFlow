@@ -101,7 +101,7 @@ const routes = {
         const mine = S.name && S.name === t.assignee;
         const can = isAdmin() || S.role === "director" || mine;
         return `<tr><td class="no" title="Внутренний номер: ${esc(t.id)}">${esc(t.no)}<small>${fmtDate(t.date_set)}</small></td>
-          <td>${esc(t.description)}${t.doubt_reason ? `<span class="doubt-dot" title="под вопросом: ${esc(t.doubt_label || t.doubt_reason)} — карточка в «Конфликтах»" aria-label="под вопросом"></span>` : ""}${t.source_quote ? `<span class="sub">«${esc(t.source_quote.slice(0, 160))}»</span>` : ""}${t.source_meeting_id ? `<a class="sub task-meeting" href="#meeting/${esc(t.source_meeting_id)}">встреча ${fmtDate(t.meeting_date)} — протокол</a>` : ""}</td>
+          <td>${esc(t.description)}${t.operational ? ' <span class="badge">оперативная</span>' : ""}${t.doubt_reason ? `<span class="doubt-dot" title="под вопросом: ${esc(t.doubt_label || t.doubt_reason)} — карточка в «Конфликтах»" aria-label="под вопросом"></span>` : ""}${t.source_quote ? `<span class="sub">«${esc(t.source_quote.slice(0, 160))}»</span>` : ""}${t.source_meeting_id ? `<a class="sub task-meeting" href="#meeting/${esc(t.source_meeting_id)}">встреча ${fmtDate(t.meeting_date)} — протокол</a>` : ""}${isAdmin() && view === "active" ? `<button class="btn-link sub" data-op="${t.id}" data-op-on="${t.operational ? 0 : 1}" title="Пометка «оперативная» — задача идёт в раздел «Оперативные задачи» протокола">${t.operational ? "оперативная ✓ — снять" : t.operational_hint ? "похоже на оперативную — отметить?" : "в оперативные"}</button>` : ""}</td>
           <td>${esc(t.assignee || "Не назначен")}</td><td${t.overdue ? ' class="overdue" title="Просрочено: порог в «Параметры системы → Пороги»"' : ""}>${esc(t.due_text || t.due_date || "—")}</td><td>${esc(t.last_comment || "")}</td>
           <td>${can && view === "active" ? `<button class="btn" data-done="${t.id}">Выполнено</button>` : ""}
               ${can && view !== "active" ? `<button class="btn btn-ghost" data-back="${t.id}">Вернуть</button>` : ""}</td></tr>`;
@@ -119,6 +119,8 @@ const routes = {
     $("#main").querySelectorAll("[data-view]").forEach((b) => b.onclick = () => { store.set("tasks-view", b.dataset.view); render(); });
     $("#main").querySelectorAll("[data-done]").forEach((b) => b.onclick = () => undoable(b, b.dataset.done, "done"));
     $("#main").querySelectorAll("[data-back]").forEach((b) => b.onclick = async () => { await api(`/api/tasks/${b.dataset.back}`, { method: "PATCH", json: { status: "active" } }); render(); });
+    // пометка «оперативная» одним нажатием (как ERP, 26.10.2026)
+    $("#main").querySelectorAll("[data-op]").forEach((b) => b.onclick = async () => { try { await api(`/api/tasks/${b.dataset.op}/operational`, { method: "POST", json: { on: b.dataset.opOn === "1" } }); render(); } catch (e) { toast(e.message); } });
   },
 
   async search() {

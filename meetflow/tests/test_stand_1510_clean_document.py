@@ -24,7 +24,8 @@ def test_header_has_no_system_lines(store, project, make_pipe):
     p, mid, rep, md = _run(store, project, make_pipe)
     assert rep.protocol_saved
     assert md.startswith("# Протокол встречи 01.10.2026")
-    for mark in ("Откуда", "собран", FILE, "Стенд без модели", "Обработано", "заглушк"):
+    # перевёрнут 27.10.2026: колонка «Откуда» таблицы задач — часть документа (ERP 26.10.2026), пометка — «Откуда:»
+    for mark in ("Откуда:", "собран", FILE, "Стенд без модели", "Обработано", "заглушк"):
         assert mark not in md, f"в документе системная пометка: {mark}"
     assert clean_document(md)[1] == []
 

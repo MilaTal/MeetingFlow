@@ -21,8 +21,9 @@ def _rows(md):
     out = {}
     for ln in md.splitlines():
         cells = [c.strip() for c in re.split(r"(?<!\\)\|", ln.strip().strip("|"))]
-        if len(cells) == 4 and cells[0].isdigit():
-            out[cells[1]] = cells[2]
+        # перевёрнут 27.10.2026: семь колонок (№ · Задача · Статус · Ответственный · …), ERP 26.10.2026
+        if len(cells) == 7 and cells[0].isdigit():
+            out[cells[1]] = cells[3]
     return out
 
 
@@ -40,6 +41,7 @@ def test_protocol_assignee_equals_registry(store, project, make_pipe, who, line)
     assert p.run(project, mid).tasks_added == 1
     reg = {t["description"]: t["assignee"] for t in store.q("SELECT * FROM tasks WHERE source_meeting_id=?", (mid,))}
     proto = _rows(store.get("meetings", mid)["protocol_md"])
-    unassigned = p.theme.word("unassigned")
+    from meetflow.core.tablica_zadach import НЕ_НАЗНАЧЕН
+    unassigned = НЕ_НАЗНАЧЕН                 # перевёрнут 27.10.2026: «не назначен», как таблица ERP
     assert set(proto) == set(reg)
     assert all(proto[d] == (reg[d] or unassigned) for d in reg)

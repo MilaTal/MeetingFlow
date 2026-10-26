@@ -42,7 +42,9 @@ SCHEMA: dict[str, dict[str, str]] = {
               "date_set": "TEXT", "date_closed": "TEXT", "source_meeting_id": "INTEGER",
               "source_quote": "TEXT DEFAULT ''", "last_comment": "TEXT DEFAULT ''",
               # «под вопросом» — причина сомнения, служебная: в документы не идёт, видна только администраторам (15.10.26)
-              "doubt_reason": "TEXT DEFAULT ''"},
+              "doubt_reason": "TEXT DEFAULT ''",
+              # пометка «оперативная» — ставит человек одним нажатием или протокол секретаря (как ERP, 26.10.2026)
+              "operational": "INTEGER DEFAULT 0"},
     # версии протокола (находки стенда 43, 47; решение владельца 15.10.26): прежняя не затирается; model — модель,
     # которая написала текст (ответившая точка маршрута), а не настроенная основная
     "protocol_versions": {"id": "INTEGER PRIMARY KEY", "meeting_id": "INTEGER", "version": "INTEGER",

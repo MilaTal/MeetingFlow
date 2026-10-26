@@ -184,4 +184,7 @@ def test_same_core_three_themes(store, project, meeting):
         rep = p.run(project, mid)
         proto = store.get("meetings", mid)["protocol_md"]
         assert rep.status == "ok" and proto.startswith(f"# {th.word('protocol')}")
-        assert all(f"## {s}" in proto for s in th["protocol_skeleton"])
+        # перевёрнут 27.10.2026 (ERP 26.10.2026): раздел без строк не пишется — заглушки «Не обсуждалось» нет;
+        # разделы, которые есть, идут в порядке скелета темы
+        heads = [ln[3:] for ln in proto.splitlines() if ln.startswith("## ") and ln[3:] in th["protocol_skeleton"]]
+        assert heads == [s for s in th["protocol_skeleton"] if s in heads] and "Не обсуждалось" not in proto

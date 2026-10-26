@@ -95,6 +95,11 @@ class CommentIn(BaseModel):
     text: str = Field(min_length=1, max_length=2000)
 
 
+class OperationalIn(BaseModel):
+    """Пометка «оперативная» одним нажатием (как ERP, 26.10.2026): True — отметить, False — снять."""
+    on: bool
+
+
 class FolderIn(BaseModel):
     path: str = Field("", max_length=500)
     path_repeat: str = Field("", max_length=500)
@@ -829,6 +834,12 @@ def create_app(theme_name: str | None = None, db_path: str | None = None, journa
         mdates = {m["id"]: m["date"] for m in store.q("SELECT id, date FROM meetings WHERE project_id=?", (pid,))}
         n = int(store.get_setting("overdue_highlight_working_days", None, 7) or 7)
         today = date_cls.today()
+        from ..core import tablica_zadach
+        dates = tablica_zadach.даты_прошедших_встреч(store, pid)
+
+        def hint(r: dict) -> bool:   # «похоже на оперативную — отметить?»: только подсказка, пометку не ставит
+            return tablica_zadach.похоже_на_оперативную(
+                r, tablica_zadach.встреч_после(dates, lenient_date(r.get("date_set"))))
 
         def overdue(r: dict) -> bool:   # как в Планёрке: N рабочих дней после срока, только у задач в работе
             d = lenient_date(r.get("due_date")) if r.get("status") == "active" else None
@@ -841,6 +852,7 @@ def create_app(theme_name: str | None = None, db_path: str | None = None, journa
             return days >= n
         return [task_out({**{k: v for k, v in r.items() if k != "project_id"}, "overdue": overdue(r),
                           "meeting_date": mdates.get(r.get("source_meeting_id")),
+                          "operational": int(r.get("operational") or 0), "operational_hint": hint(r),
                           "due_text": due_text(r.get("due_date"), r.get("date_set"), r.get("due_kind"))}, u) for r in rows]
 
     @app.patch("/api/tasks/{tid}")
@@ -852,6 +864,21 @@ def create_app(theme_name: str | None = None, db_path: str | None = None, journa
         if not can(u, "task_status") and not responsible:
             raise HTTPException(403, "Статус меняет ответственный или администратор.")
         pipe.reg.set_status(tid, body.status, "web_form", by=u["name"] or u["role"])
+        return task_out(store.get("tasks", tid), u)
+
+    @app.post("/api/tasks/{tid}/operational")
+    def set_operational(tid: int, body: OperationalIn, u: dict = Depends(admin)):
+        """Пометка «оперативная» — администратор одним нажатием; строка истории «оперативная: отмечена / пометка
+        снята» — ручное решение, оно главнее протокола секретаря (как ERP, 26.10.2026)."""
+        from ..core.tablica_zadach import РУЧНАЯ_ПОМЕТКА
+        t = store.get("tasks", tid)
+        if not t:
+            raise HTTPException(404, "Задача не найдена.")
+        with store.tx():
+            store.update("tasks", tid, operational=int(body.on))
+            store.insert("task_history", task_id=tid, old_status=None, new_status=None, source="web_form",
+                         evidence_quote=f"{РУЧНАЯ_ПОМЕТКА} {'отмечена' if body.on else 'пометка снята'}",
+                         changed_by=u["name"] or u["role"], at=now())
         return task_out(store.get("tasks", tid), u)
 
     @app.post("/api/tasks/{tid}/comment")

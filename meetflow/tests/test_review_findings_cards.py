@@ -44,7 +44,8 @@ class Judging(MockLLM):
     def _protocol(self, system, data):
         out = super()._protocol(system, data)
         k = next(iter(out["sections"]))
-        out["sections"][k] = "Решили фиксировать отправку задач по почте как нарушение."
+        # фикстура 27.10.2026: фраза с опорой в записи, оценочное слово «нарушение» в записи не звучит
+        out["sections"][k] = "Задачи по почте не принимаем, это нарушение."
         return out
 
 

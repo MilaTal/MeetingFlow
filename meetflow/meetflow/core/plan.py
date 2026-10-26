@@ -64,8 +64,52 @@ def source_text(data: dict, limit: int = 60_000) -> str:
     return "\n\n".join(parts)[:limit]
 
 
-def render(meeting: dict, sections: dict) -> str:
-    """План в markdown: шапка с датой и темой, затем разделы в порядке SECTIONS."""
+ИЗ_МАТЕРИАЛОВ = "Из материалов"
+СУТЬ_СЛОВ = 30
+
+
+def _без_разметки(text: str) -> str:
+    return " ".join(str(text or "").replace("**", "").replace("__", "").replace("#", " ").replace("|", " ").split())
+
+
+def суть_модели(gist, names: list[str]) -> dict[str, str]:
+    """Суть материала от модели (поле "materials_gist"): только имена материалов этой встречи, без разметки, не длиннее
+    30 слов (как ERP `doc_assembly.суть_модели`, 25.10.2026). Остальное отбрасывается."""
+    out: dict[str, str] = {}
+    if not isinstance(gist, dict):
+        return out
+    for name, text in gist.items():
+        if name in names and isinstance(text, str):
+            words = _без_разметки(text).split()
+            if words:
+                out[name] = " ".join(words[:СУТЬ_СЛОВ]).rstrip(".") + "."
+    return out
+
+
+def суть_кодом(material: dict) -> str:
+    """Модель промолчала — первая содержательная строка материала (не длиннее 30 слов); текста нет — подпись вида."""
+    for line in str(material.get("text") or "").splitlines():
+        words = _без_разметки(line).split()
+        if len(words) >= 3:
+            return " ".join(words[:СУТЬ_СЛОВ]).rstrip(".") + "."
+    return "материал без текста."
+
+
+def блок_материалов(materials: list[dict], gist: dict[str, str]) -> list[str]:
+    """Блок «Из материалов» в конце плана: по каждому материалу строка «Материал «имя»: суть.» (решение владелицы
+    25.10.2026: материалы — в конце того же плана). Материалов нет — блока нет."""
+    if not materials:
+        return []
+    lines = [f"## {ИЗ_МАТЕРИАЛОВ}"]
+    for m in materials:
+        name = str(m.get("name") or "")
+        lines.append(f"Материал «{name}»: {gist.get(name) or суть_кодом(m)}")
+        lines.append("")
+    return lines
+
+
+def render(meeting: dict, sections: dict, materials: list[dict] | None = None, gist: dict | None = None) -> str:
+    """План в markdown: шапка с датой и темой, затем разделы в порядке SECTIONS, в конце — «Из материалов»."""
     day = _iso(meeting.get("date"))
     head = f"# План встречи {day[8:10]}.{day[5:7]}.{day[:4]}" if len(day) >= 10 else "# План встречи"
     topic = " ".join(str(meeting.get("topic") or "").split())
@@ -75,4 +119,5 @@ def render(meeting: dict, sections: dict) -> str:
         lines.append(f"## {name}")
         lines.append(text or "—")
         lines.append("")
+    lines += блок_материалов(list(materials or []), gist or {})
     return "\n".join(lines).rstrip() + "\n"

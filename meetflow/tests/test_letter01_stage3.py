@@ -261,7 +261,8 @@ def test_protocol_cells_escaped(store, project, make_pipe):
     import re
     row = next(ln for ln in store.get("meetings", mid)["protocol_md"].splitlines() if "Сверить" in ln)
     cells = [c for c in re.split(r"(?<!\\)\|", row.strip().strip("|"))]
-    assert len(cells) == 4 and "A \\| B" in row and "/" not in cells[1]
+    # перевёрнут 27.10.2026: семь колонок таблицы как у секретаря (ERP 26.10.2026); экранирование — прежнее
+    assert len(cells) == 7 and "A \\| B" in row and "/" not in cells[1]
 
 
 # 01/24 — дата встречи не в ISO не роняет прогон с единицами

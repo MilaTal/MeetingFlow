@@ -46,7 +46,9 @@ def test_findings_go_to_review_notes_not_gate(store, project, make_pipe):
         def _protocol(self, system, data):
             out = super()._protocol(system, data)
             k = next(iter(out["sections"]))
-            out["sections"][k] = "Решили фиксировать отправку задач по почте как нарушение."
+            # фикстура 27.10.2026: фраза с опорой в записи (иначе её убирает проверка опоры `tekst_po_zapisi` до
+            # кодовых проверок), оценочное слово «нарушение» в записи по-прежнему не звучит; «Решили» не пишется
+            out["sections"][k] = "Задачи по почте не принимаем, это нарушение."
             return out
     mid = store.insert("meetings", project_id=project, date="2026-10-01", label="встреча")
     p = make_pipe(gen=Judging())

@@ -40,6 +40,7 @@ from .registry import CardQueue, OperatorMemory, TaskRegistry
 from . import deadline
 from . import asr_journal, plan as plan_mod, voice_step
 from . import petlya_raspoznavaniya as petlya, polnota_rasshifrovki as polnota
+from . import korotkiy_protokol, tablica_zadach, tekst_po_zapisi
 from .team_sync import sync_people
 from ..connectors.team_shared import team_shared_state
 from .dates import due_text, lenient_date
@@ -87,6 +88,8 @@ class RunReport:
     cost_usd: float = 0.0
     protocol_saved: bool = False
     completeness: str = ""      # полнота расшифровки — строка итога сборки, в документ не идёт (26.10.2026, как ERP)
+    text_check: str = ""        # текст по записи: проверено, убрано по причинам (26.10.2026, как ERP)
+    text_removed: list = field(default_factory=list)     # убранные предложения (до 40) — в журнал, не в документ
 
 
 HIDDEN = "[строка скрыта: похожа на инструкцию для модели]"
@@ -577,10 +580,12 @@ class MeetingPipeline:
         if not source.strip():
             source = "Прошлого протокола, открытых пунктов, задач и материалов пока нет."
         budget = RunBudget(BudgetLimits(**self.theme.get("budget", {})))
-        sysm, user = self.pb.plan(plan_mod.SECTIONS, source)
+        names = [str(m.get("name") or "") for m in data.get("materials") or []]
+        sysm, user = self.pb.plan(plan_mod.SECTIONS, source, names)
         out = self._call(self.gen, budget, "plan", sysm, user, meeting_id)
         sections = {name: str(_dict(out, "sections").get(name) or "") for name in plan_mod.SECTIONS}
-        markdown = plan_mod.render(meeting, sections)
+        gist = plan_mod.суть_модели(out.get("materials_gist") if isinstance(out, dict) else None, names)
+        markdown = plan_mod.render(meeting, sections, data.get("materials") or [], gist)
         self.s.update("meetings", meeting_id, plan_md=markdown, plan_built_at=now())
         return {"markdown": markdown, "sections": sections, "calls": budget.calls,
                 "cost_usd": round(budget.cost_usd, 4), "model": self.gen.model}
@@ -1128,7 +1133,13 @@ class MeetingPipeline:
                                     f"Задача не вошла в пересборку, но правилась человеком: {(t['description'] or '')[:100]}",
                                     {"task_id": t["id"], "description": t["description"], "edits": edits,
                                      "when": res["when"]}, meeting_id)
-                protocol_md = self._render_protocol(meeting, sections, added, closings, srcs, removals)
+                # пометка «оперативная» из раздела секретаря — сама, до таблицы (как ERP, 26.10.2026)
+                if notes:
+                    self._operativnye_po_sekretaryu(project_id, notes)
+                protocol_md = self._render_protocol(meeting, sections, added, closings, srcs, removals,
+                                                    record=safe_source.text + ("\n" + notes_text if notes_text else ""),
+                                                    people=[p.full_name for p in team.people], rep=rep,
+                                                    base_kind=source.kind.value)
                 protocol_md, marks = clean_document(protocol_md)   # проверка кодом до сохранения (13.10.26)
                 if marks:
                     self.cards.open(project_id, "technical", "Из протокола убрана системная пометка",
@@ -1208,6 +1219,8 @@ class MeetingPipeline:
                            dropped=rep.tasks_dropped, skipped_by_rule=rep.skipped_by_rule,
                            stopped_by=budget.stopped_by, stand=self.stand, closing_mentioned=closing_mentioned,
                            **({"polnota_rasshifrovki": rep.completeness} if rep.completeness else {}),
+                           **({"tekst_po_zapisi": rep.text_check, "tekst_ubrano": rep.text_removed}
+                              if rep.text_check else {}),
                            answered_by={k: sorted(set(v)) for k, v in budget.answered.items() if not k.startswith("_")},
                            **self.tool_info)
         return rep
@@ -1272,10 +1285,31 @@ class MeetingPipeline:
             c.pop("_score")
         return out[:max_tasks]
 
+    def _operativnye_po_sekretaryu(self, project_id: int, notes: list[dict]) -> dict:
+        """Строка раздела «Оперативные задачи» протокола секретаря (заметки встречи) ставит пометку сама; ручное решение
+        человека главнее (`tablica_zadach.отметить_по_секретарю`, как ERP 26.10.2026). Сбой разбора сохранение не роняет."""
+        try:
+            строки = [x for n in notes for x in tablica_zadach.строки_раздела_секретаря(n.get("text"))]
+
+            def похожая(a: str, b: str) -> float:
+                sa, sb = set(stems(_without_dates(a))), set(stems(_without_dates(b)))
+                return max(coverage(sa, sb), coverage(sb, sa)) if sa and sb else 0.0
+            return tablica_zadach.отметить_по_секретарю(self.s, строки, похожая=похожая, project_id=project_id)
+        except Exception as exc:  # noqa: BLE001
+            self.step_failed(project_id, None, "Пометка «оперативная» по протоколу секретаря", exc)
+            return {}
+
     def _render_protocol(self, meeting: dict, sections: dict[str, str | None], added, closings, srcs,
-                         removals=()) -> str:
+                         removals=(), *, record: str | None = None, people=(), rep: RunReport | None = None,
+                         base_kind: str = "transcript") -> str:
         """Документ для читателя — без системных пометок: модель, стенд, файлы, пределы и замечания
-        уходят в карточки и журнал (правило владельца 13.10.26 для всех систем)."""
+        уходят в карточки и журнал (правило владельца 13.10.26 для всех систем).
+
+        С 27.10.2026 (перенос решений ERP 25–26.10.2026): каждое предложение разделов проверяется по записи
+        (`tekst_po_zapisi`: без опоры, заглушки, утверждение из вопроса и повторы не пишутся; раздел без строк — не
+        пишется), заглушка «Не обсуждалось» не ставится, длинные абзацы делятся (`korotkiy_protokol.разбить_длинные`);
+        таблица задач — как у секретаря (`tablica_zadach`: семь колонок, «Поставленные на встрече» и «Оперативные
+        задачи», горизонт двух встреч); снятые задачи в документ не идут (раздела «Снято по встрече» нет)."""
         th = self.theme
         date_s = meeting.get("date") or datetime.now().strftime("%Y-%m-%d")
         try:
@@ -1288,26 +1322,24 @@ class MeetingPipeline:
             if body is None:              # не собран (предел, потолок ответа) — пусто, причина в карточке
                 out += [f"## {sec}", ""]
                 continue
-            out += [f"## {sec}", body.strip() or th.word("not_discussed"), ""]
-        out += [f"## {th.word('new_tasks')}", ""]
-        if added:
-            cols = th.get("vocabulary.task_table", ["№", "Задача", "Ответственный", "Срок"])
-            out += ["| " + " | ".join(cols) + " |", "|" + "---|" * len(cols)]
-            for i, (tid, d, g) in enumerate(added, 1):
-                # из реестра, после всех ворот: протокол не утверждает исполнителя, которого нет в реестре
-                # (письмо 39, находка Планёрки 692d05d — таблица собиралась раньше последнего решения)
-                t = self.s.get("tasks", tid) or {}
-                who = t.get("assignee") or th.word("unassigned")
-                due = due_text(t.get("due_date"), t.get("date_set"), t.get("due_kind")) or "—"     # «сегодня (дата)» — владелец 12.10.26
-                out.append(f"| {i} | {_cell(t.get('description') or g.description)} | {_cell(who)} | {_cell(due)} |")
-        else:
-            out.append(th.word("no_new_tasks"))
+            if not (body or "").strip():  # пусто — раздел не пишется: заглушка «Не обсуждалось» — системное слово
+                continue
+            out += [f"## {sec}", body.strip(), ""]
+        head = "\n".join(out)
+        if record is not None:
+            head, отчёт = tekst_po_zapisi.очистить(head, record, people)
+            if rep is not None:
+                rep.text_check = tekst_po_zapisi.строка_хода(отчёт)
+                rep.text_removed = list(отчёт.get("предложения") or [])
+        head = korotkiy_protokol.разбить_длинные(head).rstrip("\n")
+        out = head.split("\n") + [""]
+        откуда = "запись" if base_kind == SourceKind.TRANSCRIPT.value else "заметки"
+        строки = tablica_zadach.строки_встречи(
+            self.s, meeting,
+            lambda t: due_text(t.get("due_date"), t.get("date_set"), t.get("due_kind")) or "", откуда)
+        out += tablica_zadach.раздел_задач(строки)
         if closings:
-            out += ["", f"## {th.word('closed_tasks')}", ""]
+            out += [f"## {th.word('closed_tasks')}", ""]
             for i, (_tid, q) in enumerate(closings, 1):
                 out.append(f"{i}. {q.strip()}")
-        if removals:
-            out += ["", "## Снято по встрече", ""]
-            for i, (_tid, q) in enumerate(removals, 1):
-                out.append(f"{i}. {q.strip()}")
-        return "\n".join(out) + "\n"
+        return "\n".join(out).rstrip("\n") + "\n"
