@@ -125,11 +125,19 @@ class PromptBuilder:
         body, _ = fence(safe, "фразы встречи-кандидаты")
         return self._system(task), body + self.p.no_think_suffix
 
-    def protocol(self, sections: list[str], source_text: str, notes_text: str = "") -> tuple[str, str]:
+    def protocol(self, sections: list[str], source_text: str, notes_text: str = "",
+                 participants: list[str] | None = None, leader: str = "") -> tuple[str, str]:
         task = ("ЗАДАЧА: кратко изложи обсуждение по разделам протокола. Только то, что есть в "
                 "тексте встречи; задачи и таблицы не пиши — их вставит система. Без оценок и "
                 "домыслов, деловым языком.\nРАЗДЕЛЫ:\n" + "\n".join(f"- {s}" for s in sections) +
                 '\n\nСхема: {"sections":{"<раздел>":str}}')
+        # Участники — по голосам и «Команде», а не по догадке модели (задание владелицы 26.10.2026):
+        # имена уже опознаны правилом 0,65/0,10 и сверены с подтверждённой «Командой».
+        if participants:
+            task += ("\n\nУчастники по голосам (ФИО из «Команды»; в разделе «Участники» используй только эти "
+                     "имена, других не придумывай): " + "; ".join(participants[:60]))
+        if leader:
+            task += f"\nВедущий встречи: {leader}."
         body, _ = fence(source_text, "текст встречи")
         if notes_text:
             nb, _ = fence(notes_text, "заметки — акцент: что точно обязательно, но не предел")

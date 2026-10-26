@@ -204,6 +204,9 @@ def test_serve_allows_non_loopback_with_warning(monkeypatch):
     import uvicorn
 
     from meetflow.__main__ import main
+    # `main` читает `.env.local`; пустые значения не дают подтянуть рабочие пути и «протечь» в следующие тесты
+    for key in ("VOICE_BASE_PATH", "TEAM_SHARED_PATH", "VOICE_MODELS_DIR"):
+        monkeypatch.setenv(key, "")
     started = []
     monkeypatch.setattr(uvicorn, "run", lambda *a, **k: started.append(k.get("host")))   # не поднимать сервер
     assert main(["serve", "--host", "0.0.0.0", "--port", "8019"]) == 0 and started == ["0.0.0.0"]

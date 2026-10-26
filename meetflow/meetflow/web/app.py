@@ -35,6 +35,7 @@ from ..connectors.registry import default_registry
 from ..connectors.team_shared import team_shared_state
 from ..connectors.voice_base import voice_base_state
 from ..core.config import Theme, list_themes, load_theme
+from ..core.team_sync import sync_people
 from ..core.accounts import Accounts, AuthError
 from ..core.backup import Backups
 from ..core.dates import due_text, lenient_date
@@ -417,6 +418,9 @@ def create_app(theme_name: str | None = None, db_path: str | None = None, journa
 
     @app.get("/api/projects/{pid}/people")
     def people(pid: int):
+        project_or_404(pid)
+        # подтверждённые люди общей «Команды» — в проектную, иначе экран «Команда» пуст (26.10.2026)
+        sync_people(store, pid, store.get_setting("voice_base_path") or os.environ.get("VOICE_BASE_PATH"))
         return store.q("SELECT id, full_name, role, department, organization, external, confirmed FROM people "
                        "WHERE project_id=? "
                        "ORDER BY full_name", (pid,))

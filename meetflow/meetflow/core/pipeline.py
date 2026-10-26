@@ -39,6 +39,7 @@ from .prompts import PromptBuilder, chunks, parse_json, profile
 from .registry import CardQueue, OperatorMemory, TaskRegistry
 from . import deadline
 from . import asr_journal, voice_step
+from .team_sync import sync_people
 from ..connectors.team_shared import team_shared_state
 from .dates import due_text, lenient_date
 from .draft_checks import clean_document, run_code_checks
@@ -324,6 +325,26 @@ class MeetingPipeline:
                 return True
         return False
 
+    def _participants(self, meeting_id: int, meeting: dict) -> tuple[list[str], str]:
+        """ФИО, опознанные по голосам в источниках встречи, и ведущий — для раздела «Участники».
+
+        Источник — `voice_names` в сводке распознавания: там только имена, прошедшие правило и подтверждённые
+        «Командой». Если записи не было, список пуст — модель работает по тексту, как раньше.
+        """
+        names: list[str] = []
+        seen: set[str] = set()
+        for row in self.s.q("SELECT meta FROM sources WHERE meeting_id=? AND removed_at IS NULL", (meeting_id,)):
+            try:
+                meta = json.loads(row.get("meta") or "{}")
+            except (TypeError, ValueError):
+                continue
+            for name in (meta.get("voice_names") or {}).values():
+                clean = " ".join(str(name or "").split())
+                if clean and clean not in seen:
+                    seen.add(clean)
+                    names.append(clean)
+        return names, " ".join(str(meeting.get("leader") or "").split())
+
     # ---------------------------------------------------------------- приём
     def _voice_step(self, project_id: int, meeting_id: int, wav_path: Path | None, doc, filename: str) -> None:
         """Разделение по голосам, ФИО по общей базе и вклад в базу — с записью в журнал распознавания.
@@ -548,6 +569,9 @@ class MeetingPipeline:
                                     meeting_id)
                 return rep
 
+        # Общая «Команда» → проектная: без этого подсказка модели и страж исполнителя работают по пустому
+        # списку, хотя подтверждённые люди есть (задание владелицы 26.10.2026).
+        sync_people(self.s, project_id, self.s.get_setting("voice_base_path") or os.environ.get("VOICE_BASE_PATH"))
         people = [Person(p["full_name"], p["role"], p["department"], json.loads(p["aliases"] or "[]"),
                          bool(p["external"]), bool(p["confirmed"]), p["id"], p.get("organization") or "",
                          json.loads(p.get("known_marks") or "[]"))
@@ -748,7 +772,9 @@ class MeetingPipeline:
                         closings, removals = [], []
 
                     # 3. протокол — разделы пишет модель, таблицы и шапку — код
-                    sysm, user = self.pb.protocol(self.theme["protocol_skeleton"], safe_source.text, notes_text)
+                    participants, leader = self._participants(meeting_id, meeting)
+                    sysm, user = self.pb.protocol(self.theme["protocol_skeleton"], safe_source.text, notes_text,
+                                                  participants=participants, leader=leader)
                     try:
                         out = self._call(self.gen, budget, "protocol", sysm, user, meeting_id)
                         sections = {k: str(v)[:20000] for k, v in _dict(out, "sections").items()
