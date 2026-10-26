@@ -56,6 +56,15 @@ ADMIN_ROLES = {"project_admin", "super_admin"}
 
 class ProjectIn(BaseModel):
     name: str = Field(min_length=1, max_length=200)
+    aliases: list[str] = Field(default_factory=list)
+    parent_id: int = 0                  # 0 — без надпроекта
+
+
+class ProjectEditIn(BaseModel):
+    name: str = Field(min_length=1, max_length=200)
+    aliases: list[str] = Field(default_factory=list)
+    parent_id: int = 0                  # 0 — убрать надпроект
+    archived: bool = False
 
 
 class PersonIn(BaseModel):
@@ -423,11 +432,41 @@ def create_app(theme_name: str | None = None, db_path: str | None = None, journa
 
     @app.get("/api/projects")
     def projects():
-        return store.q("SELECT id, name, theme FROM projects ORDER BY id")
+        rows = store.q("SELECT id, name, theme, aliases, active, archived, parent_id FROM projects ORDER BY name")
+        for r in rows:
+            try:
+                r["aliases"] = json.loads(r.get("aliases") or "[]")
+            except (TypeError, ValueError):
+                r["aliases"] = []
+        return rows
 
     @app.post("/api/projects")
     def create_project(p: ProjectIn, u: dict = Depends(admin)):
-        return {"id": store.insert("projects", name=p.name, theme=theme.id)}
+        if p.parent_id:
+            project_or_404(p.parent_id)
+        return {"id": store.insert("projects", name=p.name.strip(), theme=theme.id,
+                                   aliases=json.dumps([a.strip() for a in p.aliases if a.strip()], ensure_ascii=False),
+                                   active=1, archived=0, parent_id=p.parent_id or None, created_at=now())}
+
+    @app.patch("/api/projects/{pid}")
+    def edit_project(pid: int, p: ProjectEditIn, u: dict = Depends(admin)):
+        project_or_404(pid)
+        parent = p.parent_id or None
+        if parent:
+            project_or_404(parent)
+            if parent == pid:
+                raise HTTPException(422, "Проект не может быть надпроектом сам себе.")
+            seen, cur = {pid}, parent
+            while cur:
+                if cur in seen:
+                    raise HTTPException(422, "Так получится кольцо проектов — выберите другой надпроект.")
+                seen.add(cur)
+                row = store.get("projects", cur) or {}
+                cur = row.get("parent_id")
+        store.update("projects", pid, name=p.name.strip(),
+                     aliases=json.dumps([a.strip() for a in p.aliases if a.strip()], ensure_ascii=False),
+                     parent_id=parent, archived=int(bool(p.archived)))
+        return {"ok": True}
 
     @app.get("/api/projects/{pid}/people")
     def people(pid: int):

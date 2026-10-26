@@ -213,6 +213,52 @@ const routes = {
     $("#agr-reset").onclick = () => { S.agr = { kind: "", status: "open", since: "", till: "" }; render(); };
   },
 
+  async projects() { // справочник проектов и подпроектов — как структура ERP; данные заводят пользователи
+    const rows = await api("/api/projects");
+    const byId = new Map(rows.map((p) => [p.id, p]));
+    const children = (id) => rows.filter((p) => (p.parent_id || 0) === id);
+    const ordered = [];
+    const walk = (parent, depth) => children(parent).forEach((p) => { ordered.push({ ...p, depth }); walk(p.id, depth + 1); });
+    walk(0, 0);
+    rows.filter((p) => !byId.has(p.parent_id || 0)).forEach((p) => { if (!ordered.some((x) => x.id === p.id)) ordered.push({ ...p, depth: 0 }); });
+    const opts = (self, cur) => `<option value="0">— без надпроекта —</option>` + rows.filter((p) => p.id !== self)
+      .map((p) => `<option value="${p.id}"${Number(cur || 0) === p.id ? " selected" : ""}>${esc(p.name)}</option>`).join("");
+    const row = (p) => `<tr${p.archived ? ' class="sub"' : ""}><td style="padding-left:${8 + p.depth * 18}px">
+        <input data-pname="${p.id}" value="${esc(p.name)}" style="min-width:220px"></td>
+      <td><input data-palias="${p.id}" value="${esc((p.aliases || []).join(", "))}" placeholder="варианты написания" style="min-width:200px"></td>
+      <td><select data-pparent="${p.id}">${opts(p.id, p.parent_id)}</select></td>
+      <td>${p.archived ? `<span class="sub">в архиве</span>` : "активен"}</td>
+      <td><button class="btn btn-ghost" data-psave="${p.id}">Сохранить</button>
+        <button class="btn btn-ghost" data-parch="${p.id}">${p.archived ? "Вернуть" : "В архив"}</button></td></tr>`;
+    $("#main").innerHTML = `<h1>Проекты</h1>
+      <p class="page-sub">Проекты и подпроекты. Варианты написания помогают распознаванию и поиску; архив скрывает проект из списка выбора.</p>
+      ${isAdmin() ? `<div class="card stack"><h2 style="margin:0">Новый проект</h2><div class="row">
+        <input id="pj-name" placeholder="Название"><input id="pj-alias" placeholder="Варианты через запятую">
+        <select id="pj-parent"><option value="0">— без надпроекта —</option>${rows.map((p) => `<option value="${p.id}">${esc(p.name)}</option>`).join("")}</select>
+        <button class="btn btn-primary" id="pj-add">Создать</button></div></div>` : ""}
+      <div class="card-output" style="overflow-x:auto"><table><tr><th>Название</th><th>Варианты написания</th><th>Надпроект</th><th>Состояние</th><th></th></tr>
+      ${ordered.length ? ordered.map(row).join("") : `<tr><td colspan="5" class="empty">Проектов пока нет.</td></tr>`}</table></div>`;
+    const add = $("#pj-add");
+    if (add) add.onclick = async () => { try {
+      await api("/api/projects", { method: "POST", json: { name: $("#pj-name").value,
+        aliases: $("#pj-alias").value.split(",").map((x) => x.trim()).filter(Boolean), parent_id: Number($("#pj-parent").value) } });
+      toast("Проект заведён."); location.reload();
+    } catch (e) { toast(e.message); } };
+    $("#main").querySelectorAll("[data-psave]").forEach((b) => b.onclick = async () => {
+      const id = Number(b.dataset.psave);
+      try { await api(`/api/projects/${id}`, { method: "PATCH", json: {
+        name: $(`[data-pname="${id}"]`).value,
+        aliases: $(`[data-palias="${id}"]`).value.split(",").map((x) => x.trim()).filter(Boolean),
+        parent_id: Number($(`[data-pparent="${id}"]`).value),
+        archived: !!(rows.find((p) => p.id === id) || {}).archived } });
+        toast("Сохранено."); location.reload();
+      } catch (e) { toast(e.message); } });
+    $("#main").querySelectorAll("[data-parch]").forEach((b) => b.onclick = async () => {
+      const p = rows.find((x) => x.id === Number(b.dataset.parch));
+      try { await api(`/api/projects/${p.id}`, { method: "PATCH", json: { name: p.name, aliases: p.aliases || [],
+        parent_id: p.parent_id || 0, archived: !p.archived } }); toast(p.archived ? "Проект возвращён." : "Проект в архиве."); location.reload(); } catch (e) { toast(e.message); } });
+  },
+
   async help() { // «Как пользоваться» — короткая памятка, как в ERP
     $("#main").innerHTML = `<h1>Как пользоваться</h1>
       <div class="card stack"><p>Около трёх минут: свои задачи и отметка по ним, встречи и протоколы, реестр задач, «Статус проекта» и поиск.</p>
@@ -961,8 +1007,10 @@ async function boot() {
   const roleSel = $("#role"); roleSel.innerHTML = S.theme.roles.map((r) => `<option value="${esc(r)}">${esc(ROLE_RU[r] || r)}</option>`).join("");
   roleSel.value = S.role; roleSel.onchange = () => { S.role = roleSel.value; store.set("role", S.role); bindModeSwitch(); updateAwaitingBadge(); render(); };
   const nm = $("#username"); nm.value = S.name; nm.onchange = () => { S.name = nm.value.trim(); store.set("name", S.name); render(); };
-  const ps = $("#project"); ps.innerHTML = projects.map((p) => `<option value="${p.id}">${esc(p.name)}</option>`).join("");
-  S.project = Number(store.get("project", projects[0]?.id || 0)) || projects[0]?.id || null;
+  const visibleProjects = projects.filter((p) => !p.archived);
+  const ps = $("#project"); ps.innerHTML = visibleProjects.map((p) => `<option value="${p.id}">${esc(p.name)}</option>`).join("");
+  S.project = Number(store.get("project", visibleProjects[0]?.id || 0)) || visibleProjects[0]?.id || null;
+  if (!visibleProjects.some((p) => p.id === S.project)) S.project = visibleProjects[0]?.id || null;
   if (S.project) ps.value = S.project;
   showBrand();
   ps.onchange = () => { S.project = Number(ps.value); store.set("project", ps.value); showBrand(); render(); };

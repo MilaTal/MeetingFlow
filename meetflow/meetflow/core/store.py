@@ -21,7 +21,8 @@ from typing import Any, Iterator
 
 SCHEMA: dict[str, dict[str, str]] = {
     "projects": {"id": "INTEGER PRIMARY KEY", "name": "TEXT NOT NULL", "theme": "TEXT NOT NULL",
-                 "created_at": "TEXT"},
+                 "created_at": "TEXT", "aliases": "TEXT DEFAULT '[]'", "active": "INTEGER DEFAULT 1",
+                 "archived": "INTEGER DEFAULT 0", "parent_id": "INTEGER"},
     "meetings": {"id": "INTEGER PRIMARY KEY", "project_id": "INTEGER", "date": "TEXT", "label": "TEXT",
                  "protocol_md": "TEXT", "protocol_built_at": "TEXT", "built_from": "TEXT DEFAULT '[]'",
                  "leader": "TEXT", "review_notes": "TEXT DEFAULT '[]'",
