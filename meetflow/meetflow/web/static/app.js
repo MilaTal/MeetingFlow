@@ -332,6 +332,15 @@ const routes = {
 
   async cards() {
     const rows = await api(`/api/projects/${S.project}/cards`);
+    // Категории — как вкладки ERP «Разбор»; норма открытых — 15.
+    const CAT = { tasks: ["assign_person", "task_doubt", "due_unconfirmed"],
+      people: ["assign_person"], projects: [], agreements: ["review_finding"], system: ["technical"] };
+    const cur = S.cardsTab || "all";
+    const visible = cur === "all" ? rows : rows.filter((c) => (CAT[cur] || []).includes(c.kind));
+    const count = (key) => key === "all" ? rows.length : rows.filter((c) => (CAT[key] || []).includes(c.kind)).length;
+    const tabs = [["all", "Все"], ["tasks", "Задачи"], ["people", "Люди и голоса"],
+      ["projects", "Проекты и справочники"], ["agreements", "Договорённости"], ["system", "Система"]]
+      .map(([k, t]) => `<button class="btn ${cur === k ? "btn-primary" : ""}" data-card-tab="${k}">${t}${count(k) ? ` · ${count(k)}` : ""}</button>`).join("");
     const why = { no_verbatim_quote: "нет дословной цитаты", no_assignee: "исполнитель не назван", assignee_not_in_team: "человека нет в Команде",
       assignee_ambiguous: "неясно, о ком речь", duplicate: "похоже на существующую задачу", question_not_assignment: "это вопрос, а не поручение",
       negation_in_quote: "в цитате отрицание", suspicious_instruction: "в тексте похоже на внедрённую инструкцию",
@@ -371,11 +380,14 @@ const routes = {
       return `${list}<div class="row"><button class="btn btn-primary" data-r="${c.id}" data-s="accepted">Подтвердить</button>
         <button class="btn" data-r="${c.id}" data-s="rejected">Не нужно</button></div>`;
     };
-    $("#main").innerHTML = `<h1>${esc(S.theme.vocabulary.cards)}</h1><p class="page-sub">Здесь только то, что система не решила сама. «Подтвердить» выполняет предложенное: заводит задачу или применяет закрытие.</p>
-      ${rows.length ? moreItems(rows, (c) => `<div class="card-output stack"><strong>${esc(c.title)}</strong>
+    $("#main").innerHTML = `<h1>Разбор</h1><p class="page-sub">Здесь только то, что система не решила сама. «Подтвердить» выполняет предложенное: заводит задачу или применяет закрытие.</p>
+      <p class="sub">Открыто ${rows.length} (норма ≤ 15)${rows.length > 15 ? ' <span class="overdue">— больше нормы</span>' : ""}.</p>
+      <div class="row" style="margin-bottom:10px">${tabs}</div>
+      ${visible.length ? moreItems(visible, (c) => `<div class="card-output stack"><strong>${esc(c.title)}</strong>
         ${c.payload.reasons ? `<span class="sub">Почему: ${c.payload.reasons.map((r) => esc(why[r] || r)).join(", ")}</span>` : ""}
         ${c.payload.quote ? `<q class="sub">${esc(c.payload.quote)}</q>` : ""}
-        ${body(c)}</div>`) : `<p class="empty">Очередь пуста.</p>`}`;
+        ${body(c)}</div>`) : `<p class="empty">${rows.length ? "В этой вкладке пусто." : "Очередь пуста."}</p>`}`;
+    $("#main").querySelectorAll("[data-card-tab]").forEach((b) => b.onclick = () => { S.cardsTab = b.dataset.cardTab; render(); });
     $("#main").querySelectorAll("[data-new]").forEach((b) => b.onclick = async () => {
       const id = b.dataset.new;
       try {
@@ -892,7 +904,7 @@ async function boot() {
   $('[data-route="tasks"]').textContent = V.nav_tasks || V.registry; $('[data-route="meetings"]').textContent = V.nav_meetings || V.meetings;
   $('[data-route="search"]').textContent = V.nav_search || V.search || "Поиск по проекту";
   $('[data-route="roadmap"]').textContent = V.nav_roadmap || V.roadmap || "Дорожная карта";
-  $('[data-route="cards"]').textContent = S.theme.vocabulary.cards; $('[data-route="team"]').textContent = S.theme.vocabulary.team;
+  $('[data-route="cards"]').textContent = "Разбор"; $('[data-route="team"]').textContent = S.theme.vocabulary.team;
   if (!S.auth) { S.role = store.get("role", "member"); S.name = store.get("name", ""); }
   $("#test-identity").hidden = S.auth; $("#auth-identity").hidden = !S.auth;
   if (S.auth) { $("#auth-identity").innerHTML = `Вы вошли: ${esc(S.name)} · ${esc(ROLE_RU[S.role] || S.role)} · <button class="btn-link" id="logout">Выйти</button>`;

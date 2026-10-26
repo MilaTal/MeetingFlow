@@ -46,7 +46,7 @@ def test_long_lists_limit_7_and_ribbon():
     assert "const listLimit = () => (window.innerHeight < 720 ? 5 : 7);" in JS
     assert ".ribbon { max-height: 480px; overflow: auto;" in CSS
     for marker in ('moreRows("<tr><th>Дата</th><th>Название</th></tr>"', 'moreRows("<tr><th>№</th><th>ФИО</th>',
-                   "moreItems(rows, (c) =>", 'moreRows("<tr><th>Проект</th><th>Что</th>', "moreItems(rows, (t) =>",
+                   "moreItems(visible, (c) =>", 'moreRows("<tr><th>Проект</th><th>Что</th>', "moreItems(rows, (t) =>",
                    'moreRows("", d.history', "moreItems(mtasks,", "moreItems(proto.units,"):
         assert marker in JS, marker
     assert "dec.slice(0, 3)" not in JS and "history.slice(0, 6)" not in JS
