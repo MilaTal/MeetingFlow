@@ -276,8 +276,14 @@ class Route:
 
     @property
     def uses_proxy(self) -> bool:
-        """Внешняя точка ходит через системный прокси (если не выключен у точки); локальная — мимо прокси."""
+        """Внешняя точка ходит через прокси (системный или адресом точки); локальная — мимо прокси."""
         return self.external and self.opt("proxy", "system") != "none"
+
+    @property
+    def proxy_address(self) -> str:
+        """Адрес прокси точки, если в «Моделях» выбран вариант «адрес» (как в Планёрке, 16.10.26)."""
+        value = str(self.opt("proxy", "") or "")
+        return value if value.startswith(("http://", "https://")) else ""
 
     @property
     def label(self) -> str:
@@ -377,7 +383,16 @@ _install_opener()
 
 
 def mark_request(req: urllib.request.Request, route: "Route") -> urllib.request.Request:
-    """Пометить запрос к точке: локальная или внешняя без прокси — напрямую, внешняя — через системный прокси."""
+    """Пометить запрос к точке: локальная или внешняя без прокси — напрямую, внешняя — через системный прокси или
+    адрес прокси точки (как в Планёрке, 16.10.26)."""
+    addr = route.proxy_address
+    if addr:
+        from urllib.parse import urlsplit
+        u = urlsplit(addr)
+        req.set_proxy(u.netloc, u.scheme)      # https-точка — туннелем CONNECT через этот прокси
+        req._model_routes_direct = False
+        req._model_routes_proxy = addr
+        return req
     req._model_routes_direct = not route.uses_proxy
     return req
 
@@ -645,8 +660,10 @@ def _check_point(name: str, ep: dict) -> None:
         raise RoutesError(f"точка «{name}»: key_source — env (имя переменной) или value (значение)")
     if key_source == "value" and key_env:
         raise RoutesError(f"точка «{name}»: ключ задан двумя способами — оставьте имя переменной или значение")
-    if ep.get("proxy", "system") not in PROXY_MODES:
-        raise RoutesError(f"точка «{name}»: proxy — system (системный прокси) или none (без прокси)")
+    proxy = ep.get("proxy", "system")
+    if proxy not in PROXY_MODES and not (isinstance(proxy, str) and proxy.startswith(("http://", "https://"))):
+        raise RoutesError(f"точка «{name}»: proxy — system (системный прокси), none (без прокси) или адрес "
+                          f"http://… / https://…")
     reasoning = ep.get("reasoning", "auto")
     if reasoning not in REASONING_MODES:
         raise RoutesError(f"точка «{name}»: reasoning — auto (как задаёт модель), low, high или none (выключено), "

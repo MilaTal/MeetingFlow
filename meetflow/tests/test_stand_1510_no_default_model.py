@@ -27,7 +27,7 @@ def routes(tmp_path, monkeypatch):
 
 def test_shared_modules_are_byte_copies():
     """Общие модули ERP и Планёрки — копии байт в байт; правятся там, переносятся целиком."""
-    assert hashlib.md5((SHARED / "model_routes.py").read_bytes()).hexdigest().startswith("f839eb2891d8")
+    assert hashlib.md5((SHARED / "model_routes.py").read_bytes()).hexdigest().startswith("9fb66b24572b")
     assert hashlib.md5((SHARED / "llm_cost.py").read_bytes()).hexdigest().startswith("7d6d18d214f8")
 
 
