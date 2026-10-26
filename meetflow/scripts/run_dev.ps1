@@ -13,6 +13,7 @@
 #
 #   powershell -ExecutionPolicy Bypass -File scripts\run_dev.ps1 -Theme erp_rollout -Port 8002 -Llm openrouter
 param([string]$Theme = "it_product", [int]$Port = 8002, [string]$Db = "data\meetflow.db",
+      [string]$BindHost = "127.0.0.1",
       [ValidateSet("mock", "ollama", "openrouter", "routes")][string]$Llm = "routes",
       [string]$KeyFrom = "$env:USERPROFILE\Documents\ITMO_planerka\webapp\.env.local")
 $env:PYTHONIOENCODING = "utf-8"
@@ -49,4 +50,4 @@ if ($needKey -and -not $env:OPENROUTER_API_KEY) {
     }
 }
 Set-Location (Split-Path $PSScriptRoot -Parent)
-python -m meetflow serve --theme $Theme --db $Db --port $Port
+python -m meetflow serve --theme $Theme --db $Db --port $Port --host $BindHost
