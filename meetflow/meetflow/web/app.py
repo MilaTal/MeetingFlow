@@ -46,6 +46,7 @@ from ..core import roadmap as roadmap_mod
 from ..core import search as search_mod
 from ..core import units as units_mod
 from ..core.pipeline import MeetingPipeline
+from ..core import norm_yo
 from ..core.store import Store, now
 from ..core.text import same_word, stems, words
 from ..core.types import CardStatus, TaskStatus
@@ -188,6 +189,9 @@ class VoiceDecisionIn(BaseModel):
     ids: list[int] = Field(default_factory=list)
     decision: Literal["yes", "no", "other", "noise"] = "yes"
     name: str = Field("", max_length=200)
+    # два почти равных кандидата (как ERP 26.10.2026): какой выбран — «pervyy» / «vtoroy»; только с «Это он»
+    vybran: Literal["", "pervyy", "vtoroy"] = ""
+    kandidat: str = Field("", max_length=200)
 
 
 LLM_TOOLS = ("mock", "ollama", "openrouter", "routes")
@@ -499,7 +503,7 @@ def create_app(theme_name: str | None = None, db_path: str | None = None, journa
         same, similar = [], []
         for r in store.q("SELECT full_name, external, organization FROM people WHERE project_id=?", (pid,)):
             rw = words(r["full_name"])
-            org_same = (r["organization"] or "").strip().lower() == p.organization.strip().lower()
+            org_same = norm_yo.равны(r["organization"], p.organization)     # «е» = «ё» (ERP 26.10.2026)
             if " ".join(rw) == norm and bool(r["external"]) == p.external and (not p.external or org_same):
                 same.append(r["full_name"])
             elif not p.external and not r["external"] and rw and name_words and same_word(rw[0], name_words[0]):
@@ -1140,17 +1144,56 @@ def create_app(theme_name: str | None = None, db_path: str | None = None, journa
     def _voice_base() -> str:
         return store.get_setting("voice_base_path") or os.environ.get("VOICE_BASE_PATH") or ""
 
+    def _komanda() -> list[str]:
+        """«Команда» MeetFlow для «Разбора голосов»: подтверждённые внутренние люди всех проектов и общей «Команды»,
+        полным ФИО (фамилия и имя)."""
+        names = {" ".join((r["full_name"] or "").split()) for r in store.q(
+            "SELECT full_name FROM people WHERE confirmed=1 AND COALESCE(external, 0)=0")}
+        try:
+            st = team_shared_state(voice_base_path=store.get_setting("voice_base_path"))
+            names |= {" ".join((p.get("full_name") or "").split()) for p in (st.get("people_list") or [])
+                      if not p.get("external")}
+        except Exception:  # noqa: BLE001 — без общей «Команды» — только проектные люди
+            pass
+        return sorted(n for n in names if len(n.split()) >= 2)
+
+    def v_komande(name: str, komanda: list[str] | None = None) -> str | None:
+        """ФИО человека «Команды»: точное совпадение («е» = «ё») или один человек с тем же ключом фамилии и имени;
+        тёзки — нет (как ERP `routers/voice_review.в_команде`, 26.10.2026)."""
+        name = " ".join((name or "").split())
+        if not name:
+            return None
+        komanda = _komanda() if komanda is None else komanda
+        same = [k for k in komanda if norm_yo.равны(k, name)]
+        if len(same) == 1:
+            return same[0]
+        key = " ".join(norm_yo.ключ(name).split()[:2])
+        hits = [k for k in komanda if len(key.split()) == 2 and " ".join(norm_yo.ключ(k).split()[:2]) == key]
+        return hits[0] if len(hits) == 1 else None
+
     @app.get("/api/monitoring/voice-review")
     def voice_review_state(tab: str = "queue", u: dict = Depends(super_admin)):
-        """«Разбор голосов»: очередь новых отпечатков и решённые — как в ERP (задание 26.10.2026)."""
+        """«Разбор голосов»: очередь новых отпечатков и решённые — как в ERP (задание 26.10.2026). «Это он» — по
+        кандидату, однозначно найденному в «Команде» (`kandidat_v_komande`); второй из двух почти равных — тоже
+        (`vtoroy_v_komande`)."""
         from ..core import voice_review
         base = _voice_base()
         if not base:
             return {"error": "Путь к общей базе голосов не задан.", "gruppy": [], "klastery": []}
         try:
-            return voice_review.reshennye(base) if tab == "done" else voice_review.ochered(base)
+            if tab == "done":
+                return voice_review.reshennye(base)
+            data = voice_review.ochered(base)
         except (voice_review.RazborNeTot, OSError) as exc:
             return {"error": str(exc), "gruppy": [], "klastery": []}
+        komanda = _komanda()
+        for g in data.get("gruppy") or []:
+            g["v_komande"] = bool(g.get("imya")) and v_komande(g["imya"], komanda) is not None
+            for kl in g.get("klastery") or []:
+                kl["kandidat_v_komande"] = (v_komande(kl["kandidat"], komanda) or "") if kl.get("kandidat") else ""
+                kl["vtoroy_v_komande"] = (v_komande(kl["second"], komanda) or "") if kl.get("second") else ""
+        data["komanda"] = komanda
+        return data
 
     @app.get("/api/monitoring/voice-review/clip/{sid}")
     def voice_review_clip(sid: int, u: dict = Depends(super_admin)):
@@ -1172,9 +1215,22 @@ def create_app(theme_name: str | None = None, db_path: str | None = None, journa
             raise HTTPException(422, "Не выбран ни один говорящий.")
         if body.decision == "yes" and not body.name.strip():
             raise HTTPException(422, "Для решения «Это он» нужно имя.")
+        if body.vybran and body.decision != "yes":
+            raise HTTPException(422, "Выбор одного из двух кандидатов — только с решением «Это он».")
+        name = body.name.strip()
+        if body.decision in ("yes", "other"):
+            # имя должно однозначно найтись в «Команде» полным ФИО (как ERP 26.10.2026); «Другой человек» — ФИО
+            # «Команды», «Это он» — имя кандидата из базы голосов, чтобы отпечатки легли к тому же человеку базы
+            found = v_komande(name)
+            if len(name.split()) < 2 or found is None:
+                raise HTTPException(422, f"«{name or 'пусто'}» — нет в «Команде» MeetFlow полным ФИО. Выберите человека "
+                                         "в «Другой человек»: одно имя или тёзка не подставляются.")
+            if body.decision == "other":
+                name = found
         try:
-            return voice_review.primenit(base, body.ids, body.decision, body.name.strip(),
-                                         kto=u.get("name") or u.get("role") or "")
+            out = voice_review.primenit(base, body.ids, body.decision, name,
+                                        kto=u.get("name") or u.get("role") or "")
+            return {**out, "vybran": body.vybran}
         except (voice_review.RazborNeTot, OSError) as exc:
             raise HTTPException(422, str(exc)) from exc
 

@@ -521,7 +521,10 @@ const routes = {
       ? `<h1>Разбор голосов</h1><p class="page-sub">Принятые правилом и решённые человеком — только просмотр. «Не он» у принятого правилом возвращает говорящего в очередь.</p>${tabs}
          <p class="sub">Кластеров ${esc(d.klasterov || 0)}, отпечатков ${esc(d.otpechatkov || 0)}; по правилу ${esc(d.po_pravilu || 0)}, человеком ${esc(d.lyudmi || 0)}.</p>`
       : `<h1>Разбор голосов</h1><p class="page-sub">Новые отпечатки общей базы голосов — кто говорит. «Это он» и «Другой человек» кладут отпечатки в центр человека; «Не он» и «Шум» больше не предлагаются. Отрывок хранится только до решения.</p>${tabs}
-         <p class="sub">Ждут разбора: ${esc(d.klasterov || 0)} говорящих, отпечатков ${esc(d.otpechatkov || 0)}, с отрывком ${esc(d.s_otryvkom || 0)}. ${rule}${etalon} Без материала для проверки: ${esc(d.bez_materiala || 0)}.</p>`;
+         <p class="sub">Ждут разбора: ${esc(d.klasterov || 0)} говорящих, отпечатков ${esc(d.otpechatkov || 0)}, с отрывком ${esc(d.s_otryvkom || 0)}. ${rule}${etalon}</p>
+         ${d.bez_materiala ? `<p class="sub">без материала для проверки: ${esc(d.bez_materiala)}</p>` : ""}`;
+    const NOT_IN_TEAM = "нет в «Команде» MeetFlow полным ФИО — выберите в «Другой человек»";
+    const num = (x) => (x == null ? "—" : Number(x).toFixed(2).replace(".", ","));
     const clip = (o) => o.otryvok
       ? `<audio controls preload="none" style="width:100%;max-width:420px" src="/api/monitoring/voice-review/clip/${encodeURIComponent(o.id)}"></audio>`
       : "";
@@ -529,10 +532,17 @@ const routes = {
         <b>${esc(k.label || "Говорящий")}</b><span class="sub">${esc(k.data || k.ref || "")}${k.meeting_key ? ` · встреча ${esc(k.meeting_key)}` : ""} · ${esc(k.vsego || 0)} отп.${k.seconds != null ? ` · ${esc(k.seconds)} с` : ""}</span></div>
       ${k.prichina ? `<div class="sub">${esc(k.prichina)}</div>` : ""}
       ${(k.otpechatki || []).map((o) => `<div class="note"><span class="meta">${esc(o.vremya || "")}</span> ${esc(o.phrase || "")}${clip(o)}</div>`).join("")}
-      <div class="row" style="margin-top:8px">${k.ids && k.ids.length ? `<button class="btn btn-primary" data-vr-yes="${k.ids.join(",")}" data-vr-name="${esc(k.kandidat || "")}">Это он${k.kandidat ? ` — ${esc(k.kandidat)}` : ""}</button>
-        ${k.dva_kandidata && k.second ? `<button class="btn" data-vr-yes="${k.ids.join(",")}" data-vr-name="${esc(k.second)}">Это ${esc(k.second)}</button>` : ""}
+      ${k.kandidat ? `<div class="sub">${k.dva_kandidata && k.second ? `Похож на: ${esc(k.kandidat)} (${num(k.cosine)}) или ${esc(k.second)} (${num(k.second_cosine)})` : `Предложено: ${esc(k.kandidat)} — близость ${num(k.cosine)}, отрыв ${num(k.gap)}`}</div>` : ""}
+      <div class="row" style="margin-top:8px">${k.ids && k.ids.length ? (k.dva_kandidata && k.second
+        // два почти равных кандидата — оба на равных, кнопка на каждого по «Команде», «Не они» (как ERP, 26.10.2026)
+        ? `<button class="btn btn-primary" data-vr-yes="${k.ids.join(",")}" data-vr-name="${esc(k.kandidat)}" data-vr-kto="pervyy" ${k.kandidat_v_komande ? "" : "disabled"} title="${esc(k.kandidat_v_komande ? "Подтвердить: это " + k.kandidat_v_komande : NOT_IN_TEAM)}">Это ${esc(k.kandidat_v_komande || k.kandidat)}</button>
+        <button class="btn btn-primary" data-vr-yes="${k.ids.join(",")}" data-vr-name="${esc(k.second)}" data-vr-kto="vtoroy" ${k.vtoroy_v_komande ? "" : "disabled"} title="${esc(k.vtoroy_v_komande ? "Подтвердить: это " + k.vtoroy_v_komande : NOT_IN_TEAM)}">Это ${esc(k.vtoroy_v_komande || k.second)}</button>
         <button class="btn" data-vr-other="${k.ids.join(",")}">Другой человек</button>
-        <button class="btn btn-ghost" data-vr-no="${k.ids.join(",")}">Не он</button>
+        <button class="btn btn-ghost" data-vr-no="${k.ids.join(",")}" data-vr-name="${esc(k.kandidat + "; " + k.second)}">Не они</button>`
+        // «Это он» — только по кандидату, однозначно найденному в «Команде»; иначе кнопка серая с подсказкой
+        : `<button class="btn btn-primary" data-vr-yes="${k.ids.join(",")}" data-vr-name="${esc(k.kandidat || "")}" ${k.kandidat_v_komande ? "" : "disabled"} title="${esc(k.kandidat_v_komande ? "Подтвердить: это " + k.kandidat_v_komande : (k.kandidat ? NOT_IN_TEAM : "Кандидата нет — выберите «Другой человек»"))}">Это он${k.kandidat_v_komande ? ` — ${esc(k.kandidat_v_komande)}` : ""}</button>
+        <button class="btn" data-vr-other="${k.ids.join(",")}">Другой человек</button>
+        <button class="btn btn-ghost" data-vr-no="${k.ids.join(",")}" data-vr-name="${esc(k.kandidat || "")}">Не он</button>`) + `
         <button class="btn btn-ghost" data-vr-noise="${k.ids.join(",")}">Шум / не голос</button>` : `<span class="sub">решение уже принято</span>`}</div></div>`;
     const groups = (d.gruppy || []).map((g) => `<h2>${esc(g.imya || "Похоже на кого-то")}</h2>${(g.klastery || []).map(speaker).join("")}`).join("");
     const decided = (d.klastery || []).map((k) => `<div class="card-output"><div class="row" style="justify-content:space-between;align-items:baseline">
@@ -540,9 +550,9 @@ const routes = {
       <div>${k.imya ? `<b>${esc(k.imya)}</b>` : "—"}${k.pravilo ? `<span class="sub"> · ${esc(k.pravilo)}</span>` : ""}${k.kto ? `<span class="sub"> · решил ${esc(k.kto)} ${esc(k.kogda || "")}</span>` : ""}</div>
       ${k.ne_on && k.ids && k.ids.length ? `<div class="row"><button class="btn btn-ghost" data-vr-dismiss="${k.ids.join(",")}">Не он</button></div>` : ""}</div>`).join("");
     $("#main").innerHTML = `${head}${err}${done ? (decided || '<p class="empty">Решённых пока нет.</p>') : (groups || '<p class="empty">Непонятных голосов нет — разбирать нечего.</p>')}`;
-    const act = async (ids, decision, name = "") => { try { await api("/api/monitoring/voice-review/apply", { method: "POST", json: { ids: ids.split(",").map(Number), decision, name } }); toast("Решение записано."); render(); } catch (e) { toast(e.message); } };
-    $("#main").querySelectorAll("[data-vr-yes]").forEach((b) => b.onclick = () => act(b.dataset.vrYes, "yes", b.dataset.vrName || ""));
-    $("#main").querySelectorAll("[data-vr-no]").forEach((b) => b.onclick = () => act(b.dataset.vrNo, "no"));
+    const act = async (ids, decision, name = "", vybran = "") => { try { await api("/api/monitoring/voice-review/apply", { method: "POST", json: { ids: ids.split(",").map(Number), decision, name, vybran } }); toast("Решение записано."); render(); } catch (e) { toast(e.message); } };
+    $("#main").querySelectorAll("[data-vr-yes]").forEach((b) => b.onclick = () => act(b.dataset.vrYes, "yes", b.dataset.vrName || "", b.dataset.vrKto || ""));
+    $("#main").querySelectorAll("[data-vr-no]").forEach((b) => b.onclick = () => act(b.dataset.vrNo, "no", b.dataset.vrName || ""));
     $("#main").querySelectorAll("[data-vr-noise]").forEach((b) => b.onclick = () => act(b.dataset.vrNoise, "noise"));
     $("#main").querySelectorAll("[data-vr-other]").forEach((b) => b.onclick = () => { const n = prompt("ФИО из «Команды», кем оказался говорящий:"); if (n && n.trim()) act(b.dataset.vrOther, "other", n.trim()); });
     $("#main").querySelectorAll("[data-vr-dismiss]").forEach((b) => b.onclick = async () => { try { await api("/api/monitoring/voice-review/dismiss", { method: "POST", json: { ids: b.dataset.vrDismiss.split(",").map(Number) } }); toast("Возвращён в очередь."); render(); } catch (e) { toast(e.message); } });
@@ -939,7 +949,7 @@ function restoreScroll(k) {
   if (k.anchor) {
     const row = main.querySelector(`[data-row="${CSS.escape(k.anchor.key)}"]`) || (k.anchor.next && main.querySelector(`[data-row="${CSS.escape(k.anchor.next)}"]`));
     if (row) { window.scrollBy(0, row.getBoundingClientRect().top - k.anchor.top);
-      const f = row.querySelector("button, a, input, select");
+      const f = row.querySelector("button:not([disabled])") || row.querySelector("a, input, select");
       if (f && !main.contains(document.activeElement)) f.focus({ preventScroll: true }); }
   }
   main.style.minHeight = "";
@@ -968,11 +978,11 @@ async function render() {
     if (e instanceof Stale || seq !== renderSeq) return;
     $("#main").innerHTML = `<h1>Не получилось открыть раздел</h1><p class="page-sub">${esc(e.message)}</p>`; }
   if (seq !== renderSeq) return;      // экран уже другой — плашку и обработчики не трогаем
-  if (keep) restoreScroll(keep); else $("#main").style.minHeight = "";
-  S.shownHash = location.hash;
   // стенд без модели виден на каждом экране (письмо meeting-registry 01/19)
   if (S.theme && S.theme.stand) $("#main").insertAdjacentHTML("afterbegin",
     `<p class="stand-banner" role="status">Стенд без модели: протоколы собирает заглушка, а не модель. Для работы нужен MEETFLOW_LLM=routes, ollama или openrouter.</p>`);
+  if (keep) restoreScroll(keep); else $("#main").style.minHeight = "";   // место — после всего, что меняет высоту
+  S.shownHash = location.hash;
 }
 
 function showLogin() {

@@ -99,7 +99,7 @@ class Team:
             return self._by_initial(toks, inits, context, description)
         name_low = " ".join(toks)
         exact = [p for p in self.people if p.full_name.lower().replace("ё", "е") == name_low
-                 or name_low in [a.lower() for a in p.aliases]]
+                 or name_low in [a.lower().replace("ё", "е") for a in p.aliases]]   # «е» = «ё» (26.10.2026)
         exact = self._by_org(exact, org_toks or self._org_tokens(context)) if len(exact) > 1 else exact
         if len(exact) == 1 and len(toks) >= 2:
             return Match(exact[0], via="exact")
