@@ -646,6 +646,7 @@ def create_app(theme_name: str | None = None, db_path: str | None = None, journa
         # (находка циклов ролей ERP и Планёрки 15.10.26: Планёрка GET /meetings/{id}/minutes отдавала их всем)
         staff = u["role"] in admin_roles
         return {"markdown": m["protocol_md"], "built_at": m["protocol_built_at"] if staff else None,
+                "topic": m.get("topic") or "", "leader": m.get("leader") or "",
                 "review_notes": json.loads(m["review_notes"] or "[]") if staff else [], "units": meeting_units(mid)}
 
     def meeting_units(mid: int) -> list[dict]:

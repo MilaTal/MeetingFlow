@@ -236,8 +236,9 @@ const routes = {
     const p = await api(`/api/meetings/${id}/plan`);
     const srcs = await api(`/api/meetings/${id}/sources`);
     $("#main").innerHTML = `<p><a href="#prep">← Подготовка встречи</a></p>
-      <div class="row" style="align-items:baseline"><h1 style="margin:0">План встречи ${fmtDate(p.date)}</h1>
-        <a class="btn" href="#meeting/${id}">Протокол</a></div>
+      <div class="row" style="align-items:baseline"><h1 style="margin:0">План встречи ${fmtDate(p.date)}</h1></div>
+      <div class="row" style="margin-bottom:8px"><a class="btn btn-primary" href="#plan/${id}">План</a><a class="btn" href="#meeting/${id}">Протокол</a></div>
+      ${p.built_at ? `<p class="sub">собран ${esc(String(p.built_at).slice(0, 16).replace("T", " "))}</p>` : ""}
       <div class="card stack"><label class="sub">Тема встречи<input id="pl-topic" value="${esc(p.topic || "")}" placeholder="без темы"></label>
         ${isAdmin() ? `<div class="row"><button class="btn btn-primary" id="pl-build">${p.markdown ? "Пересобрать план" : "Собрать план"}</button><button class="btn" id="pl-topic-save">Сохранить тему</button><span class="sub" id="pl-state"></span></div>` : ""}
         ${srcs.length ? `<div class="sub">Материалы: ${srcs.map((s) => esc(s.name)).join("; ")}</div>` : `<div class="sub">Материалов к встрече пока нет.</div>`}</div>
@@ -253,13 +254,15 @@ const routes = {
   async meeting(id) {
     const srcs = await api(`/api/meetings/${id}/sources`);
     const rec = await api(`/api/meetings/${id}/recognition`).catch(() => null);
+    const pl = await api(`/api/meetings/${id}/plan`).catch(() => null);
     let proto = null; try { proto = await api(`/api/meetings/${id}/protocol`); } catch { /* ещё нет */ }
     const notes = (proto && proto.review_notes) || [];
     const mtasks = await api(`/api/meetings/${id}/tasks`);   // задачи этой встречи (стенд 5)
     const ST = { active: "в работе", done: "выполнена", dropped: "снята" };
     $("#main").innerHTML = `<p><a href="#meetings">← ${esc(S.theme.vocabulary.meetings)}</a></p>
       <h1>${esc(S.theme.vocabulary.protocol)}</h1>
-      <div class="row" style="margin-bottom:8px"><a class="btn" href="#plan/${id}">План встречи</a><a class="btn" href="#meetings">Все встречи</a></div>
+      <div class="row" style="margin-bottom:8px"><a class="btn" href="#plan/${id}">План</a><a class="btn btn-primary" href="#meeting/${id}">Протокол</a><a class="btn btn-ghost" href="#meetings">Все встречи</a></div>
+      <p class="sub">${pl && pl.topic ? `Тема: ${esc(pl.topic)} · ` : ""}${proto && proto.leader ? `Вёл встречу: ${esc(proto.leader)} · ` : ""}${proto && proto.built_at ? `собран ${esc(String(proto.built_at).slice(0, 16).replace("T", " "))} · ` : ""}материалов ${srcs.length}</p>
       <div class="card stack"><div class="dropzone" id="drop">Перетащите файлы встречи сюда или <label style="text-decoration:underline;cursor:pointer">выберите<input type="file" id="file" multiple hidden></label></div>
       ${srcs.length ? `<div>${srcs.map((s) => `<span class="badge">${esc({ transcript: "расшифровка", notes: "заметки", other: "материал" }[s.kind] || s.kind)}</span> ${esc(s.name)}${s.local_asr ? ` <a class="btn-link" href="/api/meetings/${encodeURIComponent(id)}/sources/${encodeURIComponent(s.id)}/export" title="Расшифровка распознана здесь — выгрузить в Word">.docx</a>` : ""}`).join("<br>")}</div>` : ""}
       ${rec && (rec.route || rec.error) ? `<p class="sub" id="asr-line">Распознавание: ${rec.error ? esc(rec.error) : `${esc(rec.route || rec.model || "точка не записана")} · реплик ${esc(rec.segments ?? "—")} · говорящих ${esc(rec.speakers ?? "—")} · подписано строк ${esc(rec.signed_lines ?? "—")}${rec.diarization_seconds != null ? ` · разделение ${esc(rec.diarization_seconds)} с` : ""}${rec.voice_samples ? ` · отпечатков в общую базу ${esc(rec.voice_samples)}` : ""}`}</p>` : ""}
