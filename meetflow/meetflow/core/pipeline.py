@@ -86,10 +86,19 @@ class RunReport:
 HIDDEN = "[строка скрыта: похожа на инструкцию для модели]"
 
 
+def _span(text: str) -> int:
+    """Охват расшифровки по её же меткам времени: секунды от первой метки до последней; 0 — меток меньше двух."""
+    marks = []
+    for m in re.finditer(r"\b(\d{1,2}):(\d{2})(?::(\d{2}))?\b", text or ""):
+        a, b, c = int(m.group(1)), int(m.group(2)), int(m.group(3) or 0)
+        marks.append(a * 3600 + b * 60 + c if m.group(3) else a * 60 + b)
+    return marks[-1] - marks[0] if len(marks) >= 2 and marks[-1] >= marks[0] else 0
+
+
 def choose_transcript(transcripts: list[dict]) -> tuple[dict | None, str]:
-    """Одна расшифровка текстом сборки (правило 25.10.2026): своя локальная; выгрузка ВКС — только если своя пустая
-    или знаков меньше половины выгрузки. Выбор и причина идут в итог сборки. Покрытие по времени не считается:
-    длительность записи MeetFlow не хранит."""
+    """Одна расшифровка текстом сборки (правило 25.10.2026): своя локальная; выгрузка ВКС — только если своя пустая,
+    знаков меньше половины выгрузки или покрывает меньше 70 % её времени по меткам (когда у обеих есть хотя бы две
+    метки). Выбор и причина идут в итог сборки."""
     if not transcripts:
         return None, ""
     local = next((s for s in transcripts if s.get("local_asr")), None)
@@ -100,9 +109,14 @@ def choose_transcript(transcripts: list[dict]) -> tuple[dict | None, str]:
     if not text:
         return other or local, "своя расшифровка пустая — текстом выгрузка"
     if other is not None:
-        olen = len((other.get("text") or "").strip())
+        otext = (other.get("text") or "").strip()
+        olen = len(otext)
         if olen and len(text) * 2 < olen:
             return other, (f"своя явно неполная ({len(text)} из {olen} знаков выгрузки) — "
+                           "текстом выгрузка, своя остаётся источником имён")
+        lspan, ospan = _span(text), _span(otext)
+        if lspan and ospan and lspan * 10 < ospan * 7:
+            return other, (f"своя покрывает {int(lspan * 100 / ospan)} % времени выгрузки — "
                            "текстом выгрузка, своя остаётся источником имён")
     return local, ""
 

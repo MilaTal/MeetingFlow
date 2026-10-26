@@ -35,3 +35,25 @@ def test_no_local_uses_single_transcript():
     only = _s("выгрузка", "б" * 1200)
     row, reason = choose_transcript([only])
     assert row is only and "своей" in reason
+
+
+def test_local_short_by_time_falls_back():
+    """Охват по меткам: своя 0:00–0:10 против выгрузки 0:00–1:00 — меньше 70 %, текстом выгрузка."""
+    local = _s("своя", "[00:00] раз [00:10] два " + "а" * 1000, local=True)
+    other = _s("выгрузка", "[00:00] раз [01:00] два " + "б" * 1200, sid=2)
+    row, reason = choose_transcript([local, other])
+    assert row is other and "времени" in reason
+
+
+def test_local_full_by_time_wins():
+    local = _s("своя", "[00:00] раз [00:55] два " + "а" * 1000, local=True)
+    other = _s("выгрузка", "[00:00] раз [01:00] два " + "б" * 1200, sid=2)
+    row, reason = choose_transcript([local, other])
+    assert row is local and reason == ""
+
+
+def test_no_timestamps_uses_half_length_only():
+    local = _s("своя", "а" * 1000, local=True)
+    other = _s("выгрузка", "б" * 1200, sid=2)
+    row, reason = choose_transcript([local, other])
+    assert row is local and reason == ""
