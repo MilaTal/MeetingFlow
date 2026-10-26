@@ -8,6 +8,12 @@
 
 Протокол тот же, что у общего вызова: `form=multipart` — multipart с полем `file`, иначе — wav телом и параметры
 в строке запроса. Разделение по голосам у сервиса не просим (`diarization=false`): его делает наш код.
+
+С 27.10.2026 — как общий вызов ERP и Планёрки от 26.10.2026 («Транс» рвал соединение на wav с подсказкой):
+подсказка (`initial_prompt`, `hotwords`) в строку запроса не идёт — у формы raw с подсказкой запрос уходит multipart,
+запись полем `file`, параметры и подсказка полями формы под прежними именами (прежний путь — `prompt_in=query`);
+`audio` у точки — формат звука: `wav` (по умолчанию), `m4a` или `ogg` — сжатие общим `_звук_для_сервиса`, временная
+папка удаляется сразу. Что ушло сервису — в сводке: `audio_sent`, `audio_bytes`, `prompt_sent`.
 """
 from __future__ import annotations
 
@@ -26,8 +32,11 @@ def call(route, wav_path, *, language: str = "ru", initial_prompt: str = "",
     """Текст «ЧЧ:ММ:СС<TAB>реплика» и сводка с временами реплик."""
     if not _mr._internal_url(route.url):
         raise _mr.RoutesError("сервис распознавания — только во внутренней сети")
-    data = Path(wav_path).read_bytes()
+    audio_format = str(route.opt("audio") or "wav").strip().lower()
+    data, filename, audio_type, sent = _mr._звук_для_сервиса(wav_path, audio_format)
     prompt = " ".join(x for x in (initial_prompt or "", hotwords or "") if x)
+    prompt_in_query = str(route.opt("prompt_in") or "form").strip().lower() == "query"
+    sending = {"audio_sent": sent, "audio_bytes": len(data)}
     started = time.monotonic()
 
     def collect(raw: dict) -> tuple[str, dict]:
@@ -66,39 +75,50 @@ def call(route, wav_path, *, language: str = "ru", initial_prompt: str = "",
             "segment_lines": texts,
             "segment_times": times,
         })
+        meta.update(sending)
         return text, {k: v for k, v in meta.items() if v not in (None, [], "")}
+
+    def send_form(fields: list[tuple[str, str]]) -> dict:
+        boundary = "----meetflow-asr-" + uuid.uuid4().hex
+        file_field = str(route.opt("file_field") or "file")
+        parts: list[bytes] = []
+        for name, value in fields:
+            if value == "":
+                continue
+            parts.append(f"--{boundary}\r\nContent-Disposition: form-data; name=\"{name}\"\r\n\r\n{value}\r\n"
+                         .encode("utf-8"))
+        parts.append(f"--{boundary}\r\nContent-Disposition: form-data; name=\"{file_field}\"; "
+                     f"filename=\"{filename}\"\r\nContent-Type: {audio_type}\r\n\r\n".encode("utf-8"))
+        parts.append(data + b"\r\n")
+        parts.append(f"--{boundary}--\r\n".encode("utf-8"))
+        body = b"".join(parts)
+        req = urllib.request.Request(route.url, data=body, method="POST",
+                                     headers={"Content-Type": f"multipart/form-data; boundary={boundary}",
+                                              "Content-Length": str(len(body))})
+        with urllib.request.urlopen(req, timeout=float(route.opt("timeout_sec", 4 * 3600))) as resp:
+            return json.loads(resp.read().decode("utf-8"))
 
     form = str(route.opt("form") or "").strip().lower()
     if form != "multipart":
         query = {k: v for k, v in {"language": language, "initial_prompt": initial_prompt,
                                    "hotwords": hotwords or ""}.items()
                  if isinstance(v, (str, int, float)) and v != ""}
+        has_prompt = bool(query.get("initial_prompt") or query.get("hotwords"))
+        if has_prompt and not prompt_in_query:
+            # подсказка в строке запроса — несколько килобайт после urlencode: полями формы под прежними именами
+            sending["prompt_sent"] = "поле формы"
+            return collect(send_form([(str(k), str(v)) for k, v in query.items()]))
+        if has_prompt:
+            sending["prompt_sent"] = "строка запроса"
         url = route.url + (("&" if "?" in route.url else "?") + urllib.parse.urlencode(query) if query else "")
-        req = urllib.request.Request(url, data=data, headers={"Content-Type": "audio/wav"}, method="POST")
+        req = urllib.request.Request(url, data=data, headers={"Content-Type": audio_type}, method="POST")
         with urllib.request.urlopen(req, timeout=float(route.opt("timeout_sec", 4 * 3600))) as resp:
             raw = json.loads(resp.read().decode("utf-8"))
         return collect(raw)
 
-    boundary = "----meetflow-asr-" + uuid.uuid4().hex
-    file_field = str(route.opt("file_field") or "file")
     fields = [("language", language), ("prompt", prompt), ("wait", "true"),
               ("diarization", "false"), ("identify_speakers", "false"), ("word_timestamps", "false")]
     fields += [(str(k), str(v)) for k, v in (route.opt("extra_fields") or {}).items()]
-    parts: list[bytes] = []
-    for name, value in fields:
-        if value == "":
-            continue
-        parts.append(f"--{boundary}\r\nContent-Disposition: form-data; name=\"{name}\"\r\n\r\n{value}\r\n"
-                     .encode("utf-8"))
-    filename = Path(wav_path).name or "audio.wav"
-    parts.append(f"--{boundary}\r\nContent-Disposition: form-data; name=\"{file_field}\"; "
-                 f"filename=\"{filename}\"\r\nContent-Type: audio/wav\r\n\r\n".encode("utf-8"))
-    parts.append(data + b"\r\n")
-    parts.append(f"--{boundary}--\r\n".encode("utf-8"))
-    body = b"".join(parts)
-    req = urllib.request.Request(route.url, data=body, method="POST",
-                                 headers={"Content-Type": f"multipart/form-data; boundary={boundary}",
-                                          "Content-Length": str(len(body))})
-    with urllib.request.urlopen(req, timeout=float(route.opt("timeout_sec", 4 * 3600))) as resp:
-        raw = json.loads(resp.read().decode("utf-8"))
-    return collect(raw)
+    if prompt:
+        sending["prompt_sent"] = "поле формы"
+    return collect(send_form(fields))

@@ -21,6 +21,7 @@ from __future__ import annotations
 
 import json
 import os
+import sys
 import threading
 import time
 import urllib.error
@@ -28,7 +29,7 @@ import urllib.request
 from datetime import datetime, timezone
 from pathlib import Path
 
-from .base import AnswerTruncated, ConnectorError, ConnectorUnavailable, LLMConnector
+from .base import AnswerTruncated, BadAnswer, ConnectorError, ConnectorUnavailable, LLMConnector
 from .shared import llm_cost
 from .shared import model_routes as mr
 from ..core.types import LLMResult
@@ -52,7 +53,8 @@ PRESETS: dict[str, dict] = {
                          "за 1 млн (вход / из кэша / выход), часы пик ×2"},
     "claude": {"kind": "openai", "url": "", "model": "claude-sonnet-5-5", "max_tokens": 32000, "key_source": "value",
                "note": "Claude по ключу — адрес https://api.anthropic.com/v1; модель claude-sonnet-5-5, claude-opus-5-5 "
-                       "или claude-haiku-5-5; рассуждение задаёт сама модель; temperature и top_p не передаются"},
+                       "или claude-haiku-5-5; родной Messages API, усилие рассуждения low "
+                       "(LLM_CLAUDE_EFFORT); temperature и top_p не передаются"},
     "openrouter": {"kind": "openrouter", "model": "", "key_source": "value",
                    "note": "через OpenRouter — любая модель каталога; рассуждение — своим форматом OpenRouter"},
     "qwen-local": {"kind": "ollama", "url": "", "model": "qwen3.8:latest", "max_tokens": 8000,
@@ -298,6 +300,25 @@ class PointLLM(LLMConnector):
         if st["state"] == "stop":
             raise ConnectorUnavailable(llm_cost.текст_остановки(st))
 
+    def _stop(self, purpose: str, attempt: int, text: str, reasoning: str, finish, reason: str, detail: str = "",
+              **extra) -> None:
+        """Строка об отброшенной попытке (`model_routes.stop_line`, общая с ERP и Планёркой) — в журнал вызовов и в
+        лог сервера; без текста встречи (26.10.2026)."""
+        line = mr.stop_line(purpose, attempt, len(text or ""), len(reasoning or ""), finish, reason, detail)
+        print(f"[модель] {self.point}: {line}", file=sys.stderr)
+        if not self.journal_path:
+            return
+        rec = {"ts": time.strftime("%Y-%m-%dT%H:%M:%S"), "purpose": purpose, "route": self.point, "stop": line,
+               "discarded": reason, "finish_reason": finish, "chars_out": len(text or ""),
+               "reasoning_chars": len(reasoning or ""), **extra}
+        try:
+            p = Path(self.journal_path)
+            p.parent.mkdir(parents=True, exist_ok=True)
+            with p.open("a", encoding="utf-8") as f:
+                f.write(json.dumps(rec, ensure_ascii=False) + chr(10))
+        except OSError:
+            pass
+
     def complete(self, system: str, user: str, *, json_mode: bool = True, temperature: float = 0.0,
                  purpose: str = "", deadline: float | None = None) -> LLMResult:
         key = self.route.api_key
@@ -307,15 +328,19 @@ class PointLLM(LLMConnector):
             raise ConnectorError(f"{self.label}: Ollama — только в контуре; внешний адрес разрешается явно (allow_remote)")
         self._limit_check()
         body = self.body(system, user, json_mode, temperature)
-        headers = {"Content-Type": "application/json", "X-Title": "MeetFlow"}
-        if key:
-            headers["Authorization"] = f"Bearer {key}"
+        bad = 0                          # негодных ответов (пустой, зацикливание) на этот вызов (26.10.2026)
+        net = 0                          # попыток связи: сеть, 429/5xx — повтор лечит
         last, t0 = "", time.monotonic()
-        for i in range(self.attempts):
+        while net < self.attempts:
+            # адрес, тело и заголовки — общим `wire_request`: у точки Anthropic родной Messages API с усилием
+            # (`output_config.effort`, по умолчанию low), у прочих — прежний вход (как ERP и Планёрка, 26.10.2026)
+            url, wire, headers = mr.wire_request(self.route, body, key)
+            if not mr.messages_api(self.route):
+                headers["X-Title"] = "MeetFlow"
             left = None if deadline is None else deadline - time.monotonic()
             if left is not None and left <= 0:
                 raise ConnectorError(f"Время прогона вышло до ответа модели ({last or 'запрос не отправлен'}).")
-            req = mr.mark_request(urllib.request.Request(self.route.endpoint, data=json.dumps(body).encode("utf-8"),
+            req = mr.mark_request(urllib.request.Request(url, data=json.dumps(wire).encode("utf-8"),
                                                          headers=headers, method="POST"), self.route)
             try:
                 with urllib.request.urlopen(req, timeout=self.timeout if left is None else min(self.timeout, left)) as r:
@@ -324,7 +349,8 @@ class PointLLM(LLMConnector):
                 detail = mr.scrub(e.read().decode("utf-8", "replace"), extra=(key,))
                 if e.code == 429 or e.code >= 500:
                     last = f"HTTP {e.code}"
-                    time.sleep(min(15 * (i + 1), max(0.0, (left or 30) - 1)) if i + 1 < self.attempts else 0)
+                    net += 1
+                    time.sleep(min(15 * net, max(0.0, (left or 30) - 1)) if net < self.attempts else 0)
                     continue
                 if e.code == 401:
                     raise ConnectorUnavailable(f"{self.label}: {mr.key_rejected_reason(detail, extra=(key,))}") from None
@@ -335,20 +361,54 @@ class PointLLM(LLMConnector):
                 raise ConnectorError(f"{self.label} отказал: HTTP {e.code} — {detail[:300]}") from None
             except (urllib.error.URLError, TimeoutError, ConnectionError, OSError, ValueError) as e:
                 last = mr.scrub(f"{type(e).__name__}: {e}", extra=(key,))[:200]
+                net += 1
                 continue
+            reasoning = ""
             if self.route.kind == "ollama":
                 text = ((data.get("message") or {}).get("content") or "")
                 finish = "length" if data.get("done_reason") == "length" else data.get("done_reason")
                 usage = {"prompt_tokens": data.get("prompt_eval_count"), "completion_tokens": data.get("eval_count")}
+            elif mr.messages_api(self.route):
+                # Messages API: текст — блоки text, причина остановки — словами OpenAI, расход — prompt/completion
+                text = mr.response_text(data)
+                stop = data.get("stop_reason")
+                finish = mr.STOP_REASON_AS_OPENAI.get(stop, stop)
+                usage = mr.normalize_usage(data.get("usage") or {})
+                reasoning = "".join(str(b.get("thinking") or "") for b in (data.get("content") or [])
+                                    if isinstance(b, dict) and b.get("type") == "thinking")
             else:
                 choice = (data.get("choices") or [{}])[0]
-                text = (choice.get("message") or {}).get("content") or ""
+                message = choice.get("message") or {}
+                text = message.get("content") or ""
+                reasoning = str(message.get("reasoning_content") or message.get("reasoning") or "")
                 finish, usage = choice.get("finish_reason"), data.get("usage") or {}
+            attempt = net + bad + 1
+            if finish == "length" and not text.strip():
+                # пустой ответ при остановке по потолку — сбой, а не повод повторить: тот же запрос с тем же потолком
+                # дал бы тот же обрыв (Claude 5.x: скрытое рассуждение съело потолок; как ERP и Планёрка, 26.10.2026)
+                done = int(usage.get("completion_tokens") or 0)
+                why = (f"обрыв по потолку — ответ пуст, max_tokens {self.max_answer_tokens}, completion_tokens {done}: "
+                       "рассуждение заняло весь потолок ответа")
+                self._stop(purpose, attempt, text, reasoning, finish, "обрыв по потолку: ответ пуст", "",
+                           completion_tokens=done, empty_at_ceiling=True, model=data.get("model") or self.model)
+                raise BadAnswer(f"{self.label}: {why}")
             if finish == "length":
                 raise AnswerTruncated(f"Ответ модели оборван потолком {self.max_answer_tokens} токенов — повтор дал бы "
                                       "тот же обрыв.")
-            if not text.strip():
-                last = "пустой ответ"
+            loop = "" if not text.strip() else mr.degenerate_loop(text)
+            if not text.strip() or loop:
+                # негодный ответ — не больше BAD_ANSWERS_PER_CALL обращений на вызов, на запасную точку не уходит
+                bad += 1
+                why = "зацикливание" if loop else "пустой ответ"
+                self._stop(purpose, attempt, text, reasoning, finish, why, loop,
+                           completion_tokens=int(usage.get("completion_tokens") or 0),
+                           model=data.get("model") or self.model)
+                last = why
+                if bad >= mr.BAD_ANSWERS_PER_CALL:
+                    raise BadAnswer(f"{self.label}: негодный ответ модели {bad} раза подряд ({why}) — "
+                                    f"больше {mr.BAD_ANSWERS_PER_CALL} обращений на вызов не делается")
+                if loop:
+                    body = self.body(system, user + mr.LOOP_REMINDER, json_mode, temperature)
                 continue
             cost = llm_cost.стоимость_вызова(usage, tariff_of(self.ep, data.get("model") or self.model),
                                              datetime.now(timezone.utc))

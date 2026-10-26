@@ -13,8 +13,23 @@
 
 Файл маршрутов — `models.json` (путь — переменная MODEL_ROUTES_PATH, иначе `data/models.json` продукта). Он
 перечитывается при изменении — переключение без перезапуска. Ключи в файле не хранятся, только ИМЯ переменной
-окружения с ключом. Файла нет — маршруты собираются из прежних переменных (LLM_PROVIDER, QWEN_MODEL,
-QWEN_VERIFY_MODEL, LLM_BASE_URL, LLM_VERIFY_BASE_URL…), то есть поведение без файла прежнее.
+окружения с ключом (или ключ значением, см. ниже).
+
+Нет тихой подстановки модели (решение владельца 16.10.26, Д2; правило 13.10.26 «у роли нет модели по умолчанию»). Файла
+нет, он не читается или в нём у роли генерации или проверки нет точки — роль «не настроена»: `chain` поднимает
+`RoleNotConfigured` («модель не настроена — назначьте в «Моделях»»), продукт не делает ни одного вызова, сборка встаёт
+карточкой «Ожидает ввода», пульт «Модели» показывает причину (`not_configured`). Переменные окружения (LLM_PROVIDER,
+QWEN_MODEL, QWEN_VERIFY_MODEL, LLM_BASE_URL, OPENROUTER_API_KEY…) модель роли больше не задают: до 16.10.26 без файла
+маршрут собирался из них, и сборка молча шла на модель, которую в «Моделях» никто не назначал. Исключение владельца
+13.10.26 остаётся: у проверки без своей точки — точки генерации, назначенные в «Моделях»; пульт показывает это явно
+(`inherited`). Распознавание речи (роль `asr`) этим не затронуто: без своей точки — как раньше, WEBAPP_WHISPER_MODEL
+на этой машине. Файла нет — пульт начинает его с пустого: первое подключение и назначение роли создают models.json.
+
+Роль «Договорённости (отдельный вызов)» — `agreements` (решение владелицы 18.10.2026, «надо доработать выбор модели»):
+назначается в пульте «Модели», как остальные; без своей точки идёт на точки генерации («как у черновика», `inherited`),
+других ролей не подменяет. Последнюю точку из неё можно убрать — роль снова «как у черновика». Роль необязательная
+(`OPTIONAL_ROLES`): пульт показывает её, если продукт её включил (`show_role` — Планёрка, с 19.10.2026 и ERP —
+`legacy_bridge`) или она уже есть в файле. Пробный запрос перед сборкой опрашивает её точку, если роль назначена.
 
 Формат:
     {
@@ -62,6 +77,15 @@ openai или openrouter поле `key_source`: `env` (по умолчанию �
 прокси (`proxy`: system по умолчанию или none), локальные — мимо прокси. Роль `asr` внешнюю точку не принимает
 ни при какой записи и ни при загрузке файла: голос не покидает периметр.
 
+Прокси точки адресом (решение владельца 16.10.26: Claude с локальной машины доступен только через прокси компании,
+а прокси для всей Windows или в .env.local не включаем). Третье значение поля `proxy` — сам адрес прокси,
+`http://хост:порт` или `https://хост:порт`, например `http://172.17.17.97:3128`. Через него идут только запросы этой
+точки: рабочий вызов, пробный запрос перед сборкой, «Проверить связь»; остальные точки и весь прочий процесс — как
+раньше. Список обхода системных настроек к адресу точки не применяется. Адрес с логином и паролем, с путём или без
+порта — отказ при загрузке и записи файла: «прокси с паролем не поддерживается». Точка во внутренней сети ходит
+напрямую, даже если адрес прокси у неё задан: адрес не ломает запись, но к своей машине не применяется. У точек
+распознавания прокси-адреса нет. В форме «Моделей» — вариант «адрес» и строка `proxy_url`, файл хранит сам адрес.
+
 Рассуждение модели у внешней точки (решение владельца 14.10.26): поле `reasoning` у точки рода openai —
 `auto` (умолчание, поле не отправляется) или `none` — выключить рассуждение, чтобы ход мысли не съедал потолок
 ответа (`reasoning_effort: "none"`, проверено на DeepSeek). Моделям с обязательным рассуждением (`muse`) опция
@@ -86,12 +110,44 @@ platform.claude.com/docs/en/api/openai-sdk, проверено 15.10.2026). У C
 него свой формат. `response_format` адрес тоже не читает, кэш подсказок через него не работает (цена из кэша = цене
 входа, см. справочник в `llm_cost`).
 
+С 26.10.2026 точка с адресом api.anthropic.com ходит в родной Messages API (`/v1/messages`), а не в OpenAI-совместимый
+вход (отчёт ЛМ «Claude/Sonnet: пробы прошли, генерация пустая»: черновик 12.10 на claude-sonnet-5-5 — 134 422 знака
+входа, 0 знаков ответа, completion_tokens 32 000, finish_reason length, 0,446 $; скрытое рассуждение при усилии `high` по
+умолчанию съело весь потолок). Совместимый вход усилием не управляется, а родной принимает `output_config.effort`
+(skill claude-api, разделы Thinking & Effort и Migrating to Claude Sonnet 5.5 → Choosing an effort level: `low` для
+генерации текста и извлечения; там же — не опираться на OpenAI-совместимые прослойки). Тело продукта остаётся прежним,
+перевод — в одном месте, `wire_request`: системная подсказка — полем `system`, ключ — в `x-api-key`, заголовок
+`anthropic-version`, усилие — `CLAUDE_EFFORT_DEFAULT` (`low`) или переменная `LLM_CLAUDE_EFFORT`; temperature, top_p,
+stream_options, reasoning_effort, response_format не уходят; `thinking` не задаётся (адаптивное по умолчанию, `disabled`
+у Sonnet 5.5 и Opus 5.5 — 400). Поток Messages API понимает `stream_piece`, расход в словах OpenAI — `normalize_usage`.
+
+Переход на запасную модель (задание владелицы 20.10.2026, «закончились лимиты на дипсик — система бы переключилась?»).
+Запасная — вторая точка роли («Добавить запасной»), назначает администратор, по умолчанию её нет: правило 13.10.26 не
+нарушается, молчаливой подстановки нет. Переход — только по недоступности основной (402, 401, 403, 404, 429 и 5xx после
+повторов, таймаут, отказ соединения); не-формат и 400 — не переход. О переходе продукт говорит строкой «Основная модель
+недоступна (причина), работа идёт на запасной «…»» — один раз за срыв (`fallback_notice`), в журнале вызовов строка
+ответа запасной несёт `role` и `fallback_from` (`fallback_of`). Через охлаждение (`cooldown_sec`) вызовы снова идут на
+основную; ответила — `mark_up`, следующий срыв снова даст строку.
+
+Роль «Досмотр реплик к системе» — `guard` (решение владелицы 20.10.2026, «да»): второй слой защиты от реплик,
+обращённых к программе. Необязательная, генерацию не наследует: без своей точки «не настроена», и работают только
+правила. Модель видит только предложения, которые правила сочли подозрительными, и отвечает ДА/НЕТ (потолок ответа —
+`GUARD_MAX_TOKENS_CEILING`).
+
 Пробный запрос перед сборкой (решение владельца 14.10.26): перед сборкой Протокола и Плана первой доступной точке
 роли уходит настоящее начало первого запроса сборки — о неготовой модели известно сразу, а не после 25–36 минут
 повторов; готова — по первому признаку жизни. Настройки — раздел "probe" в файле (рядом с cooldown_sec) или
 переменные MODEL_PROBE*; first_sign_sec не задан — берётся порог молчания сборки:
     "probe": {"enabled": true, "first_sign_sec": 600, "fresh_sec": 600, "max_tokens": 64}
 Подробно — у `probe_settings` и `probe_role` ниже.
+
+Вырожденный ответ (сбой пересборки 14.10.26, отчёт локальной машины): «deepseek-flash» на проверке черновика отдал
+278 077 знаков и упёрся в потолок точки (96 000 токенов) — нормальный ответ любого шага в десятки раз короче, и потолок
+точки один на все шаги. Поток ответа проверяется на зацикливание (`degenerate_loop`): один и тот же абзац или блок
+абзацев подряд не меньше LOOP_MIN_REPEATS раз и на LOOP_MIN_CHARS знаков (отличающиеся только числами — «№ 12», «№ 13» —
+не меньше LOOP_MIN_REPEATS_DIGITS раз). Найдено — чтение обрывается (платить за остаток не за что), одна повторная попытка с `LOOP_REMINDER`, снова
+зациклилось — шаг останавливается карточкой «модель ответила не в формате», без новых платных попыток. Оба продукта
+зовут одну функцию.
 
 Переключение: поменять порядок в `roles` (первая — основная) или командой
     python model_routes.py show [--path data/models.json] — роли, точки, состояние предохранителей
@@ -109,6 +165,7 @@ import threading
 import time
 import urllib.error
 import urllib.parse
+import zlib
 import uuid
 import urllib.request
 from dataclasses import dataclass, field
@@ -123,8 +180,19 @@ OPENROUTER_URL = "https://openrouter.ai/api/v1/chat/completions"
 KINDS = ("openrouter", "openai", "ollama")
 ASR_KINDS = ("faster-whisper", "python", "asr-service")   # распознавание — на этой машине или во внутренней сети
 CODE_ASR_KINDS = ("python", "asr-service")                 # распознаёт чужой движок: функция или сервис
-ROLES = ("generate", "verify", "asr")
-ROLE_TITLES = {"asr": "Распознавание речи", "generate": "Генерация черновика", "verify": "Проверка черновика"}
+ROLES = ("generate", "verify", "asr", "agreements", "guard")
+ROLE_TITLES = {"asr": "Распознавание речи", "generate": "Генерация черновика", "verify": "Проверка черновика",
+               "agreements": "Договорённости (отдельный вызов)", "guard": "Досмотр реплик к системе"}
+# Роли, которые без своей точки идут на точки генерации: проверка (исключение владельца 13.10.26) и договорённости
+# (решение владелицы 18.10.2026: отдельный вызов договорённостей, своя модель назначается в «Моделях», не назначена —
+# «как у черновика»). Других ролей это не касается: генерация без точки — «не настроена», распознавание — по переменной.
+INHERIT_GENERATE = ("verify", "agreements")
+# Роли сверх трёх основных показываются в пульте, только если продукт их включил (`show_role`) или они уже есть в файле:
+# файл одинаков до байта в Планёрке и ERP, а договорённости пока есть только в Планёрке (18.10.2026).
+# «Досмотр» (guard, решение владелицы 20.10.2026) — тоже необязательная, но НЕ наследует генерацию: без своей точки она
+# «не настроена», и реплики к системе разбирают только правила (`repliki_k_sisteme`), как до 20.10.
+OPTIONAL_ROLES = ("agreements", "guard")
+_shown_roles: set[str] = set()
 _BASE_KEYS = ("kind", "model", "url", "key_env")
 DEFAULT_COOLDOWN_SEC = 300
 HISTORY_KEEP = 30
@@ -132,6 +200,9 @@ _ENV_NAME = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
 KEYS_FILE = "model_keys.local.json"        # ключи значением — рядом с models.json, в git и выгрузки не идут
 KEY_SOURCES = ("env", "value")              # имя переменной окружения или само значение (14.10.26)
 PROXY_MODES = ("system", "none")            # внешняя точка: через системный прокси (по умолчанию) или напрямую
+PROXY_ADDRESS = "address"                   # третий вариант формы (16.10.26): в файле вместо него — сам адрес прокси
+PROXY_CHOICES = PROXY_MODES + (PROXY_ADDRESS,)
+PROXY_HINT = "http://172.17.17.97:3128"
 REASONING_MODES = ("auto", "low", "high", "none")   # как у модели (умолчание), low, high (15.10.26), выключено (14.10.26)
 REASONING_EFFORTS = ("low", "high")
 REASONING_MANDATORY = ("muse",)             # у этих рассуждение обязательное — опцию им не передаём (ответят 400)
@@ -177,8 +248,11 @@ HIDDEN = "[ключ скрыт]"
 _KEY_FIELDS = (
     {"key": "key_source", "label": "Ключ", "choices": list(KEY_SOURCES),
      "choice_titles": {"env": "имя переменной окружения", "value": "значение"}},
-    {"key": "proxy", "label": "Прокси — для внешней точки", "choices": list(PROXY_MODES),
-     "choice_titles": {"system": "системный", "none": "без прокси"}},
+    {"key": "proxy", "label": "Прокси — для внешней точки", "choices": list(PROXY_CHOICES),
+     "choice_titles": {"system": "системный", "none": "без прокси", PROXY_ADDRESS: "адрес"},
+     # вариант «адрес» (16.10.26): строка ввода адреса — поле proxy_url формы, в файл идёт сам адрес в proxy
+     "address_key": "proxy_url", "address_hint": PROXY_HINT,
+     "address_help": f"например {PROXY_HINT} — прокси компании; через него пойдут только вызовы этой точки"},
 )
 # Подсказки адреса внешнего OpenAI-совместимого поставщика; адрес — без /v1, как у своего сервера.
 EXTERNAL_URL_HINTS = [
@@ -189,6 +263,17 @@ EXTERNAL_URL_HINTS = [
     {"title": "Z.ai (GLM), международный", "url": "https://api.z.ai/api/paas/v4"},
     {"title": "Anthropic (Claude)", "url": "https://api.anthropic.com"},
 ]
+
+# Формат звука, который точка `asr-service` отправляет сервису (26.10.2026): расширение файла, тип, кодек ffmpeg.
+# wav — по умолчанию, как было; m4a и ogg — сжатие перед отправкой. Повод — отчёт локальной машины 26.10.2026: «Транс»
+# закрывал соединение на wav 16 кГц с подсказкой и принимал тот же отрезок в m4a с той же подсказкой.
+АУДИО_ФОРМАТЫ = {
+    "wav": (".wav", "audio/wav", None),
+    "m4a": (".m4a", "audio/mp4", ["-c:a", "aac", "-b:a", "64k"]),
+    "ogg": (".ogg", "audio/ogg", ["-c:a", "libopus", "-b:a", "32k"]),
+}
+# Поля подсказки распознаванию: длинный текст, в строку запроса по умолчанию не идёт (26.10.2026)
+ПОДСКАЗКА_ПОЛЯ = ("initial_prompt", "hotwords")
 
 # Что оператор заполняет у точки каждого рода. По этому описанию панель строит форму «Подключение» — новый род
 # появляется в форме сам, без правки экрана.
@@ -220,7 +305,14 @@ KIND_FIELDS = {
                     "fields": [{"key": "url", "label": "Адрес сервиса (только внутренняя сеть)", "hint": "http://192.168.100.60:9000/transcribe", "required": True},
                                {"key": "form", "label": "Форма запроса", "choices": ["raw", "multipart"],
                                 "default": "raw",
-                                "hint": "raw — wav телом, параметры в строке (прежний протокол); multipart — поля формы и file (audioCintezPro /transcribe)"}]},
+                                "hint": "raw — wav телом, параметры в строке (прежний протокол); multipart — поля формы и file (audioCintezPro /transcribe)"},
+                               # 26.10.2026 (отчёт локальной машины: «Транс» рвёт wav 16 кГц + подсказка, m4a + подсказка принимает)
+                               {"key": "audio", "label": "Звук для сервиса", "choices": list(АУДИО_ФОРМАТЫ),
+                                "default": "wav",
+                                "hint": "wav — как раньше; m4a или ogg — сжать ffmpeg перед отправкой (в 5–10 раз меньше)"},
+                               {"key": "prompt_in", "label": "Подсказка распознаванию при форме raw", "choices": ["form", "query"],
+                                "default": "form",
+                                "hint": "form — подсказка и запись полями формы (в строку запроса подсказка не идёт); query — подсказка в строке запроса, как до 26.10.2026"}]},
 }
 
 
@@ -256,6 +348,8 @@ class Route:
             return OPENROUTER_URL
         if self.kind == "ollama":
             return self.url.rstrip("/") + "/api/chat"
+        if messages_api(self):
+            return api_base(self.url) + "/messages"   # родной Messages API у точки Anthropic (26.10.2026)
         return api_base(self.url) + "/chat/completions"
 
     @property
@@ -276,14 +370,14 @@ class Route:
 
     @property
     def uses_proxy(self) -> bool:
-        """Внешняя точка ходит через прокси (системный или адресом точки); локальная — мимо прокси."""
+        """Внешняя точка ходит через системный прокси или прокси точки (если не выключен у точки); локальная — мимо."""
         return self.external and self.opt("proxy", "system") != "none"
 
     @property
     def proxy_address(self) -> str:
-        """Адрес прокси точки, если в «Моделях» выбран вариант «адрес» (как в Планёрке, 16.10.26)."""
+        """Адрес прокси этой точки (16.10.26); пусто — системный, без прокси или точка во внутренней сети."""
         value = str(self.opt("proxy", "") or "")
-        return value if value.startswith(("http://", "https://")) else ""
+        return value if self.external and value.startswith(("http://", "https://")) else ""
 
     @property
     def label(self) -> str:
@@ -305,6 +399,7 @@ class _State:
     down_until: dict = field(default_factory=dict)   # имя точки -> время, до которого она выведена
     last_error: dict = field(default_factory=dict)   # имя точки -> текст последней ошибки
     probe_ok: dict = field(default_factory=dict)     # (точка, адрес, модель) -> время удачного пробного запроса
+    noticed: set = field(default_factory=set)        # (роль, основная) — о переходе на запасную уже сказано (20.10.2026)
 
 
 _state = _State()
@@ -366,10 +461,31 @@ def is_external(ep: dict) -> bool:
 # (всё остальное в процессе) идут как раньше — обычным ProxyHandler по системным настройкам.
 
 class _ProxyByRoute(urllib.request.ProxyHandler):
+    # Прокси точки адресом (16.10.26): запрос, помеченный `_model_routes_proxy`, идёт на адрес точки, а не на
+    # системный прокси. Системного прокси может не быть вовсе — тогда у ProxyHandler нет http_open/https_open, и
+    # ставим их сами: непомеченные запросы проходят мимо, как и раньше.
+    def __init__(self, proxies=None):
+        super().__init__(proxies)
+        for вид in ("http", "https"):
+            if вид not in self.proxies:
+                setattr(self, f"{вид}_open", lambda r, вид=вид: self._point_open(r, вид))
+
     def proxy_open(self, req, proxy, type):  # noqa: A002 — подпись urllib
+        if getattr(req, "_model_routes_proxy", None):
+            return self._point_open(req, type)   # у точки свой прокси — системный и его список обхода не нужны
         if getattr(req, "_model_routes_direct", False):
             return None                       # мимо прокси: следующий обработчик откроет соединение напрямую
         return super().proxy_open(req, proxy, type)
+
+    def _point_open(self, req, type):  # noqa: A002
+        адрес = getattr(req, "_model_routes_proxy", None)
+        if not адрес or req.has_proxy() or getattr(req, "_tunnel_host", None):
+            return None                       # не помечен или прокси уже назначен — дальше обычным путём
+        часть = urllib.parse.urlparse(адрес)
+        req.set_proxy(часть.netloc, часть.scheme)   # https-точка — туннелем CONNECT через прокси, как у urllib
+        if type == часть.scheme or type == "https":
+            return None
+        return self.parent.open(req, timeout=req.timeout)
 
 
 def _install_opener() -> None:
@@ -383,18 +499,29 @@ _install_opener()
 
 
 def mark_request(req: urllib.request.Request, route: "Route") -> urllib.request.Request:
-    """Пометить запрос к точке: локальная или внешняя без прокси — напрямую, внешняя — через системный прокси или
-    адрес прокси точки (как в Планёрке, 16.10.26)."""
-    addr = route.proxy_address
-    if addr:
-        from urllib.parse import urlsplit
-        u = urlsplit(addr)
-        req.set_proxy(u.netloc, u.scheme)      # https-точка — туннелем CONNECT через этот прокси
-        req._model_routes_direct = False
-        req._model_routes_proxy = addr
-        return req
+    """Пометить запрос к точке: локальная или внешняя без прокси — напрямую, внешняя — через системный прокси,
+    внешняя с адресом прокси (16.10.26) — через этот адрес."""
     req._model_routes_direct = not route.uses_proxy
+    req._model_routes_proxy = route.proxy_address or None
     return req
+
+
+def proxy_problem(value) -> str:
+    """Что не так с адресом прокси точки; пусто — годен. Только http(s)://хост:порт, без логина и пароля."""
+    адрес = str(value or "").strip()
+    if not адрес.startswith(("http://", "https://")):
+        return f"адрес прокси — http://хост:порт или https://хост:порт, например {PROXY_HINT}"
+    часть = urllib.parse.urlparse(адрес)
+    if "@" in часть.netloc:
+        return f"прокси с паролем не поддерживается — укажите адрес без логина и пароля, например {PROXY_HINT}"
+    try:
+        порт = часть.port
+    except ValueError:
+        порт = None
+    if not часть.hostname or not порт or часть.path not in ("", "/") or часть.query or часть.fragment \
+            or часть.params:
+        return f"адрес прокси — только хост и порт, без пути: http://хост:порт, например {PROXY_HINT}"
+    return ""
 
 
 def reasoning_effort(route: "Route") -> str | None:
@@ -476,6 +603,103 @@ def apply_model_limits(body: dict, route: "Route", model: str | None = None) -> 
         for поле in SAMPLING_FIELDS:
             body.pop(поле, None)
     return body
+
+
+# --- Родной Messages API у точки Anthropic (26.10.2026) ----------------------------------------------------------------
+#
+# Черновик 12.10 на claude-sonnet-5-5 через OpenAI-совместимый вход: 0 знаков ответа при completion_tokens 32 000 —
+# рассуждение на усилии по умолчанию (`high` у Sonnet 5.5) съело весь потолок. Усилие задаётся только родным входом:
+# `output_config.effort` (skill claude-api, Thinking & Effort; Migrating to Claude Sonnet 5.5 → Choosing an effort
+# level — `low` для генерации текста, извлечения и классификации). Рассуждение и при `low` тратит тот же потолок, но на
+# простом шаге модель его обычно пропускает, на большом — держит коротким.
+ANTHROPIC_VERSION = "2023-06-01"
+CLAUDE_EFFORT_ENV = "LLM_CLAUDE_EFFORT"
+CLAUDE_EFFORT_DEFAULT = "low"
+CLAUDE_EFFORTS = ("low", "medium", "high", "xhigh", "max")
+# Модели, у которых усилия нет (skill claude-api: на Sonnet 4.5 и Haiku 4.5 поле даёт ошибку) — поле им не шлём.
+CLAUDE_БЕЗ_УСИЛИЯ = ("claude-3", "claude-haiku-4-5", "claude-sonnet-4-5", "claude-sonnet-4-0", "claude-sonnet-4-2",
+                     "claude-opus-4-0", "claude-opus-4-1", "claude-opus-4-2")
+СИСТЕМА_РАЗДЕЛИТЕЛЬ = chr(10) * 2
+
+
+def messages_api(route) -> bool:
+    """Точка ходит в родной Messages API Anthropic: род openai и адрес api.anthropic.com (26.10.2026)."""
+    return getattr(route, "kind", None) == "openai" and anthropic_url(getattr(route, "url", ""))
+
+
+def claude_effort() -> str:
+    """Усилие рассуждения Claude: `LLM_CLAUDE_EFFORT`, если значение из `CLAUDE_EFFORTS`, иначе `CLAUDE_EFFORT_DEFAULT`."""
+    значение = str(os.environ.get(CLAUDE_EFFORT_ENV) or "").strip().lower()
+    return значение if значение in CLAUDE_EFFORTS else CLAUDE_EFFORT_DEFAULT
+
+
+def to_messages_api(body: dict) -> dict:
+    """Тело OpenAI-совместимого вызова продукта → тело Messages API. Системные реплики — полем `system`, остальные
+    реплики как есть; потолок, модель и поток — те же; усилие — `claude_effort()`. Поля совместимого входа (temperature,
+    top_p, stream_options, reasoning_effort, response_format, usage) не переносятся. `thinking` не задаётся: у Sonnet 5.5 и
+    Opus 5.5 рассуждение адаптивное по умолчанию, а `disabled` — 400."""
+    система, реплики = [], []
+    for реплика in body.get("messages") or []:
+        if реплика.get("role") == "system":
+            система.append(str(реплика.get("content") or ""))
+        else:
+            реплики.append({"role": реплика.get("role"), "content": реплика.get("content")})
+    итог = {"model": body.get("model"), "max_tokens": int(body.get("max_tokens") or 16000), "messages": реплики}
+    if система:
+        итог["system"] = СИСТЕМА_РАЗДЕЛИТЕЛЬ.join(система)
+    if body.get("stream"):
+        итог["stream"] = True
+    модель = str(body.get("model") or "").strip().lower()
+    if not модель.startswith(CLAUDE_БЕЗ_УСИЛИЯ):
+        итог["output_config"] = {"effort": claude_effort()}
+    return итог
+
+
+def wire_request(route, body: dict, api_key: str | None = "") -> tuple[str, dict, dict]:
+    """(адрес, тело, заголовки) запроса к точке. Одно место для рабочего вызова обоих продуктов, пробы и «Проверить
+    связь»: у точки Anthropic — родной Messages API (`x-api-key`, `anthropic-version`, `to_messages_api`), у прочих —
+    тело как есть и `Authorization: Bearer`. Ключ идёт только в заголовок."""
+    headers = {"Content-Type": "application/json"}
+    if messages_api(route):
+        if api_key:
+            headers["x-api-key"] = api_key
+        headers["anthropic-version"] = ANTHROPIC_VERSION
+        return route.endpoint, to_messages_api(body), headers
+    if api_key:
+        headers["Authorization"] = f"Bearer {api_key}"
+    return route.endpoint, body, headers
+
+
+def _целое_токенов(значение) -> int:
+    return значение if isinstance(значение, int) and not isinstance(значение, bool) else 0
+
+
+def normalize_usage(usage) -> dict:
+    """Расход Messages API (`input_tokens`, `output_tokens`, `cache_read_input_tokens`, `cache_creation_input_tokens`)
+    в словах OpenAI, которые читают журнал и `llm_cost`: prompt_tokens — весь вход вместе с кэшем, completion_tokens —
+    весь выход вместе со скрытым рассуждением. Расход OpenAI-совместимого входа возвращается как есть."""
+    if not isinstance(usage, dict):
+        return {}
+    if "prompt_tokens" in usage or not ({"input_tokens", "output_tokens"} & set(usage)):
+        return usage
+    из_кэша = _целое_токенов(usage.get("cache_read_input_tokens"))
+    вход = _целое_токенов(usage.get("input_tokens")) + из_кэша + _целое_токенов(usage.get("cache_creation_input_tokens"))
+    выход = _целое_токенов(usage.get("output_tokens"))
+    return {**usage, "prompt_tokens": вход, "completion_tokens": выход, "total_tokens": вход + выход,
+            "prompt_tokens_details": {"cached_tokens": из_кэша}}
+
+
+def response_text(raw) -> str:
+    """Текст ответа без потока: Messages API (`content` — список блоков, текст — в блоках text), OpenAI-совместимый
+    (`choices[0].message.content`) и родной Ollama (`message.content`)."""
+    if not isinstance(raw, dict):
+        return ""
+    if isinstance(raw.get("content"), list):
+        return "".join(str(б.get("text") or "") for б in raw["content"]
+                       if isinstance(б, dict) and б.get("type") == "text")
+    if isinstance(raw.get("message"), dict) and not raw.get("choices"):
+        return str(raw["message"].get("content") or "")
+    return str((((raw.get("choices") or [{}])[0] or {}).get("message") or {}).get("content") or "")
 
 
 def forbidden_reason(detail, extra=()) -> str:
@@ -661,9 +885,14 @@ def _check_point(name: str, ep: dict) -> None:
     if key_source == "value" and key_env:
         raise RoutesError(f"точка «{name}»: ключ задан двумя способами — оставьте имя переменной или значение")
     proxy = ep.get("proxy", "system")
-    if proxy not in PROXY_MODES and not (isinstance(proxy, str) and proxy.startswith(("http://", "https://"))):
-        raise RoutesError(f"точка «{name}»: proxy — system (системный прокси), none (без прокси) или адрес "
-                          f"http://… / https://…")
+    if proxy not in PROXY_MODES:
+        if not isinstance(proxy, str) or not proxy.startswith(("http://", "https://")):
+            raise RoutesError(f"точка «{name}»: proxy — system (системный прокси), none (без прокси) или адрес "
+                              f"прокси http://хост:порт")
+        if proxy_problem(proxy):
+            raise RoutesError(f"точка «{name}»: {proxy_problem(proxy)}")
+        if kind in ASR_KINDS:
+            raise RoutesError(f"точка «{name}»: у распознавания прокси нет — голос не покидает периметр")
     reasoning = ep.get("reasoning", "auto")
     if reasoning not in REASONING_MODES:
         raise RoutesError(f"точка «{name}»: reasoning — auto (как задаёт модель), low, high или none (выключено), "
@@ -706,13 +935,30 @@ def _check_point(name: str, ep: dict) -> None:
             raise RoutesError(f"точка «{name}»: {exc}") from None
 
 
+def show_role(role: str) -> None:
+    """Продукт включает в пульте «Модели» необязательную роль (`OPTIONAL_ROLES`): Планёрка — договорённости (18.10.2026)."""
+    if role in OPTIONAL_ROLES:
+        _shown_roles.add(role)
+
+
+def own_chain(role: str) -> bool:
+    """Есть ли у роли своя цепочка в файле маршрутов (а не унаследованная от генерации); файл не читается — нет."""
+    try:
+        data = _load()
+    except (RoutesError, ValueError, OSError):
+        return False
+    return bool(data and (data.get("roles") or {}).get(role))
+
+
 def _validate(data: dict) -> dict:
     eps = data.get("endpoints")
     roles = data.get("roles")
-    if not isinstance(eps, dict) or not eps:
-        raise RoutesError("в models.json нет раздела endpoints или он пуст")
-    if not isinstance(roles, dict) or "generate" not in roles:
-        raise RoutesError("в models.json нет раздела roles с ролью generate")
+    # С 16.10.26 (решение владельца, Д2) пустой справочник и роль без точки — не ошибка файла, а «роль не настроена»:
+    # пульт начинает файл с пустого, а сборка без назначенной модели не идёт (`chain` → RoleNotConfigured).
+    if not isinstance(eps, dict):
+        raise RoutesError("в models.json нет раздела endpoints")
+    if not isinstance(roles, dict):
+        raise RoutesError("в models.json нет раздела roles")
     for name, ep in eps.items():
         _check_point(name, ep)
     if "probe" in data:
@@ -755,37 +1001,175 @@ def _load() -> dict | None:
         return _state.data
 
 
-def _from_env(role: str, env: dict | None = None) -> list[Route]:
-    """Прежнее поведение без файла: один маршрут на роль, собранный из настроек продукта.
+NOT_CONFIGURED = "модель не настроена — назначьте в «Моделях»"
 
-    `env` — текущие значения из модуля продукта (LLM_PROVIDER, OLLAMA_URL, LLM_BASE_URL, LLM_VERIFY_BASE_URL):
-    продукт читает их при импорте, а тесты подменяют их в модуле, поэтому брать надо оттуда, а не из os.environ."""
-    env = env or {}
+
+class RoleNotConfigured(RoutesError):
+    """У роли генерации или проверки нет назначенной модели (решение владельца 16.10.26, Д2): ни одного вызова, причина —
+    человеку. Наследует RoutesError: прежние перехваты ошибок маршрутов её видят."""
+
+    def __init__(self, role: str, reason: str):
+        self.role, self.reason = role, reason
+        super().__init__(f"Роль «{ROLE_TITLES.get(role, role)}»: {NOT_CONFIGURED} ({reason}).")
+
+
+def _from_env(role: str, env: dict | None = None) -> list[Route]:
+    """Распознавание речи без своей точки в файле — как раньше, по WEBAPP_WHISPER_MODEL на этой машине.
+
+    До 16.10.26 здесь же из переменных (LLM_PROVIDER, LLM_BASE_URL, QWEN_MODEL…) собирались роли генерации и проверки.
+    Решение владельца 16.10.26 (Д2): переменные модель роли не задают — роль «не настроена» (`RoleNotConfigured`)."""
     if role == "asr":
         return [Route("env-asr", "faster-whisper", None, from_env=True)]
-    get = lambda k, d: (env.get(k) if env.get(k) is not None else os.environ.get(k, d))  # noqa: E731
-    provider = (get("LLM_PROVIDER", _state.default_provider) or _state.default_provider).strip()
-    base = (get("LLM_BASE_URL", "http://localhost:1234") or "").rstrip("/")
-    if provider == "ollama":
-        route = Route("env", "ollama", None, get("OLLAMA_URL", "http://localhost:11434"), from_env=True)
-    elif provider == "openrouter":
-        route = Route("env", "openrouter", None, key_env="OPENROUTER_API_KEY", from_env=True)
-    else:
-        route = Route("env", "openai", None, base, key_env="LLM_API_KEY", from_env=True)
-    verify_url = (get("LLM_VERIFY_BASE_URL", "") or "").rstrip("/")
-    if role == "verify" and verify_url and provider != "ollama":
-        route = Route("env-verify", "openai", None, verify_url, key_env="LLM_VERIFY_API_KEY", from_env=True)
-    return [route]
+    raise RoleNotConfigured(role, "в «Моделях» роли не назначена модель")
+
+
+def not_configured(role: str) -> str:
+    """Почему у роли нет модели (для пульта, мониторинга и карточки) или пустая строка — роль настроена. Распознавание
+    всегда настроено: без своей точки — WEBAPP_WHISPER_MODEL."""
+    try:
+        chain(role)
+    except RoleNotConfigured as exc:
+        return exc.reason
+    except (RoutesError, ValueError, OSError):
+        return ""            # распознавание с неверным файлом — его ошибка покажется своим путём, как раньше
+    return ""
+
+
+def primary(role: str, env: dict | None = None) -> "Route | None":
+    """Основная точка роли или None — роль не настроена (мониторинг, строки панели: показать причину, а не упасть)."""
+    try:
+        return chain(role, env)[0]
+    except RoleNotConfigured:
+        return None
+
+
+def names(role: str) -> list[str]:
+    """Имена точек цепочки роли или [] — роль не настроена (журнал смены модели в пульте, 16.10.26)."""
+    try:
+        return [r.name for r in chain(role)]
+    except RoleNotConfigured:
+        return []
+
+
+LOOP_MIN_REPEATS = 8          # один и тот же абзац или блок — подряд не меньше стольких раз
+LOOP_MIN_REPEATS_DIGITS = 20  # отличаются только числами («№ 12», «№ 13») — подряд не меньше стольких раз
+LOOP_MIN_CHARS = 2000         # и не меньше стольких знаков повтора (короткие одинаковые строки таблицы — не цикл)
+LOOP_CHECK_EVERY = 4000       # поток проверяется каждые столько новых знаков ответа
+LOOP_MAX_BLOCK = 12           # самый длинный повторяющийся блок, абзацев
+LOOP_TAIL = 40000             # проверяется хвост ответа такой длины
+# Третий способ (заход 5 хаос-тестов, 20.10.2026): почти одинаковые куски — находки проверки с разными цитатами и одним
+# пояснением, без переносов и точек между ними. Первые два способа их не ловят (куски не совпадают дословно), и проверка
+# на стенде писала до потолка. Хвост от LOOP_ZIP_MIN_CHARS знаков, который сжимается лучше LOOP_ZIP_RATIO, — цикл.
+# Замер 20.10.2026 на 2 695 окнах по 20–40 тыс. знаков документов, протоколов, черновиков и журналов трёх рабочих папок:
+# самое плотное окно настоящего текста — 0,051 (сырой вывод атаки вехи 3), черновики и сверки — от 0,083; ниже порога
+# только нарочно повторяющиеся загрузки хаос-тестов (0,002). Находки проверки с одним пояснением и случайными цитатами
+# (400 штук) — 0,039.
+LOOP_ZIP_MIN_CHARS = 20000
+LOOP_ZIP_RATIO = 0.045
+LOOP_REMINDER = ("\n\nВажно: прошлая попытка ответа зациклилась — один и тот же абзац повторялся без конца. Не "
+                 "повторяй строки и абзацы: каждое поручение, находку и абзац пиши один раз и закончи ответ, когда всё "
+                 "сказано, строго в требуемом формате.")
+_LOOP_SPLIT = re.compile(r"\n+|(?<=[.!?;])\s+")
+
+
+def _loop_norm(unit: str, без_цифр: bool) -> str:
+    """Кусок для сравнения: пробелы схлопнуты; `без_цифр` — числа не различаются, но только у куска с текстом (20+ букв):
+    строки из одних чисел (таблица итогов) сравниваются как есть, иначе разные числа сошли бы за повтор."""
+    кусок = re.sub(r"\s+", " ", unit).strip()
+    if без_цифр and len(re.findall(r"[^\W\d_]", кусок)) >= 20:
+        кусок = re.sub(r"\d+", "#", кусок)
+    return кусок
+
+
+def _loop_blocks(куски: list[str], нужно: int) -> str:
+    for q in range(1, LOOP_MAX_BLOCK + 1):
+        if len(куски) < q * нужно:
+            break
+        блок = куски[-q:]
+        раз, i = 1, len(куски) - 2 * q
+        while i >= 0 and куски[i:i + q] == блок:
+            раз += 1
+            i -= q
+        if раз >= нужно and sum(len(k) for k in блок) * раз >= LOOP_MIN_CHARS:
+            что = "абзац" if q == 1 else f"блок из {q} абзацев"
+            return f"один и тот же {что} повторяется {раз} раз подряд: «{блок[0][:120]}»"
+    return ""
+
+
+def degenerate_loop(text: str) -> str:
+    """Признак вырожденного (зациклившегося) ответа модели: пустая строка — нет, иначе описание для журнала и карточки.
+
+    Три способа, все по хвосту ответа (третий — сжатие, см. LOOP_ZIP_RATIO, 20.10.2026): (1) абзацы и предложения — один и тот же блок из 1–LOOP_MAX_BLOCK кусков подряд
+    не меньше LOOP_MIN_REPEATS раз, а отличающийся только числами — не меньше LOOP_MIN_REPEATS_DIGITS раз; (2) точный повтор знаков без переносов и точек — хвост
+    периодичен. Порог по знакам — не меньше LOOP_MIN_CHARS: восемь одинаковых коротких строк таблицы циклом не считаются."""
+    хвост = (text or "")[-LOOP_TAIL:]
+    if len(хвост) < LOOP_MIN_CHARS:
+        return ""
+    сырые = _LOOP_SPLIT.split(хвост)[:-1]                              # последний кусок может быть недописан
+    for без_цифр, нужно in ((False, LOOP_MIN_REPEATS), (True, LOOP_MIN_REPEATS_DIGITS)):
+        найдено = _loop_blocks([k for k in (_loop_norm(x, без_цифр) for x in сырые) if k], нужно)
+        if найдено:
+            return найдено
+    образец = хвост[-200:]
+    прежний = хвост.rfind(образец, 0, len(хвост) - len(образец))
+    if прежний >= 0:
+        период = len(хвост) - len(образец) - прежний
+        if период > 0:
+            кусок = хвост[-период:]
+            раз, i = 1, len(хвост) - период
+            while i - период >= 0 and хвост[i - период:i] == кусок:
+                раз += 1
+                i -= период
+            if раз >= LOOP_MIN_REPEATS and период * раз >= LOOP_MIN_CHARS:
+                return f"один и тот же отрезок в {период} знаков повторяется {раз} раз подряд: «{кусок.strip()[:120]}»"
+    if len(хвост) >= LOOP_ZIP_MIN_CHARS:
+        байты = хвост.encode("utf-8")
+        доля = len(zlib.compress(байты, 6)) / len(байты)
+        if доля < LOOP_ZIP_RATIO:
+            return (f"почти одинаковые куски: хвост в {len(хвост)} знаков сжимается до {доля:.3f} "
+                    f"(порог {LOOP_ZIP_RATIO}): «{хвост[-120:].strip()}»")
+    return ""
+
+
+# Негодный ответ — пустой или зациклившийся (26.10.2026, вариант Д на 12.10 «Т», стенд Планёрки): на шаг вызова не больше
+# стольких платных обращений с таким ответом, сколько бы точек ни было в цепочке. Было: на последней (и единственной)
+# точке цепочки число попыток бралось из ожидания выгруженной модели (`LLM_UNLOADED_ATTEMPTS`, 5), и пустой ответ
+# переспрашивался до пяти раз — каждое обращение до потолка ответа и до часа без строки журнала, сборка «не кончалась».
+# Сетевые сбои, 429/5xx и выгруженная модель по-прежнему ждут своё число попыток: там повтор лечит, здесь — нет.
+BAD_ANSWERS_PER_CALL = 2
+
+
+def stop_line(step: str | None, attempt: int | None, chars_text: int, chars_reasoning: int, finish_reason: str | None,
+              reason: str, detail: str = "") -> str:
+    """Строка о попытке, отброшенной транспортом, — одинаковая в журнале вызовов, журнале сервера и итоге прогона
+    (26.10.2026): шаг, попытка, что вернула модель (знаков ответа и рассуждения, `finish_reason`) и причина остановки.
+    Без текста встречи; `detail` — описание зацикливания или ошибки, не длиннее 200 знаков."""
+    подробно = " ".join(str(detail or "").split())[:200]
+    return (f"шаг «{step or '?'}», попытка {attempt or '?'}: ответ {chars_text} знаков, рассуждение {chars_reasoning} "
+            f"знаков, finish_reason {finish_reason or '—'}; остановлено: {reason}" + (f" — {подробно}" if подробно else ""))
 
 
 def chain(role: str, env: dict | None = None) -> list[Route]:
-    """Цепочка точек роли по порядку; выведенные предохранителем — в конце (если живых нет, пробуем и их)."""
-    data = _load()
-    if data is None:
-        return _from_env(role, env)
-    if role == "asr" and "asr" not in data["roles"]:
-        return _from_env(role, env)          # распознавание в файл не вынесено — как раньше, по переменным
-    names = data["roles"].get(role) or data["roles"]["generate"]
+    """Цепочка точек роли по порядку; выведенные предохранителем — в конце (если живых нет, пробуем и их).
+
+    Генерация и проверка без назначенной модели — `RoleNotConfigured` (решение владельца 16.10.26, Д2): файла нет, он не
+    читается или у роли нет точки. Переменные окружения (`env`, LLM_PROVIDER, QWEN_MODEL…) модель не задают; параметр
+    оставлен для совместимости вызовов. Проверка без своей точки — точки генерации (исключение владельца 13.10.26)."""
+    if role == "asr":
+        data = _load()                       # неверный файл распознаванию — ошибкой, как раньше
+        if data is None or "asr" not in data["roles"]:
+            return _from_env(role, env)      # распознавание в файл не вынесено — как раньше, WEBAPP_WHISPER_MODEL
+        names = data["roles"]["asr"]
+    else:
+        try:
+            data = _load()
+        except (RoutesError, ValueError, OSError) as exc:
+            raise RoleNotConfigured(role, f"файл маршрутов {_current_path()} не читается: {scrub(str(exc))[:300]}") from exc
+        if data is None:
+            raise RoleNotConfigured(role, f"файла маршрутов нет ({_current_path() or 'data/models.json'})")
+        names = data["roles"].get(role) or (data["roles"].get("generate") if role in INHERIT_GENERATE else None)
+        if not names:
+            raise RoleNotConfigured(role, "в «Моделях» роли не назначена модель")
     routes = [_route(n, data["endpoints"][n]) for n in names]
     now = time.time()
     live = [r for r in routes if _state.down_until.get(r.name, 0) <= now]
@@ -858,6 +1242,50 @@ def max_tokens_of(route: Route | None) -> int | None:
     return потолок
 
 
+# Потолок ответа проверки черновика поверх точки и переменной шага (заход 5 хаос-тестов, 20.10.2026). Проверка на стенде
+# Планёрки дважды писала до потолка точки 96 000 токенов (276 912 знаков, finish_reason: length, 0,119 $), хотя её
+# нормальный ответ — вердикт и находки: по журналам 263 вызовов проверки 880–9 925 токенов, у deepseek-flash на стенде
+# 8 208–22 946. 16 000 по таблице шага мало (deepseek, 14.10.26 — обрыв), 32 000 — запас в 1,4 раза над наибольшим
+# нормальным ответом. Переменная `LLM_VERIFY_MAX_TOKENS_CEILING` поднимает или опускает потолок без правки кода.
+VERIFY_MAX_TOKENS_CEILING = 32000
+
+
+GUARD_MAX_TOKENS_CEILING = 256   # досмотр отвечает одним словом ДА/НЕТ (20.10.2026); запас — на короткое рассуждение
+
+
+# Потолок ответа черновика поверх точки и переменной шага (обрыв черновика на большом входе, 25.10.2026). Прогон набора на
+# стенде Планёрки, встреча 12.10.2026, вход «К» (протокол секретаря и обе расшифровки, 223 250 знаков): один вызов
+# черновика написал 242 587 знаков и был отброшен. Потолок шага по таблице — 48 000 токенов, но потолок точки в «Моделях»
+# (96 000 у deepseek-flash на стенде) главнее таблицы, и черновику было разрешено вдвое больше. Нормальный черновик —
+# 10–40 тыс. знаков (deepseek-flash пишет около 3 знаков на токен, 1 245 вызовов в «Рабочем»), 48 000 токенов — около
+# 150 тыс. знаков, запас втрое и место под рассуждение. Переменная `LLM_GENERATE_MAX_TOKENS_CEILING` меняет потолок без
+# правки кода; 0 — без потолка поверх точки.
+GENERATE_MAX_TOKENS_CEILING = 48000
+
+
+def _потолок_из_переменной(имя: str, по_умолчанию: int) -> int:
+    try:
+        return int(os.environ.get(имя) or по_умолчанию)
+    except ValueError:
+        return по_умолчанию
+
+
+def step_ceiling(purpose: str | None, tokens: int) -> int:
+    """Потолок ответа шага после точки и переменной шага: проверке черновика — не выше `VERIFY_MAX_TOKENS_CEILING`
+    (или `LLM_VERIFY_MAX_TOKENS_CEILING`); черновику — не выше `GENERATE_MAX_TOKENS_CEILING` (или
+    `LLM_GENERATE_MAX_TOKENS_CEILING`, 25.10.2026); досмотру реплик — не выше `GUARD_MAX_TOKENS_CEILING`; остальным — как было."""
+    шаг = (purpose or "").strip().lower()
+    if шаг == "guard":
+        return min(tokens, GUARD_MAX_TOKENS_CEILING)
+    if шаг == "generate":
+        потолок = _потолок_из_переменной("LLM_GENERATE_MAX_TOKENS_CEILING", GENERATE_MAX_TOKENS_CEILING)
+        return min(tokens, потолок) if потолок > 0 else tokens
+    if шаг != "verify":
+        return tokens
+    потолок = _потолок_из_переменной("LLM_VERIFY_MAX_TOKENS_CEILING", VERIFY_MAX_TOKENS_CEILING)
+    return min(tokens, потолок) if потолок > 0 else tokens
+
+
 def tariff_for(route: Route, model: str | None = None) -> tuple[dict | None, str]:
     """Тариф точки для расчёта стоимости вызова (15.10.26): (тариф, откуда) — «точка», «справочник» или «».
     Заданный у точки в models.json — он; иначе — справочник по модели вызова и адресу точки."""
@@ -903,6 +1331,81 @@ def mark_down(route: Route, error: str) -> None:
 def mark_up(route: Route) -> None:
     with _lock:
         _state.down_until.pop(route.name, None)
+        # Основная снова ответила — следующий её срыв снова даст строку о переходе (20.10.2026).
+        _state.noticed = {к for к in _state.noticed if к[1] != route.name}
+
+
+# --- Переход на запасную модель (задание владелицы 20.10.2026) -------------------------------------------------------
+#
+# Запасная модель роли — вторая и следующие точки цепочки («Добавить запасной» в «Моделях»); назначает администратор, по
+# умолчанию её нет (правило 13.10.26: нет модели по умолчанию). Переход делает сам вызов: точка, не ответившая по
+# недоступности (402, 401, 403, 404, 429 и 5xx после повторов, таймаут, отказ соединения), уходит на охлаждение, вызов —
+# на следующую. Ответ не в формате и ошибка самого запроса (400) переходом не считаются. Здесь — только то, что нужно
+# продукту, чтобы сказать о переходе: какая точка основная, какой ответ — от запасной, почему, и сказать один раз за срыв.
+def configured_primary(role: str) -> str | None:
+    """Основная точка роли по порядку в «Моделях» (без учёта охлаждения) или None — роль не настроена. Проверка и
+    договорённости без своей точки — основная точка генерации (как `chain`)."""
+    try:
+        data = _load()
+    except (RoutesError, ValueError, OSError):
+        return None
+    if not data:
+        return None
+    roles = data.get("roles") or {}
+    names = roles.get(role) or (roles.get("generate") if role in INHERIT_GENERATE else None)
+    return names[0] if names else None
+
+
+def fallback_of(role: str, answered: str) -> str | None:
+    """Ответ точки `answered` — работа на запасной? Да — имя основной точки роли (она сейчас выведена предохранителем),
+    иначе None. Не-формат уходит на следующую точку без охлаждения основной — это не переход (решение 13.10.26)."""
+    основная = configured_primary(role)
+    if not основная or основная == answered:
+        return None
+    with _lock:
+        выведена = _state.down_until.get(основная, 0) > time.time()
+    return основная if выведена else None
+
+
+def fallback_notice(role: str, answered: str) -> dict | None:
+    """Сказать ли о переходе на запасную: один раз за срыв основной (до её возврата — `mark_up`). Возвращает
+    {"role", "role_title", "primary", "spare", "reason", "reason_full"} или None. Ключа в тексте нет (`scrub`)."""
+    основная = fallback_of(role, answered)
+    if not основная:
+        return None
+    with _lock:
+        if (role, основная) in _state.noticed:
+            return None
+        _state.noticed.add((role, основная))
+        полная = _state.last_error.get(основная, "")
+    return {"role": role, "role_title": ROLE_TITLES.get(role, role), "primary": основная, "spare": answered,
+            "reason": unavailability_reason(полная), "reason_full": scrub(полная)[:300]}
+
+
+_КОД_ОШИБКИ = re.compile(r"(?:ошибк[уаи]|HTTP)\s*(\d{3})\b")
+
+
+def unavailability_reason(text) -> str:
+    """Почему основная недоступна — коротко, для заголовка строки «Основная модель недоступна (…)»."""
+    t = str(text or "")
+    m = _КОД_ОШИБКИ.search(t)
+    if m:
+        код = int(m.group(1))
+        if код >= 500:
+            return f"сбой сервера модели (HTTP {код})"
+        return {402: "на счёте поставщика нет денег (HTTP 402)", 401: "ключ не принят (HTTP 401)",
+                403: "доступ запрещён (HTTP 403)", 404: "модели нет на сервере (HTTP 404)",
+                429: "перегрузка поставщика (HTTP 429)"}.get(код, f"отказ поставщика (HTTP {код})")
+    низ = t.lower()
+    if any(п in низ for п in ("timed out", "timeout", "таймаут", "перестал отвечать", "нет ответа за",
+                              "не ответила за", "первого признака")):
+        return "модель не ответила вовремя (таймаут)"
+    if any(п in низ for п in ("не удалось обратиться", "refused", "urlopen error", "10061", "10060", "getaddrinfo",
+                              "нет связи", "connection")):
+        return "нет связи с сервером модели"
+    if "выгружена" in низ:
+        return "модель выгружена из памяти сервера"
+    return "модель не ответила"
 
 
 def model_for(route: Route, requested: str | None, defaults: tuple, primary: bool) -> str:
@@ -921,8 +1424,10 @@ def status() -> dict:
     data = _load()
     now = time.time()
     if data is None:
-        return {"source": "переменные окружения", "path": str(_current_path() or ""),
-                "roles": {r: [x.name for x in _from_env(r)] for r in ROLES}, "down": {}}
+        # Файла нет (16.10.26, Д2): модели ролей не назначены, переменные окружения их не задают.
+        return {"source": "не настроено", "path": str(_current_path() or ""),
+                "roles": {r: ([x.name for x in _from_env(r)] if r == "asr" else []) for r in ROLES},
+                "not_configured": {r: not_configured(r) for r in ("generate", "verify")}, "down": {}}
     return {"source": "файл", "path": str(_current_path()), "roles": data["roles"],
             "endpoints": {n: {k: v for k, v in ep.items() if k != "key"} for n, ep in data["endpoints"].items()},
             "down": {n: int(t - now) for n, t in _state.down_until.items() if t > now},
@@ -931,9 +1436,12 @@ def status() -> dict:
 
 def _editable() -> tuple[Path, dict]:
     path = _current_path()
+    if path is None:
+        raise RoutesError("путь к файлу маршрутов не задан — править нечего")
     data = _load()
-    if data is None or path is None:
-        raise RoutesError("файла маршрутов нет — править нечего; создайте models.json (образец — models.example.json)")
+    if data is None:
+        # Файла нет (16.10.26, Д2): пульт начинает его с пустого — первое подключение и назначение роли создают файл.
+        return path, {"endpoints": {}, "roles": {}}
     return path, json.loads(json.dumps(data))          # копия: ошибка проверки не портит загруженное
 
 
@@ -952,7 +1460,13 @@ def _write(path: Path, data: dict, record: dict, backup: bool = True) -> dict:
         hist = path.with_name("models.history")
         hist.mkdir(exist_ok=True)
         stamp = time.strftime("%Y%m%d-%H%M%S") + f"-{int(time.time() * 1000) % 1000:03d}"
-        (hist / f"models-{stamp}.json").write_bytes(path.read_bytes())
+        # Две записи в одну миллисекунду не затирают копию друг друга (вопрос ERP 15.10.26, стенд Планёрки 510c07b):
+        # суффикс «_01», «_02» сортируется ПОСЛЕ основного имени — откат по-прежнему берёт последнюю по имени.
+        копия, n = hist / f"models-{stamp}.json", 0
+        while копия.exists():
+            n += 1
+            копия = hist / f"models-{stamp}_{n:02d}.json"
+        копия.write_bytes(path.read_bytes())
         for old in sorted(hist.glob("models-*.json"))[:-HISTORY_KEEP]:
             old.unlink()
     tmp = path.with_suffix(".json.tmp")
@@ -976,6 +1490,10 @@ def use(role: str, name: str, by: str = "") -> dict:
     пишется строкой в `models.log.jsonl` рядом с файлом: когда, какая роль, какая точка, кто."""
     path, data = _editable()
     _role_and_point(data, role, name)
+    if data["roles"].get(role, [])[:1] == [name]:
+        # Точка и так первая — ничего не пишем (Д1 цикла «Мониторинга», 15.10.26; стенд Планёрки 510c07b): иначе новая
+        # копия и строка журнала, а «Откатить» потом ничего не меняет — откатывает «смену» на то же самое.
+        return data["roles"]
     data["roles"][role] = [name] + [n for n in data["roles"].get(role, []) if n != name]
     _write(path, data, {"action": "use", "role": role, "point": name, "by": by})
     with _lock:
@@ -1002,9 +1520,12 @@ def remove_from_role(role: str, name: str, by: str = "") -> dict:
     chain_ = data["roles"].get(role, [])
     if name not in chain_:
         raise RoutesError(f"точки «{name}» нет в роли «{ROLE_TITLES.get(role, role)}»")
-    if len(chain_) == 1:
+    if len(chain_) == 1 and role not in OPTIONAL_ROLES:
         raise RoutesError(f"«{name}» — единственная точка роли «{ROLE_TITLES.get(role, role)}»: сначала добавьте другую")
     data["roles"][role] = [n for n in chain_ if n != name]
+    if not data["roles"][role]:
+        # Необязательная роль без точек (договорённости, 18.10.2026) — снова «как у черновика»: роль уходит из файла.
+        del data["roles"][role]
     _write(path, data, {"action": "remove", "role": role, "point": name, "by": by})
     return data["roles"]
 
@@ -1050,6 +1571,13 @@ def clean_point(fields: dict) -> dict:
         ep.pop("key_source")
     if ep.get("proxy") == "system":
         ep.pop("proxy")
+    elif ep.get("proxy") == PROXY_ADDRESS:     # вариант «адрес» (16.10.26): в файл — сам адрес из строки формы
+        адрес = str(fields.get("proxy_url") or "").strip().rstrip("/")
+        if not адрес:
+            raise RoutesError(f"прокси «адрес»: впишите адрес прокси, например {PROXY_HINT}")
+        if proxy_problem(адрес):
+            raise RoutesError(proxy_problem(адрес))
+        ep["proxy"] = адрес
     if ep.get("reasoning") == "auto":
         ep.pop("reasoning")                    # как у модели — поле в запрос не идёт, в файл тоже
     return ep
@@ -1127,10 +1655,11 @@ def delete_point(name: str, by: str = "") -> None:
     if name not in data["endpoints"]:
         raise RoutesError(f"нет точки «{name}»")
     for role, chain_ in data["roles"].items():
-        if chain_ == [name]:
+        if chain_ == [name] and role not in OPTIONAL_ROLES:
             raise RoutesError(f"«{name}» — единственная точка роли «{ROLE_TITLES.get(role, role)}»: сначала добавьте "
                               f"в роль другую")
     data["roles"] = {r: [n for n in ch if n != name] for r, ch in data["roles"].items()}
+    data["roles"] = {r: ch for r, ch in data["roles"].items() if ch or r not in OPTIONAL_ROLES}
     del data["endpoints"][name]
     _write(path, data, {"action": "delete", "point": name, "by": by})
     key_delete(name, by=by)
@@ -1195,14 +1724,21 @@ def rollback(by: str = "") -> dict:
 def panel(full_keys: bool = False) -> dict:
     """Для панели «Мониторинг» супер-администратора: роли, точки по порядку, состояние каждой.
     Ключ не отдаётся никогда: `full_keys=True` (супер-администратор) — «ключ задан · …XXXX», иначе «ключ задан»."""
-    data = _load()
+    try:
+        data = _load()
+    except (RoutesError, ValueError, OSError) as exc:
+        # Файл не читается (16.10.26, Д2): сборка не идёт, править с пульта нечего — причина человеку.
+        причина = f"файл маршрутов {_current_path()} не читается: {scrub(str(exc))[:300]}"
+        return {"source": "error", "path": str(_current_path() or ""), "switchable": False,
+                "note": f"Модели ролей не настроены — {причина}. Сборка документов не начнётся, вызовов модели нет. "
+                        "Исправьте файл или откатите его из models.history/.",
+                "not_configured": {r: причина for r in ("generate", "verify")}, "roles": {}}
     now = time.time()
-    if data is None:
-        return {"source": "env", "path": str(_current_path() or ""), "switchable": False,
-                "note": "Файла маршрутов нет — модели заданы переменными окружения, переключать с панели нечего. "
-                        "Чтобы включить переключение, положите models.json (образец — models.example.json).",
-                "roles": {r: [{"name": x.name, "kind": x.kind, "model": None, "url": x.url, "state": "основная"}
-                              for x in _from_env(r)] for r in ROLES}}
+    пустой = data is None
+    if пустой:
+        # Файла нет (16.10.26, Д2): переменные окружения модель не задают — роли «не настроены»; пульт начинает файл с
+        # пустого (`_editable`), поэтому переключение доступно сразу.
+        data = {"endpoints": {}, "roles": {}}
     roles = {}
     if "asr" not in data["roles"]:
         roles["asr"] = [{"name": "env-asr", "kind": "faster-whisper", "model": None, "url": "",
@@ -1218,6 +1754,19 @@ def panel(full_keys: bool = False) -> dict:
                          "last_error": _state.last_error.get(n, ""), "external": is_external(ep),
                          "reasoning": ep.get("reasoning", "auto")})
         roles[role] = rows
+    # Роль генерации или проверки без точки — «не настроена» (16.10.26, Д2): пустая цепочка и причина. Проверка без своей
+    # точки идёт на точки генерации (исключение владельца 13.10.26) — показано явно, строками генерации с пометкой.
+    # Договорённости (18.10.2026) — так же, как проверка: без своей точки — строки генерации с пометкой «как у черновика»;
+    # в пульте роль видна, только если продукт её включил (`show_role`) или она уже есть в файле.
+    inherited = {}
+    for role in ("generate", "verify") + tuple(r for r in OPTIONAL_ROLES if r in _shown_roles or r in roles):
+        if roles.get(role):
+            continue
+        if role in INHERIT_GENERATE and roles.get("generate"):
+            roles[role] = [dict(r, state="как у черновика — " + r["state"]) for r in roles["generate"]]
+            inherited[role] = "generate"
+        else:
+            roles[role] = []
     # Ручной выбор: для каждой роли — все готовые точки подходящего рода (у распознавания — только свои движки).
     options = {}
     for role in ROLES:
@@ -1239,7 +1788,13 @@ def panel(full_keys: bool = False) -> dict:
                           "key": key_masked(n, full_keys) if ep.get("key_source") == "value" else "",
                           **({"tariff": _tariff_panel(ep)} if ep["kind"] in KINDS else {})})
     hist = _current_path().with_name("models.history")
-    return {"source": "file", "path": str(_current_path()), "switchable": True,
+    return {"source": "none" if пустой else "file", "path": str(_current_path()), "switchable": True,
+            "not_configured": {r: (f"файла маршрутов нет ({_current_path()})" if пустой else
+                                   "в «Моделях» роли не назначена модель")
+                               for r in ("generate", "verify") if not roles.get(r)},
+            "inherited": inherited,
+            "note": (f"Файла маршрутов нет ({_current_path()}): модели ролей не назначены, сборка документов не начнётся. "
+                     "Заведите подключение и назначьте его роли — файл создастся." if пустой else ""),
             "cooldown_sec": int(data.get("cooldown_sec", DEFAULT_COOLDOWN_SEC)), "roles": roles, "options": options,
             "endpoints": endpoints, "kinds": KIND_FIELDS, "role_titles": ROLE_TITLES, "history": history(),
             "tariff_book": llm_cost.справочник_для_формы(),
@@ -1250,6 +1805,13 @@ def check_all() -> list[dict]:
     """Короткий запрос на каждую точку обеих ролей (стоит долей цента на облачных точках)."""
     out, seen = [], set()
     for role in ROLES:
+        if role in OPTIONAL_ROLES and not own_chain(role):
+            continue                         # необязательная роль без своей точки идёт на точки генерации — они выше
+        причина = not_configured(role)
+        if причина:
+            out.append({"name": f"роль «{ROLE_TITLES.get(role, role)}»", "model": "", "ok": False,
+                        "detail": f"{NOT_CONFIGURED} ({причина})"})
+            continue
         for r in chain(role):
             if r.name in seen:
                 continue
@@ -1284,6 +1846,14 @@ def _asr_service(route: Route):
     * по умолчанию (`form` не задана) — прежний: POST телом `audio/wav`, параметры в строке запроса,
       ответ JSON `{text, meta}`. Он остаётся, потому что уже заведённые сервисы работают так.
 
+    С 26.10.2026 (отчёт локальной машины: «Транс» рвёт соединение на wav 16 кГц + подсказка, m4a + подсказка принимает):
+      * подсказка (`initial_prompt`, `hotwords`) в строку запроса не идёт. У формы raw с подсказкой запрос уходит
+        multipart: запись полем `file`, параметры и подсказка полями формы под теми же именами. Без подсказки raw —
+        как раньше, байт в байт. Прежний путь — `prompt_in=query` у точки;
+      * `audio` у точки — формат звука: `wav` (по умолчанию, как было), `m4a` или `ogg` — сжать ffmpeg перед отправкой.
+        Сжатие идёт во временную папку, она удаляется сразу после чтения; ffmpeg нет или он не справился — уходит wav,
+        причина — в сводке (`audio_sent`).
+
     Разбор по голосам и разметку слов по умолчанию НЕ просим (`diarization=false`,
     `identify_speakers=false`, `word_timestamps=false`): их делает наш разбор, а лишняя работа на сервисе
     только удлиняет распознавание."""
@@ -1291,8 +1861,11 @@ def _asr_service(route: Route):
         raise RoutesError("сервис распознавания — только во внутренней сети")
     форма = str(route.opt("form") or "").strip().lower()
 
+    формат_звука = str(route.opt("audio") or "wav").strip().lower()
+    подсказка_в_строке = str(route.opt("prompt_in") or "form").strip().lower() == "query"
+
     def run(wav_path, **params):
-        данные = Path(wav_path).read_bytes()
+        данные, имя_файла, тип_звука, отправлено = _звук_для_сервиса(wav_path, формат_звука)
         язык = str(params.get("language") or "")
         подсказка = " ".join(ч for ч in (str(params.get("initial_prompt") or ""), str(params.get("hotwords") or "")) if ч)
         начало = time.monotonic()
@@ -1308,14 +1881,20 @@ def _asr_service(route: Route):
             точка: имя точки — модель, «сервис в сети» — устройство, длительность — из ответа."""
             сегменты = raw.get("segments") if isinstance(raw.get("segments"), list) else []
             строки = []
+            времена = []
             for сегмент in сегменты:
                 if not isinstance(сегмент, dict):
                     continue
                 реплика = str(сегмент.get("text") or "").strip()
                 if not реплика:
                     continue
-                секунды = int(float(сегмент.get("start") or 0))
+                старт = float(сегмент.get("start") or 0)
+                конец = float(сегмент.get("end") or 0)
+                секунды = int(старт)
                 строки.append(f"{секунды // 3600:02d}:{секунды % 3600 // 60:02d}:{секунды % 60:02d}\t{реплика}")
+                # Время каждой строки — для разделения по голосам: ERP подписывает строки и режет отрывки
+                # «Разбора голосов» по этим меткам (иначе сервисная точка оставалась без голосов).
+                времена.append([старт, конец if конец > старт else старт + 1.0])
             текст = "\n".join(строки) if строки else str(raw.get("text") or "")
             длительность = raw.get("duration") or raw.get("media_seconds") \
                 or (raw.get("meta") or {}).get("media_seconds")
@@ -1331,43 +1910,105 @@ def _asr_service(route: Route):
                 "elapsed_seconds": round(time.monotonic() - начало),
                 "speakers": raw.get("speaker_count") or мета.get("speakers"),
                 "segments": len(сегменты),
+                "segment_lines": строки,
+                "segment_times": времена,
             })
+            мета.update(отправка)
             return текст, {k: v for k, v in мета.items() if v not in (None, [], "")}
+
+        # Что ушло сервису — в сводку распознавания (26.10.2026): формат и размер звука, где была подсказка.
+        отправка = {"audio_sent": отправлено, "audio_bytes": len(данные)}
+
+        def отправить_форму(поля: list[tuple[str, str]]) -> dict:
+            """multipart/form-data собираем руками: своя библиотека тут не нужна, а зависимостей не добавляем."""
+            граница = "----webapp-asr-" + uuid.uuid4().hex
+            поле_файла = str(route.opt("file_field") or "file")
+            части: list[bytes] = []
+            for имя, значение in поля:
+                if значение == "":
+                    continue
+                части.append(f"--{граница}\r\nContent-Disposition: form-data; name=\"{имя}\"\r\n\r\n{значение}\r\n"
+                             .encode("utf-8"))
+            части.append(f"--{граница}\r\nContent-Disposition: form-data; name=\"{поле_файла}\"; "
+                         f"filename=\"{имя_файла}\"\r\nContent-Type: {тип_звука}\r\n\r\n".encode("utf-8"))
+            части.append(данные + b"\r\n")
+            части.append(f"--{граница}--\r\n".encode("utf-8"))
+            тело = b"".join(части)
+            req = urllib.request.Request(route.url, data=тело, method="POST",
+                                         headers={"Content-Type": f"multipart/form-data; boundary={граница}",
+                                                  "Content-Length": str(len(тело))})
+            with urllib.request.urlopen(req, timeout=float(route.opt("timeout_sec", 4 * 3600))) as resp:
+                return json.loads(resp.read().decode("utf-8"))
 
         if форма != "multipart":
             query = {k: v for k, v in params.items() if isinstance(v, (str, int, float)) and not isinstance(v, bool) and v != ""}
+            есть_подсказка = any(query.get(k) for k in ПОДСКАЗКА_ПОЛЯ)
+            if есть_подсказка and not подсказка_в_строке:
+                # Подсказка в строке запроса — несколько килобайт после urlencode (кириллица — 6 знаков на букву): сервер
+                # вправе оборвать такую строку. Подсказка и параметры — полями формы под прежними именами (26.10.2026).
+                отправка["prompt_sent"] = "поле формы"
+                return собрать(отправить_форму([(str(k), str(v)) for k, v in query.items()]))
+            if есть_подсказка:
+                отправка["prompt_sent"] = "строка запроса"
             url = route.url + (("&" if "?" in route.url else "?") + urllib.parse.urlencode(query) if query else "")
-            req = urllib.request.Request(url, data=данные, headers={"Content-Type": "audio/wav"}, method="POST")
+            req = urllib.request.Request(url, data=данные, headers={"Content-Type": тип_звука}, method="POST")
             with urllib.request.urlopen(req, timeout=float(route.opt("timeout_sec", 4 * 3600))) as resp:
                 raw = json.loads(resp.read().decode("utf-8"))
             return собрать(raw)
 
-        # multipart/form-data собираем руками: своя библиотека тут не нужна, а зависимостей не добавляем.
-        граница = "----webapp-asr-" + uuid.uuid4().hex
-        поле_файла = str(route.opt("file_field") or "file")
         поля = [("language", язык), ("prompt", подсказка), ("wait", "true"),
                 ("diarization", "false"), ("identify_speakers", "false"), ("word_timestamps", "false")]
         поля += [(str(k), str(v)) for k, v in (route.opt("extra_fields") or {}).items()]
-        части: list[bytes] = []
-        for имя, значение in поля:
-            if значение == "":
-                continue
-            части.append(f"--{граница}\r\nContent-Disposition: form-data; name=\"{имя}\"\r\n\r\n{значение}\r\n"
-                         .encode("utf-8"))
-        имя_файла = Path(wav_path).name or "audio.wav"
-        части.append(f"--{граница}\r\nContent-Disposition: form-data; name=\"{поле_файла}\"; "
-                     f"filename=\"{имя_файла}\"\r\nContent-Type: audio/wav\r\n\r\n".encode("utf-8"))
-        части.append(данные + b"\r\n")
-        части.append(f"--{граница}--\r\n".encode("utf-8"))
-        тело = b"".join(части)
-        req = urllib.request.Request(route.url, data=тело, method="POST",
-                                     headers={"Content-Type": f"multipart/form-data; boundary={граница}",
-                                              "Content-Length": str(len(тело))})
-        with urllib.request.urlopen(req, timeout=float(route.opt("timeout_sec", 4 * 3600))) as resp:
-            raw = json.loads(resp.read().decode("utf-8"))
-        return собрать(raw)
+        if подсказка:
+            отправка["prompt_sent"] = "поле формы"
+        return собрать(отправить_форму(поля))
 
     return run
+
+
+def _ffmpeg() -> str | None:
+    """ffmpeg для сжатия звука: тот же портативный, что вынимает звук из записи (imageio_ffmpeg), иначе из PATH."""
+    try:
+        import imageio_ffmpeg
+        return imageio_ffmpeg.get_ffmpeg_exe()
+    except Exception:  # noqa: BLE001 — нет пакета или в нём нет файла: ищем в PATH
+        import shutil
+        return shutil.which("ffmpeg")
+
+
+def _звук_для_сервиса(wav_path, формат: str) -> tuple[bytes, str, str, str]:
+    """Звук для точки `asr-service` (26.10.2026): (данные, имя файла, тип, что отправлено).
+
+    wav — файл как есть (поведение до 26.10.2026). m4a или ogg — сжатие ffmpeg во временную папку, которая удаляется
+    сразу после чтения: запись на диске не остаётся. ffmpeg нет или он не справился — уходит wav, а в «что отправлено»
+    — причина: распознавание не встаёт из-за сжатия."""
+    import subprocess
+    import tempfile
+
+    исходный = Path(wav_path)
+    расширение, тип, кодек = АУДИО_ФОРМАТЫ.get(формат) or АУДИО_ФОРМАТЫ["wav"]
+    как_есть = (исходный.read_bytes(), исходный.name or "audio.wav", "audio/wav")
+    if кодек is None:
+        return (*как_есть, "wav")
+    exe = _ffmpeg()
+    if not exe:
+        return (*как_есть, f"wav (сжать в {формат} нечем: ffmpeg не найден)")
+    # ogg: Opus, если в сборке ffmpeg его нет — Vorbis
+    кодеки = [кодек] + ([["-c:a", "libvorbis", "-q:a", "3"]] if формат == "ogg" else [])
+    причина = ""
+    with tempfile.TemporaryDirectory(prefix="asr-") as папка:
+        выход = Path(папка) / ("audio" + расширение)
+        for к in кодеки:
+            try:
+                готово = subprocess.run([exe, "-y", "-loglevel", "error", "-i", str(исходный), "-vn", "-ac", "1", *к,
+                                         str(выход)], capture_output=True, timeout=1800)
+            except Exception as exc:  # noqa: BLE001 — сжатие не должно останавливать распознавание
+                причина = f"{type(exc).__name__}"
+                continue
+            if готово.returncode == 0 and выход.exists() and выход.stat().st_size > 0:
+                return выход.read_bytes(), (исходный.stem or "audio") + расширение, тип, формат
+            причина = (готово.stderr or b"").decode("utf-8", "replace").strip()[-200:] or f"код {готово.returncode}"
+    return (*как_есть, f"wav (сжать в {формат} не удалось: {причина})")
 
 
 def _тихий_wav(секунды: float = 0.1, частота: int = 16000) -> bytes:
@@ -1452,18 +2093,18 @@ def _ping(route: Route, timeout: float, api_key: str | None) -> tuple[bool, str]
         body = {"model": model, "messages": [{"role": "user", "content": "Ответь одним словом: да"}], "max_tokens": 20}
         apply_reasoning(body, route)   # «Проверить связь» — тем же телом, что рабочий вызов
         apply_model_limits(body, route, model)   # Claude: без temperature и top_p (15.10.26)
-    headers = {"Content-Type": "application/json"}
     key = route.api_key if api_key is None else api_key
-    if key:
-        headers["Authorization"] = f"Bearer {key}"
-    req = mark_request(urllib.request.Request(route.endpoint, data=json.dumps(body).encode("utf-8"), headers=headers,
+    if route.kind == "ollama":
+        адрес, headers = route.endpoint, {"Content-Type": "application/json"}
+    else:
+        адрес, body, headers = wire_request(route, body, key)   # у точки Anthropic — родной Messages API (26.10.2026)
+    req = mark_request(urllib.request.Request(адрес, data=json.dumps(body).encode("utf-8"), headers=headers,
                                               method="POST"), route)
     started = time.time()
     try:
         with urllib.request.urlopen(req, timeout=timeout) as resp:
             raw = json.loads(resp.read().decode("utf-8"))
-        text = (raw.get("message") or {}).get("content") if route.kind == "ollama" else \
-            ((raw.get("choices") or [{}])[0].get("message") or {}).get("content")
+        text = response_text(raw)
         return True, f"ответ за {time.time() - started:.1f} с: {(text or '').strip()[:40]!r}"
     except urllib.error.HTTPError as exc:
         try:
@@ -1489,11 +2130,12 @@ def _ping(route: Route, timeout: float, api_key: str | None) -> tuple[bool, str]
 # Поэтому перед сборкой первой доступной точке роли уходит пробный запрос: настоящее начало первого запроса сборки
 # (системная подсказка и запись встречи — тот же префикс, что уйдёт следом: сервер вроде Ollama держит кэш
 # последнего запроса, и боевой вызов не читает запись заново). Ответа целиком проба не ждёт: первый признак жизни
-# (content, reasoning_content, reasoning или thinking — как в чтении потока рабочих вызовов) — точка готова, поток
+# (content, reasoning_content, reasoning или thinking — как в чтении потока рабочих вызовов; с 26.10.2026 и скрытое
+# рассуждение: остановка по потолку, расход выхода, блок рассуждения Anthropic — `stream_piece`) — точка готова, поток
 # закрывается. Не готова — нет связи, 401 (ключ не принят), 403 (доступ запрещён), 400 и прочие отказы сервера, молчание дольше порога
 # или поток, закончившийся без единого знака. Порог первого признака по умолчанию — порог молчания самой сборки
 # (его передаёт продукт), чтобы проба не браковала модель, которую сборка дождалась бы. Предел ответа маленький
-# (64 токена): ответ всё равно обрывается на первом признаке.
+# (64 токена; у модели Claude — не меньше PROBE_CLAUDE_MIN_TOKENS, 26.10.2026): ответ обрывается на первом признаке.
 #
 # Настройки — в одном месте: умолчания ниже, переменные окружения MODEL_PROBE* и раздел "probe" в models.json
 # (рядом с cooldown_sec, перечитывается без перезапуска). Файл сильнее переменных, переменные сильнее умолчаний.
@@ -1502,10 +2144,15 @@ PROBE_DEFAULTS = {
     "first_sign_sec": None,   # первый признак жизни — не дольше; None — порог молчания сборки (передаёт продукт)
     "fresh_sec": 600,         # точка, прошедшая пробу недавно, повторно не проверяется
     "max_tokens": 64,         # предел ответа пробы: ответ обрывается на первом признаке жизни
+    # Модель не готова — сборка ждёт (решение владельца 17.10.26, С5 сведения): повтор пробы каждые retry_sec, всего
+    # не дольше wait_sec; потом — отказ «модель не готова» (карточка и сообщение, как прежде). 0 — не ждать.
+    "retry_sec": 300,
+    "wait_sec": 3600,
 }
 PROBE_FIRST_SIGN_FALLBACK = 600    # если продукт порог молчания не передал
 PROBE_ENV = {"enabled": "MODEL_PROBE", "first_sign_sec": "MODEL_PROBE_FIRST_SIGN_SEC",
-             "fresh_sec": "MODEL_PROBE_FRESH_SEC", "max_tokens": "MODEL_PROBE_MAX_TOKENS"}
+             "fresh_sec": "MODEL_PROBE_FRESH_SEC", "max_tokens": "MODEL_PROBE_MAX_TOKENS",
+             "retry_sec": "MODEL_PROBE_RETRY_SEC", "wait_sec": "MODEL_PROBE_WAIT_SEC"}
 PROBE_SYSTEM = ("Это пробный запрос: проверяется, готова ли модель принять запрос такого размера. "
                 "Текст ниже не разбирай.")
 _PROBE_FILLER = "\nПробный запрос проверки готовности модели перед сборкой документа."
@@ -1553,7 +2200,7 @@ def probe_settings(silence_sec: float | None = None) -> dict:
             число = float(сырое)
         except ValueError:
             continue
-        if число > 0:
+        if число > 0 or (ключ in ("retry_sec", "wait_sec") and число == 0):   # 0 — ожидание выключено
             итог[ключ] = число
     try:
         data = _load()
@@ -1629,6 +2276,112 @@ def _probe_http_reason(code: int, detail: str) -> str:
     return f"запрос отклонён (HTTP {code}): {detail[:160]}"
 
 
+# --- Разбор куска потока: OpenAI-совместимый, OpenRouter, Anthropic Messages API (26.10.2026) ------------------------
+#
+# Пустой поток Claude на стенде 26.10.26 (проба 133 593 знака, «поток закончился без единого знака ответа или
+# рассуждения», сборка ушла на запасную). У Claude Sonnet 5.5 и Opus 5.5 рассуждение адаптивное и включено по
+# умолчанию (выключить нельзя: `thinking: disabled` — 400), а его текст по умолчанию не отдаётся (`display: "omitted"`:
+# блок рассуждения приходит пустым). Рассуждение тратит тот же потолок ответа (skill claude-api, разделы Thinking &
+# Effort и Migrating to Claude Sonnet 5.5, сверено 26.10.2026). Потолок пробы 64 токена целиком ушёл на скрытый ход
+# мысли: поток кончился остановкой по потолку без видимого знака, а проба считала признаком жизни только знак.
+# Признак жизни — то, что модель пишет, а не только то, что нам видно: знак текста или рассуждения; остановка по
+# потолку и расход выхода; блок, подпись или знак рассуждения Anthropic; зашифрованное рассуждение OpenRouter.
+# Ошибка поставщика внутри уже открытого потока (`event: error` Anthropic, `{"error": …}` OpenAI) — отдельно.
+STOP_REASON_AS_OPENAI = {"end_turn": "stop", "stop_sequence": "stop", "max_tokens": "length",
+                         "tool_use": "tool_calls"}
+STREAM_TEXT_FIELDS = ("content",)
+STREAM_REASONING_FIELDS = ("reasoning_content", "reasoning", "thinking")
+
+
+def stream_piece(часть) -> dict:
+    """Один разобранный кусок потока → {"text", "reasoning", "alive", "finish", "usage", "error", "end"}.
+
+    `alive` — модель пишет (в том числе скрыто): для пробы это готовность, для сборки — признак жизни сторожу молчания.
+    `finish` — причина остановки в словах OpenAI (stop / length / …), у Anthropic переведена. `end` — поставщик сам
+    закрыл ответ (`message_stop` Anthropic): поток кончился штатно, а не оборвался."""
+    итог = {"text": "", "reasoning": "", "alive": False, "finish": None, "usage": None, "error": "", "end": False}
+    if not isinstance(часть, dict):
+        return итог
+    род = часть.get("type")
+    if род == "error" or (род is None and isinstance(часть.get("error"), (dict, str))):
+        ошибка = часть.get("error")
+        if isinstance(ошибка, dict):
+            итог["error"] = " ".join(str(ошибка.get(к)) for к in ("type", "code", "message") if ошибка.get(к)) or "error"
+        else:
+            итог["error"] = str(ошибка or "error")
+        return итог
+    if isinstance(род, str) and (род.startswith(("message_", "content_block_")) or род == "ping"):
+        # Anthropic Messages API: message_start → content_block_start → content_block_delta … → message_delta → stop
+        if род == "message_start":
+            итог["usage"] = ((часть.get("message") or {}).get("usage")) or None
+        elif род == "content_block_start":
+            блок = часть.get("content_block") or {}
+            if блок.get("type") in ("thinking", "redacted_thinking", "text", "tool_use"):
+                итог["alive"] = True
+                итог["text"] = блок.get("text") or "" if блок.get("type") == "text" else ""
+                итог["reasoning"] = блок.get("thinking") or "" if блок.get("type") == "thinking" else ""
+        elif род == "content_block_delta":
+            дельта = часть.get("delta") or {}
+            вид = дельта.get("type")
+            if вид == "text_delta":
+                итог["text"] = дельта.get("text") or ""
+            elif вид == "thinking_delta":
+                итог["reasoning"] = дельта.get("thinking") or ""
+            итог["alive"] = вид in ("text_delta", "thinking_delta", "signature_delta", "input_json_delta")
+        elif род == "message_delta":
+            причина = (часть.get("delta") or {}).get("stop_reason")
+            if причина:
+                итог["finish"] = STOP_REASON_AS_OPENAI.get(причина, причина)
+            итог["usage"] = часть.get("usage") or None
+            итог["alive"] = итог["finish"] == "length" or bool((итог["usage"] or {}).get("output_tokens"))
+        elif род == "message_stop":
+            итог["end"] = True
+        if итог["text"] or итог["reasoning"]:
+            итог["alive"] = True
+        return итог
+    # OpenAI-совместимый поток (свой сервер, DeepSeek, вход Anthropic /v1/chat/completions) и OpenRouter.
+    if часть.get("message") and not часть.get("choices"):
+        дельта = часть.get("message") or {}     # родной поток Ollama
+    else:
+        выбор = (часть.get("choices") or [{}])[0] or {}
+        дельта = выбор.get("delta") or {}
+        итог["finish"] = выбор.get("finish_reason") or None
+    итог["usage"] = часть.get("usage") or None
+    for поле in STREAM_TEXT_FIELDS:
+        if isinstance(дельта.get(поле), str):
+            итог["text"] += дельта[поле]
+    for поле in STREAM_REASONING_FIELDS:
+        if isinstance(дельта.get(поле), str):
+            итог["reasoning"] += дельта[поле]
+    подробности = дельта.get("reasoning_details")
+    if isinstance(подробности, list):
+        # OpenRouter: рассуждение блоками; у Claude с display omitted — зашифрованное, без текста (reasoning: null)
+        if not итог["reasoning"]:
+            итог["reasoning"] = "".join(str(п.get("text") or п.get("summary") or "") for п in подробности
+                                        if isinstance(п, dict))
+        if подробности:
+            итог["alive"] = True
+    выход = (итог["usage"] or {}).get("completion_tokens") or (итог["usage"] or {}).get("output_tokens")
+    if итог["text"] or итог["reasoning"] or итог["finish"] == "length" or выход:
+        итог["alive"] = True
+    return итог
+
+
+# Потолок пробы у модели Claude (26.10.2026): рассуждение у Claude 5.x скрыто и тратит потолок, 64 токенов не хватает,
+# чтобы после него пришёл хоть один знак ответа. Остановка по потолку и без того признак жизни — порог нужен, чтобы
+# проба обычно доходила до текста. Цена порога — не больше 2048 токенов выхода (≈0,02 $ у Sonnet 5.5): поток
+# закрывается на первом знаке.
+PROBE_CLAUDE_MIN_TOKENS = 2048
+
+
+def probe_max_tokens(route: "Route", model: str | None, settings: dict) -> int:
+    """Потолок ответа пробы: из настроек, у модели Claude — не меньше `PROBE_CLAUDE_MIN_TOKENS`."""
+    потолок = int(settings["max_tokens"])
+    if route.kind in ("openai", "openrouter") and is_claude(model or route.model):
+        потолок = max(потолок, PROBE_CLAUDE_MIN_TOKENS)
+    return потолок
+
+
 def probe(route: Route, *, chars: int = 0, system: str | None = None, user: str | None = None,
           model: str | None = None, api_key: str | None = None, extra: dict | None = None,
           settings: dict | None = None) -> dict:
@@ -1642,7 +2395,9 @@ def probe(route: Route, *, chars: int = 0, system: str | None = None, user: str 
     if route.kind == "ollama":
         body = {"model": модель, "messages": сообщения, "stream": True}
     else:
-        body = {"model": модель, "messages": сообщения, "max_tokens": int(s["max_tokens"]), "stream": True}
+        # Claude (26.10.2026): потолок не меньше PROBE_CLAUDE_MIN_TOKENS — скрытое рассуждение тратит его первым
+        body = {"model": модель, "messages": сообщения, "max_tokens": probe_max_tokens(route, модель, s),
+                "stream": True}
     for ключ_поля, значение in (extra or {}).items():
         body.setdefault(ключ_поля, значение)
     if route.kind != "ollama":
@@ -1657,17 +2412,33 @@ def probe(route: Route, *, chars: int = 0, system: str | None = None, user: str 
     итог = {"point": route.name, "model": модель, "kind": route.kind, "external": route.external,
             "chars_in": sum(len(m["content"]) for m in сообщения), "first_sign_sec": None, "seconds": 0.0,
             "ok": False, "reason": "", "first_sign_limit_sec": порог}
-    headers = {"Content-Type": "application/json"}
     ключ = route.api_key if api_key is None else api_key
-    if ключ:
-        headers["Authorization"] = f"Bearer {ключ}"
-    req = mark_request(urllib.request.Request(route.endpoint, data=json.dumps(body).encode("utf-8"), headers=headers,
+    if route.kind == "ollama":
+        адрес, тело_запроса, headers = route.endpoint, body, {"Content-Type": "application/json"}
+    else:
+        # тем же входом, что рабочий вызов: у точки Anthropic — родной Messages API с усилием (26.10.2026)
+        адрес, тело_запроса, headers = wire_request(route, body, ключ)
+    req = mark_request(urllib.request.Request(адрес, data=json.dumps(тело_запроса).encode("utf-8"), headers=headers,
                                               method="POST"), route)
     начало = time.monotonic()
     молчит = f"модель молчит дольше {порог:g} с — первый признак жизни не пришёл"
 
-    def _готово(ok: bool, причина: str = "") -> dict:
+    def _готово(ok: bool, причина: str = "", дошёл: bool = False) -> dict:
         итог["seconds"] = round(time.monotonic() - начало, 2)
+        if дошёл or ok:
+            # Запрос дошёл до модели — поставщик берёт за весь вход пробы (это начало первого запроса сборки), хотя
+            # поток закрыт на первом знаке и `usage` нет: сумма — оценкой по знакам (20.10.2026, заход 3 хаос-тестов)
+            try:
+                тариф, _ = tariff_for(route, модель)
+                цена = llm_cost.стоимость_вызова({}, тариф, знаков_вход=итог["chars_in"],
+                                                 знаков_выход=int(llm_cost.ЗНАКОВ_НА_ТОКЕН))
+                if цена.get("cost_usd") is not None:
+                    итог["cost_usd"], итог["cost_source"] = цена["cost_usd"], цена["cost_source"]
+                    # пик по UTC момента пробы (заход 4, 20.10.2026): сверка баланса с журналом видит, где тариф двойной
+                    if "peak" in цена:
+                        итог["peak"] = цена["peak"]
+            except Exception:  # noqa: BLE001 — подсчёт денег не роняет пробу
+                pass
         if ok:
             итог["first_sign_sec"] = итог["seconds"]
             with _lock:
@@ -1688,17 +2459,18 @@ def probe(route: Route, *, chars: int = 0, system: str | None = None, user: str 
         if isinstance(exc, TimeoutError) or isinstance(причина, TimeoutError) or "timed out" in str(exc).lower():
             return _готово(False, молчит)
         return _готово(False, f"нет связи с сервером модели: {type(exc).__name__}: {exc}")
+    конец_ответа = False          # поставщик закрыл ответ сам: [DONE], message_stop, остановка, done у Ollama
     try:
         with resp:
             while True:
                 прошло = time.monotonic() - начало
                 if прошло > порог:
-                    return _готово(False, молчит)
+                    return _готово(False, молчит, дошёл=True)
                 _read_timeout(resp, порог - прошло)
                 try:
                     строка = resp.readline()
                 except (TimeoutError, OSError, ValueError):
-                    return _готово(False, молчит)
+                    return _готово(False, молчит, дошёл=True)
                 if not строка:
                     break
                 текст = строка.decode("utf-8", errors="replace").strip()
@@ -1706,28 +2478,39 @@ def probe(route: Route, *, chars: int = 0, system: str | None = None, user: str 
                     текст = текст[5:].strip()
                 if not текст or текст == "[DONE]":
                     if текст == "[DONE]":
+                        конец_ответа = True
                         break
                     continue
                 try:
                     часть = json.loads(текст)
                 except ValueError:
-                    continue
+                    continue                      # `event: …` Anthropic, `: OPENROUTER PROCESSING` и прочие служебные
                 if not isinstance(часть, dict):
                     continue
-                if route.kind == "ollama":
-                    дельта = часть.get("message") or {}
-                else:
-                    дельта = ((часть.get("choices") or [{}])[0] or {}).get("delta") or {}
-                if any(isinstance(дельта.get(поле), str) and дельта.get(поле)
-                       for поле in ("content", "reasoning_content", "reasoning", "thinking")):
+                # Разбор — общий с чтением сборки (26.10.2026): OpenAI-совместимый, OpenRouter, Anthropic Messages API.
+                кусок = stream_piece(часть)
+                if кусок["error"]:
+                    return _готово(False, f"поставщик прислал ошибку в потоке: {кусок['error'][:160]}", дошёл=True)
+                if кусок["alive"]:
                     if time.monotonic() - начало > порог:
-                        return _готово(False, молчит)
+                        return _готово(False, молчит, дошёл=True)
+                    # Каким признаком — в замер и журнал: видно, что модель думала скрыто, а не ответила текстом
+                    итог["first_sign"] = ("текст ответа" if кусок["text"] else "текст рассуждения" if кусок["reasoning"]
+                                          else "остановка по потолку, рассуждение скрыто" if кусок["finish"] == "length"
+                                          else "блок рассуждения или расход выхода, рассуждение скрыто")
                     return _готово(True)          # первый признак жизни — готова; поток закрывает with
+                if кусок["finish"] or кусок["end"]:
+                    конец_ответа = True
                 if route.kind == "ollama" and часть.get("done"):
+                    конец_ответа = True
                     break
     except Exception as exc:  # noqa: BLE001 — обрыв посреди ответа: точка не готова, причина — человеку
-        return _готово(False, f"ответ оборвался: {type(exc).__name__}: {exc}")
-    return _готово(False, "поток закончился без единого знака ответа или рассуждения")
+        return _готово(False, f"ответ оборвался: {type(exc).__name__}: {exc}", дошёл=True)
+    if not конец_ответа:
+        # Ни остановки, ни [DONE], ни message_stop — поток оборвала сеть или прокси, а не модель (26.10.2026)
+        return _готово(False, "поток оборвался до конца ответа (нет остановки и [DONE]) — связь или прокси точки",
+                       дошёл=True)
+    return _готово(False, "поток закончился без единого знака ответа или рассуждения", дошёл=True)
 
 
 def probe_role(role: str, *, chars: int = 0, system: str | None = None, user: str | None = None,
@@ -1770,6 +2553,31 @@ def probe_role(role: str, *, chars: int = 0, system: str | None = None, user: st
     return False, замеры
 
 
+def probe_role_waiting(role: str, *, on_wait=None, sleep=None, clock=None, **kw) -> tuple[bool, list[dict], int, float]:
+    """Пробный запрос с ожиданием (решение владельца 17.10.26, С5 сведения): точка не готова — повтор каждые
+    `retry_sec` (5 мин), всего не дольше `wait_sec` (1 ч), потом (False, замеры последней попытки). Ожидание не снимает
+    предохранители и охлаждение точек — повтор идёт тем же `probe_role`. `on_wait(попытка, замеры, осталось_сек,
+    пауза_сек)` — продукту: признак жизни сторожу очереди и строка в сообщениях. Возвращает (готова, замеры,
+    попыток, ждали_сек)."""
+    s = kw.get("settings") or probe_settings()
+    kw["settings"] = s
+    sleep = sleep or time.sleep
+    clock = clock or time.monotonic
+    пауза = max(0.0, float(s.get("retry_sec") or 0))
+    всего = max(0.0, float(s.get("wait_sec") or 0))
+    начало = clock()
+    попытка = 0
+    while True:
+        попытка += 1
+        готова, замеры = probe_role(role, **kw)
+        прошло = clock() - начало
+        if готова or not пауза or прошло + пауза > всего:
+            return готова, замеры, попытка, прошло
+        if on_wait:
+            on_wait(попытка, замеры, всего - прошло, пауза)
+        sleep(пауза)
+
+
 def _main(argv: list[str]) -> int:
     sys.stdout.reconfigure(encoding="utf-8")
     if "--path" in argv:
@@ -1784,7 +2592,7 @@ def _main(argv: list[str]) -> int:
             print(json.dumps(use(argv[1], argv[2], by="командная строка"), ensure_ascii=False, indent=2))
         elif cmd == "check":
             for r in check_all():
-                print(f"{'ок  ' if r['ok'] else 'НЕТ '} {r['name']:<20} {r['model'] or '(из переменных)'} — {r['detail']}")
+                print(f"{'ок  ' if r['ok'] else 'НЕТ '} {r['name']:<20} {r['model'] or '(распознавание из переменных)'} — {r['detail']}")
         else:
             print(__doc__)
             return 2

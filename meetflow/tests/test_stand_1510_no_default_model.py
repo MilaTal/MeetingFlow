@@ -27,8 +27,8 @@ def routes(tmp_path, monkeypatch):
 
 def test_shared_modules_are_byte_copies():
     """Общие модули ERP и Планёрки — копии байт в байт; правятся там, переносятся целиком."""
-    assert hashlib.md5((SHARED / "model_routes.py").read_bytes()).hexdigest().startswith("9fb66b24572b")
-    assert hashlib.md5((SHARED / "llm_cost.py").read_bytes()).hexdigest().startswith("7d6d18d214f8")
+    assert hashlib.md5((SHARED / "model_routes.py").read_bytes()).hexdigest().startswith("503fc3c34a53")  # ERP main 2ea59c1, перенос 27.10.2026
+    assert hashlib.md5((SHARED / "llm_cost.py").read_bytes()).hexdigest().startswith("fc22479aa0b5")  # ERP main 2ea59c1
 
 
 def test_without_meetflow_llm_it_is_routes_not_mock(routes, monkeypatch):
