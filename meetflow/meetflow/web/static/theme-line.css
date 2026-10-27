@@ -6,7 +6,7 @@
 /* Шрифт — Calibri (решение владельца 13.10.26: «Onest меняем на Calibri на все системы»). Системный шрифт Windows: на закрытой
    машине без загрузки и без внешних запросов. Запасные — Carlito (метрически совместимый, Linux), затем системные. */
 
-:root {
+:root:not([data-theme="dark"]) {
   --bg: #ffffff;
   --surface: #ffffff;
   --border: #e4e4e7;
@@ -33,17 +33,17 @@
   --radius-sm: 8px;
 }
 
-body { font-family: Calibri, Carlito, "Segoe UI", system-ui, -apple-system, sans-serif; background: #fff; color: var(--text); }
+body { font-family: Calibri, Carlito, "Segoe UI", system-ui, -apple-system, sans-serif; background: var(--bg); color: var(--text); }
 button, input, select, textarea { font-family: inherit; }   /* поля и кнопки шрифт сами не наследуют */
 h1 { font-weight: 600; letter-spacing: -0.01em; }
-a { color: var(--text); text-decoration-color: #a1a1aa; }
+a { color: var(--text); text-decoration-color: var(--text-muted); }
 
 /* Левая колонка: название проекта прописными, без надписи-подзаголовка; пункты — тихо, активный полужирный */
-.sidebar { border-right: 1px solid var(--reg-line); padding: 32px 16px; background: #fff; }
-.brand { font-size: 12.5px; font-weight: 500; letter-spacing: 0.14em; text-transform: uppercase; color: #71717a; line-height: 1.6; }   /* #a1a1aa из образца даёт 2,56:1 — ниже порога 4,5:1 из того же дополнения; #71717a — 4,83:1 */
+.sidebar { border-right: 1px solid var(--reg-line); padding: 32px 16px; background: var(--surface); }
+.brand { font-size: 12.5px; font-weight: 500; letter-spacing: 0.14em; text-transform: uppercase; color: var(--text-muted); line-height: 1.6; }   /* #a1a1aa из образца даёт 2,56:1 — ниже порога 4,5:1 из того же дополнения; #71717a — 4,83:1 */
 .brand-sub { display: none; }
 .nav-item, .nav-item.nav-main, .nav-item.nav-service { border-radius: 0; background: none; }
-.nav-item.nav-main { font-size: 14.5px; font-weight: 500; color: #3f3f46; padding: 8px 12px; }
+.nav-item.nav-main { font-size: 14.5px; font-weight: 500; color: var(--text-muted); padding: 8px 12px; }
 .nav-item.nav-main:hover, .nav-item:hover { background: none; color: var(--text); }
 .nav-item.nav-main.active, .nav-item.active { background: none; color: var(--text); font-weight: 600; }
 .nav-item.nav-service { color: var(--text-muted); }
@@ -55,13 +55,13 @@ a { color: var(--text); text-decoration-color: #a1a1aa; }
 
 /* Поверхности: рамка 1 px, скругление 10, без теней и плашек */
 .card, .modal-card, .reg-menu, .reg-filter, .tip-body { box-shadow: none; }
-.card { border: 1px solid var(--reg-line); border-radius: 10px; background: #fff; }
+.card { border: 1px solid var(--reg-line); border-radius: 10px; background: var(--surface); }
 .reg-menu, .reg-filter, .tip-body { box-shadow: 0 6px 24px rgba(24, 24, 27, 0.06); }
 
 /* Кнопки: главная — рамкой цвета текста, при наведении заливка; обычные — серой рамкой; залитых цветных нет */
-.btn, button.btn, .btn-sm { border: 1px solid #d4d4d8; color: var(--text); background: #fff; border-radius: 8px; }
-.btn:hover, .btn-sm:hover { border-color: #a1a1aa; background: #fff; color: var(--text); }
-.btn-primary, .btn-warning, .btn-danger { background: #fff !important; color: var(--text) !important; border: 1px solid var(--text) !important; }
+.btn, button.btn, .btn-sm { border: 1px solid var(--border); color: var(--text); background: var(--surface); border-radius: 8px; }
+.btn:hover, .btn-sm:hover { border-color: var(--text-muted); background: var(--surface); color: var(--text); }
+.btn-primary, .btn-warning, .btn-danger { background: var(--surface) !important; color: var(--text) !important; border: 1px solid var(--text) !important; }
 .btn-primary:hover, .btn-warning:hover, .btn-danger:hover { background: var(--text) !important; color: #fff !important; }
 .btn-primary:disabled, .btn-primary[disabled] { opacity: 0.5; }
 .btn-primary .tab-badge:not(:empty) { background: none; color: var(--accent); }
@@ -71,8 +71,8 @@ a { color: var(--text); text-decoration-color: #a1a1aa; }
 .doc-tab { background: none; }
 
 /* Таблицы: шапка белая, приглушённая */
-th { background: #fff; color: var(--text-muted); font-weight: 500; }
-.chip { background: #f4f4f5; color: var(--text); border-radius: 6px; }
+th { background: var(--surface); color: var(--text-muted); font-weight: 500; }
+.chip { background: var(--field-bg-hover); color: var(--text); border-radius: 6px; }
 
 /* Документ: межстрочный 1,75, заголовок отделён тонкой линией */
 .doc-render, .mt-text { line-height: 1.75; }
@@ -91,7 +91,7 @@ th { background: #fff; color: var(--text-muted); font-weight: 500; }
   border-color: var(--accent); outline: none; }
 
 /* Уведомления: белая карточка, тонкая рамка, тень, слева галочка цвета акцента; ошибка — сливовый знак */
-.toast { background: #fff !important; color: var(--text) !important; border: 1px solid var(--border); border-radius: 10px;
+.toast { background: var(--surface) !important; color: var(--text) !important; border: 1px solid var(--border); border-radius: 10px;
   box-shadow: 0 8px 28px rgba(24, 24, 27, 0.1); padding-left: 38px !important; position: fixed; }
 .toast::before { content: ""; position: absolute; left: 14px; top: 50%; width: 15px; height: 15px; margin-top: -7.5px;
   background: var(--accent);
@@ -120,13 +120,13 @@ th { background: #fff; color: var(--text-muted); font-weight: 500; }
 
 /* «Конфликты» — очередь строками (conflicts.js) */
 #conflicts-list .cf-row { display: grid; grid-template-columns: 26px minmax(0, 1fr); column-gap: 10px; border: none; border-bottom: 1px solid var(--reg-line);
-  border-radius: 0; margin: 0; padding: 12px 4px; background: #fff; }
+  border-radius: 0; margin: 0; padding: 12px 4px; background: var(--surface); }
 #conflicts-list .cf-row > *:not(.cf-ico) { grid-column: 2; }
 #conflicts-list .cf-ico { grid-column: 1; grid-row: 1 / span 6; color: var(--text-muted); padding-top: 2px; }
 #conflicts-list .cf-row b { font-size: 14.5px; font-weight: 500; }
 #conflicts-list .cf-row .page-sub { font-size: 13px; font-style: italic; color: var(--text-muted); }
 #conflicts-list .cf-row .hstack { margin-top: 8px !important; }
-#conflicts-list .cf-row .hstack .btn-primary { background: #fff !important; }
+#conflicts-list .cf-row .hstack .btn-primary { background: var(--surface) !important; }
 #conflicts-list { border: 1px solid var(--reg-line); border-radius: 10px; padding: 0 12px; }
 .cf-filter { margin-bottom: 12px; }
 
@@ -161,9 +161,9 @@ th { background: #fff; color: var(--text-muted); font-weight: 500; }
 /* «Система» (system.js): службы точкой, сообщения и «Ожидает ввода» строками */
 .svc-dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; vertical-align: middle; box-sizing: border-box; }
 .svc-ok { background: var(--text); }
-.svc-bad { border: 1.5px solid var(--reg-over); background: #fff; }
-.svc-off { border: 1.5px solid #d4d4d8; background: #fff; }
-.svc-check { border: 1.5px solid var(--accent); background: #fff; }
+.svc-bad { border: 1.5px solid var(--reg-over); background: var(--surface); }
+.svc-off { border: 1.5px solid var(--border); background: var(--surface); }
+.svc-check { border: 1.5px solid var(--accent); background: var(--surface); }
 .svc-word { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }  /* для чтения с экрана */
 .mon-table td.mon-value:has(.svc-dot) { width: 24px; }
 .svc-bad-row .mon-label { color: var(--reg-over); }
@@ -189,7 +189,7 @@ th { background: #fff; color: var(--text-muted); font-weight: 500; }
 
 /* Раскрытый длинный список — своя лента прокрутки (владелец 13.10.26), как у таблиц (480 px) */
 .list-strip { max-height: 480px; overflow: auto; }
-.list-strip > .list-collapse { position: sticky; bottom: 0; background: #fff; }
+.list-strip > .list-collapse { position: sticky; bottom: 0; background: var(--surface); }
 /* Список подключений на «Моделях» раскрывается своей кнопкой — раскрытый в ленте прокрутки */
 .model-book[open] .model-book-scroll, .model-book[open] .table-scroll { max-height: 480px; overflow: auto; }
 
@@ -231,14 +231,14 @@ th { background: #fff; color: var(--text-muted); font-weight: 500; }
   font-size: 13px; font-weight: 500; color: var(--text-muted); cursor: pointer; white-space: nowrap; }
 .mp-line { position: relative; display: inline-flex; align-items: center; gap: 10px; padding: 0 2px; }
 .mp-line::before { content: ""; position: absolute; left: 2px; right: 2px; top: 50%; height: 1px; background: #d4d4d8; }
-.mp-dot { position: relative; width: 7px; height: 7px; border-radius: 50%; box-sizing: border-box; background: #fff; }
+.mp-dot { position: relative; width: 7px; height: 7px; border-radius: 50%; box-sizing: border-box; background: var(--surface); }
 .mp-done { background: var(--text); }
 .mp-skip, .mp-todo { border: 1.5px solid #d4d4d8; }
 .mp-now { border: 1.5px solid var(--accent); box-shadow: 0 0 0 3px rgba(104, 99, 191, 0.15); }
 .mp-fail { border: 1.5px solid var(--reg-over); }
 .mt-path-fail .mp-label { color: var(--reg-over); }
 .mt-path[aria-expanded="true"] .mp-label { color: var(--text); }
-.mt-path-card { position: fixed; z-index: 60; background: #fff; border: 1px solid var(--border); border-radius: 10px;
+.mt-path-card { position: fixed; z-index: 60; background: var(--surface); border: 1px solid var(--border); border-radius: 10px;
   box-shadow: 0 8px 28px rgba(24, 24, 27, 0.1); padding: 14px 16px; max-height: calc(100vh - 120px); overflow: auto; }
 .mt-path-card .path-head { background: none; border: none; padding: 0; font-family: inherit; font-size: 13px; font-weight: 500;
   color: var(--text-muted); margin-bottom: 10px; cursor: default; }
@@ -257,17 +257,17 @@ th { background: #fff; color: var(--text-muted); font-weight: 500; }
 #main:has(#users-list) .doc-head { gap: 8px 14px; margin-bottom: 12px; align-items: center; }
 #main:has(#users-list) .doc-head h1 { font-weight: 700; letter-spacing: normal; }
 #main:has(#users-list) .doc-tabs { background: #f4f4f8; }
-#main:has(#users-list) .doc-tab-on { background: #fff !important; color: #6863bf; border-bottom: 0 !important;
+#main:has(#users-list) .doc-tab-on { background: var(--surface) !important; color: var(--accent-text); border-bottom: 0 !important;
   box-shadow: 0 1px 3px rgba(24, 24, 27, .1), inset 0 0 0 1px #eef2ff; }
 #main:has(#users-list) #users-list.card { border-radius: 16px; border-color: #e4e4e7; box-shadow: 0 6px 20px rgba(104, 99, 191, .2); }
-#main:has(#users-list) .team-table th { background: #eef2ff; color: #18181b; font-weight: 600; }
+#main:has(#users-list) .team-table th { background: var(--accent-soft); color: var(--text); font-weight: 600; }
 #main:has(#users-list) .team-table thead th:first-child { border-radius: 10px 0 0 0; }
 #main:has(#users-list) .team-table thead th:last-child { border-radius: 0 10px 0 0; }
-#main:has(#users-list) .team-table .btn-icon { width: 30px; height: 30px; padding: 0; background: #eef2ff;
+#main:has(#users-list) .team-table .btn-icon { width: 30px; height: 30px; padding: 0; background: var(--accent-soft);
   border: 1px solid rgba(104, 99, 191, .16); border-radius: 10px; }
 #main:has(#users-list) .team-table select.team-role { border-radius: 10px; }
 #main:has(#users-list) .access-toggle { border-radius: 10px; }
-#main:has(#users-list) .more-row .btn-sm, #main:has(#users-list) .list-more .btn-sm { background: #eef2ff;
+#main:has(#users-list) .more-row .btn-sm, #main:has(#users-list) .list-more .btn-sm { background: var(--accent-soft);
   border-color: rgba(104, 99, 191, .16); border-radius: 10px; }
 
 
@@ -312,8 +312,8 @@ th { background: #fff; color: var(--text-muted); font-weight: 500; }
    протокола Планёрки). Реестр — устройство старого реестра рабочей ERP 8000, оформление — новое. ======================== */
 .sr-only { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
 /* фон рабочей области и карточки */
-.main { background: #f8f8fb; }
-.card { background: #fff; border: 1px solid #e4e4e7; border-radius: 12px; box-shadow: 0 2px 10px rgba(104, 99, 191, .08); }
+.main { background: var(--bg); }
+.card { background: var(--surface); border: 1px solid var(--border); border-radius: 12px; box-shadow: 0 2px 10px rgba(104, 99, 191, .08); }
 /* шапки таблиц данных — тёмные (контраст белого на #57529c ≈ 7:1); «Команда» — вид старой ERP (прямое решение владельца) */
 .reg-table thead th, .task-table:not(.reg-old) thead th, #main table.mon-table thead th, #main .card table:not(.team-table):not(.doc-table):not(.reg-old) thead th {
   background: #57529c; color: #fff; font-weight: 600; font-size: 13.5px; text-transform: uppercase; letter-spacing: .05em;
@@ -324,16 +324,16 @@ th { background: #fff; color: var(--text-muted); font-weight: 500; }
 /* ячейки — шкала протокола: 15,5 / 400 / 1,35; служебные строки — курсивом, серым, 13,5 */
 .reg-table td, .task-table:not(.reg-old) td { font-size: 15.5px; font-weight: 400; line-height: 1.35; padding: 6px 12px 6px 10px; vertical-align: top; }
 .reg-table .reg-text, .reg-table .reg-resp, .task-table:not(.reg-old) .task-desc-cell { font-weight: 400; font-size: 15.5px; }
-.reg-sub, .tl-sub, .doc-cell-sub, .mt-sub { font-size: 13.5px; font-style: italic; color: #71717a; font-weight: 400; }
-.reg-over, .reg-table .reg-over { color: #8e5a92; }
+.reg-sub, .tl-sub, .doc-cell-sub, .mt-sub { font-size: 13.5px; font-style: italic; color: var(--text-muted); font-weight: 400; }
+.reg-over, .reg-table .reg-over { color: var(--danger); }
 .reg-table td.reg-resp { white-space: normal; }        /* ФИО переносится на вторую строку, а не растягивает колонку */
 /* последний комментарий — не больше двух строк; «Актуализировать» — кнопкой в тонкой рамке, без заливки */
 .reg-comment { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; margin: 0 0 4px; }
-.reg-actualize { background: none; border: 1px solid #d4d4d8; border-radius: 8px; padding: 1px 8px; font: inherit; font-size: 13.5px;
-  color: #6863bf; cursor: pointer; }
-.reg-actualize:hover { border-color: #6863bf; }
+.reg-actualize { background: none; border: 1px solid var(--border); border-radius: 8px; padding: 1px 8px; font: inherit; font-size: 13.5px;
+  color: var(--accent-text); cursor: pointer; }
+.reg-actualize:hover { border-color: var(--accent-text); }
 /* действия строки — линейные значки в цвете #6863bf, без заливных квадратов */
-.reg-table .ri { color: #6863bf; }
+.reg-table .ri { color: var(--accent-text); }
 .reg-table .ri:hover, .reg-table .ri:focus-visible { color: #57529c; background: #f3f2fb !important; }
 /* ширины колонок по содержанию (раскладка fixed): «Описание» — остаток; на узком экране — прежняя раскладка */
 @media (min-width: 769px) {
@@ -360,13 +360,13 @@ th { background: #fff; color: var(--text-muted); font-weight: 500; }
 @media (min-width: 901px) { .mt-drawer[data-k="tasks"] { padding-right: 16px; } }
 .mt-drawer .tl-sub, .mt-tasks .tl-sub { font-size: 13.5px; }
 /* зона поиска (реестр, «Статус проекта → Поиск»): белая, рамка 1,5 px #6863bf, скругление 12, ореол; поле без своей рамки */
-.reg-search, .search-box { background: #fff; border: 1.5px solid #6863bf !important; border-radius: 12px; box-shadow: 0 0 0 4px rgba(104, 99, 191, .10); }
+.reg-search, .search-box { background: var(--surface); border: 1.5px solid #6863bf !important; border-radius: 12px; box-shadow: 0 0 0 4px rgba(104, 99, 191, .10); }
 .reg-search input, .search-box textarea, .search-box input { border: 0 !important; box-shadow: none !important; background: transparent;
-  font-size: 15.5px; color: #18181b; outline: none; }
+  font-size: 15.5px; color: var(--text); outline: none; }
 .search-box .search-submit { background: #57529c; color: #fff; border: 0; border-radius: 8px; }
 /* подсказка во всех полях поиска — 13 px, курсив, #a1a1aa (решение владельца 13.10.26) */
 input[type="search"]::placeholder, #search-input::placeholder, .search-box textarea::placeholder { font-size: 13px; font-style: italic;
-  color: #a1a1aa; opacity: 1; }
+  color: var(--text-muted); opacity: 1; }
 
 
 /* ---- Реестр задач — 1 в 1 со старым реестром рабочей ERP (владелец 13.10.26 вечером через «Мониторинг»: «как с „Командой“ —
@@ -377,23 +377,23 @@ input[type="search"]::placeholder, #search-input::placeholder, .search-box texta
    поле справа от галочки 16 px; служебные строки курсивом; строка видов и поиска над таблицей; закрытые — серая шапка. ---- */
 #reg-list.card { padding: 16px 18px; border-radius: 16px; border-color: #e4e4e7; box-shadow: 0 6px 20px rgba(104, 99, 191, .2); }
 #reg-list .task-table { font-size: 14.5px; border-collapse: collapse; }
-#reg-list .task-table th { background: #eef2ff; color: #18181b; font-weight: 600; font-size: 12.5px; text-transform: uppercase;
-  letter-spacing: .02em; padding: 10px 8px; border-bottom: 1px solid #e4e4e7; vertical-align: bottom; white-space: nowrap; }
+#reg-list .task-table th { background: var(--accent-soft); color: var(--text); font-weight: 600; font-size: 12.5px; text-transform: uppercase;
+  letter-spacing: .02em; padding: 10px 8px; border-bottom: 1px solid var(--border); vertical-align: bottom; white-space: nowrap; }
 #reg-list .task-table thead th:first-child { border-radius: 10px 0 0 0; }
 #reg-list .task-table thead th:last-child { border-radius: 0 10px 0 0; }
 #reg-list .task-table th .reg-col { background: none; border: 0; padding: 0; margin: 0; font: inherit; color: inherit;
   text-transform: inherit; letter-spacing: inherit; cursor: pointer; text-align: left; }
-#reg-list .task-table td { font-size: 14.5px; font-weight: 400; line-height: 1.5; padding: 10px 8px; border-bottom: 1px solid #e4e4e7;
+#reg-list .task-table td { font-size: 14.5px; font-weight: 400; line-height: 1.5; padding: 10px 8px; border-bottom: 1px solid var(--border);
   vertical-align: top; }
 #reg-list .task-table .task-num { font-weight: 600; }
-#reg-list .task-table .doc-cell-sub { display: block; font-size: 12.5px; color: #71717a; margin-top: 2px; font-style: italic; }
-#reg-list .task-table .doc-cell-sub.reg-over { color: #8e5a92; }
+#reg-list .task-table .doc-cell-sub { display: block; font-size: 12.5px; color: var(--text-muted); margin-top: 2px; font-style: italic; }
+#reg-list .task-table .doc-cell-sub.reg-over { color: var(--danger); }
 #reg-list .task-table .task-note-text { margin-bottom: 6px; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical;
   overflow: hidden; }
-#reg-list .task-table .btn-sm.task-note, #reg-list .task-table .btn-sm.task-revert { background: #eef2ff; border: 1px solid rgba(104, 99, 191, .16);
-  border-radius: 10px; font-weight: 500; font-size: 13px; padding: 5px 10px; color: #18181b; }
-#reg-list .task-table .btn-icon { width: 30px; height: 30px; padding: 0; background: #eef2ff; border: 1px solid rgba(104, 99, 191, .16);
-  border-radius: 10px; font-weight: 500; font-size: 13px; color: #18181b; }
+#reg-list .task-table .btn-sm.task-note, #reg-list .task-table .btn-sm.task-revert { background: var(--accent-soft); border: 1px solid rgba(104, 99, 191, .16);
+  border-radius: 10px; font-weight: 500; font-size: 13px; padding: 5px 10px; color: var(--text); }
+#reg-list .task-table .btn-icon { width: 30px; height: 30px; padding: 0; background: var(--accent-soft); border: 1px solid rgba(104, 99, 191, .16);
+  border-radius: 10px; font-weight: 500; font-size: 13px; color: var(--text); }
 #reg-list .task-table .task-done-cell { padding-left: 20px !important; }
 #reg-list .task-table tr > td:last-child, #reg-list .task-table tr > th:last-child { padding-right: 16px; }   /* поле справа ≥ 16 px */
 /* «Описание» — остаток ширины: ему ушла бывшая колонка «Статус на дату», остальные колонки (доли 8000) ближе к нему.
@@ -421,22 +421,22 @@ input[type="search"]::placeholder, #search-input::placeholder, .search-box texta
   #reg-list .task-table, #reg-list .task-table tbody, #reg-list .task-table tr, #reg-list .task-table td { display: block; width: auto; }
   #reg-list .task-table { overflow: visible; }
   #reg-list .task-table thead { display: none; }
-  #reg-list .task-table tr { position: relative; border-bottom: 1px solid #e4e4e7; padding: 8px 0; }
+  #reg-list .task-table tr { position: relative; border-bottom: 1px solid var(--border); padding: 8px 0; }
   #reg-list .task-table td { border: 0; padding: 2px 4px; }
   #reg-list .task-table td.task-num-cell { display: none; }
   #reg-list .task-table td.task-desc-cell { padding-right: 84px; }
-  #reg-list .task-table td[data-label]::before { content: attr(data-label) ": "; color: #71717a; font-size: 12.5px; }
+  #reg-list .task-table td[data-label]::before { content: attr(data-label) ": "; color: var(--text-muted); font-size: 12.5px; }
   #reg-list .task-table td.task-act-cell { position: absolute; top: 8px; right: 42px; padding: 0 !important; }
   #reg-list .task-table td.task-act-cell.task-done-cell, #reg-list .task-table.reg-closed td.task-act-cell { right: 4px; }
   #reg-list .task-table tr.more-row td, #reg-list .task-table tr.collapse-row td { text-align: center; }
 }
 /* «Конфликты» — группы по видам, свёрнуты до заголовка с числом карточек (решение владельца 13.10.26) */
-.cf-group { border-bottom: 1px solid #e4e4e7; }
+.cf-group { border-bottom: 1px solid var(--border); }
 .cf-group-head { display: flex; align-items: center; gap: 8px; width: 100%; background: none; border: 0; padding: 10px 4px;
   font: inherit; font-size: 15.5px; font-weight: 600; color: var(--text); cursor: pointer; text-align: left; }
-.cf-group-head .n { color: #6863bf; font-weight: 500; font-size: 13.5px; }
-.cf-group-head:hover, .cf-group-head:focus-visible { background: #f8f8fb; }
-.cf-chev { display: inline-block; width: 12px; color: #71717a; transition: transform .15s; }
+.cf-group-head .n { color: var(--accent-text); font-weight: 500; font-size: 13.5px; }
+.cf-group-head:hover, .cf-group-head:focus-visible { background: var(--bg); }
+.cf-chev { display: inline-block; width: 12px; color: var(--text-muted); transition: transform .15s; }
 .cf-group-head[aria-expanded="true"] .cf-chev { transform: rotate(90deg); }
 .cf-group-body { padding-bottom: 8px; }
 /* Хаос-тест 14.10.26, масштаб 150 % (1280 → 853 px): служебная строка под ссылкой протокола на «Подготовке» не переносилась —
@@ -452,7 +452,7 @@ input[type="search"]::placeholder, #search-input::placeholder, .search-box texta
   .meetings-table th, .meetings-table td { padding-right: 16px; } }
 /* Сквозная проверка стиля 14.10.26 («Мониторинг», проход 1) */
 /* подсказки всех полей — по общему правилу: 13 px, #a1a1aa, курсив (было: в цвете акцента, 14,5) */
-input::placeholder, textarea::placeholder { color: #a1a1aa; font-size: 13px; font-style: italic; opacity: 1; }
+input::placeholder, textarea::placeholder { color: var(--text-muted); font-size: 13px; font-style: italic; opacity: 1; }
 /* «Подготовка»/«Встречи»: форма создания — в строке заголовка справа, первая строка списка ≤ 150 px */
 .meetings-head { display: flex; align-items: center; flex-wrap: wrap; gap: 8px 12px; margin-bottom: 12px; }
 .meetings-head h1 { margin: 0; }
@@ -491,7 +491,7 @@ input::placeholder, textarea::placeholder { color: #a1a1aa; font-size: 13px; fon
 /* Шапка реестра задач — вариант «Г · графит (общий нейтральный)», решение владельца 14.10.26 (по снимку вариантов А–Д):
    фон #3f3f46, белый текст; размер и начертание — как в старой ERP (12,5 / 600, прописные). Было: светлая #eef2ff 1 в 1.
    Закрытые — по-прежнему серая #6b6b73 (решение 13.10.26). */
-#reg-list .task-table:not(.reg-closed) th { background: #3f3f46; color: #fff; border-bottom-color: #3f3f46; }
+#reg-list .task-table:not(.reg-closed) th { background: #3f3f46; color: #fff; border-bottom-color: var(--text-muted); }
 
 /* ==== Шапки ВСЕХ таблиц — одинаковые, по образцу шапки реестра (решение владельца 14.10.26: «и для команды тоже графит;
    по всем таблицам выровнять высоту шапки, размер и уровень шрифта — сделать везде одинаково, как на скрине»).
@@ -524,10 +524,10 @@ input::placeholder, textarea::placeholder { color: #a1a1aa; font-size: 13px; fon
 .reg-search, .search-box { background: #f0effa !important; border: 0 !important; border-radius: 14px !important; box-shadow: none !important;
   padding: 10px 12px; }
 .reg-search:focus-within, .search-box:focus-within { box-shadow: none !important; }
-.reg-search input, .search-box textarea, .search-box input { background: #fff !important; border: 1px solid #dcd9f2 !important;
+.reg-search input, .search-box textarea, .search-box input { background: var(--surface) !important; border: 1px solid #dcd9f2 !important;
   border-radius: 10px !important; box-shadow: none !important; }
-.reg-search input:focus, .search-box textarea:focus, .search-box input:focus { border-color: #6863bf !important; outline: none; }
-.search-box .search-submit { background: #eef2ff !important; color: #18181b !important; border: 1px solid rgba(104, 99, 191, .16) !important;
+.reg-search input:focus, .search-box textarea:focus, .search-box input:focus { border-color: var(--accent-text) !important; outline: none; }
+.search-box .search-submit { background: var(--accent-soft) !important; color: var(--text) !important; border: 1px solid rgba(104, 99, 191, .16) !important;
   border-radius: 10px !important; }
 .chip:active, .chip.on, .chip[aria-pressed="true"] { background: #57529c !important; color: #fff !important; border-color: #57529c !important; }
 /* Высота шапки — как у Планёрки fcabcac (38,75 px, текст на 11 px от верха): межстрочный в пикселях — коэффициент 1,5
@@ -539,20 +539,20 @@ input::placeholder, textarea::placeholder { color: #a1a1aa; font-size: 13px; fon
 #main table thead th { border-bottom: 0 !important; }   /* граница того же цвета невидима, но добавляла высоту (39,25 → 38,75) */
 /* Меню тремя блоками по ролям (владелец 14.10.26, как у Планёрки 79120fc): черта и тихая подпись блока */
 .nav-hr { border: 0; border-top: 1px solid #e4e4e7; margin: 10px 12px 6px; }
-.nav-cap { font-size: 13.5px; color: #71717a; padding: 2px 12px 4px; }
+.nav-cap { font-size: 13.5px; color: var(--text-muted); padding: 2px 12px 4px; }
 /* «Встречи по проекту» — устройство старого списка (владелец 14.10.26), оформление новое */
 .feed-head { margin: 0 0 12px; }
 .feed-head h1 { margin: 0 0 4px; }
-.feed-sub { font-size: 13.5px; color: #71717a; font-style: italic; }
+.feed-sub { font-size: 13.5px; color: var(--text-muted); font-style: italic; }
 .feed-head { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 16px; }
 .feed-new { display: flex; align-items: center; gap: 8px; margin-left: auto; }
 .feed-new input[type="date"] { width: 150px; padding-top: 6px; padding-bottom: 6px; }
 .feed-new input[type="text"] { width: 220px; padding-top: 6px; padding-bottom: 6px; }
 @media (max-width: 900px) { .feed-new { margin-left: 0; width: 100%; flex-wrap: wrap; } .feed-new input[type="text"] { flex: 1 1 160px; width: auto; } }
-.feed-section { font-size: 15.5px; font-weight: 600; color: #18181b; margin: 8px 0 8px; cursor: default; }
+.feed-section { font-size: 15.5px; font-weight: 600; color: var(--text); margin: 8px 0 8px; cursor: default; }
 details.feed-archive > summary.feed-section { cursor: pointer; }
-.feed-section .cnt { color: #6863bf; font-weight: 500; font-size: 13.5px; }
-.feed-h-note { font-size: 13.5px; font-weight: 400; font-style: italic; color: #71717a; }
+.feed-section .cnt { color: var(--accent-text); font-weight: 500; font-size: 13.5px; }
+.feed-h-note { font-size: 13.5px; font-weight: 400; font-style: italic; color: var(--text-muted); }
 .card.feed-empty { padding: 12px 16px; margin: 0; }
 .feed-list { padding: 0; }
 .feed-head-text { flex: 1 1 300px; min-width: 0; }
@@ -595,7 +595,7 @@ details.feed-archive > summary.feed-section { cursor: pointer; }
 .id-flag input { width: auto; margin-top: 3px; }
 .id-flag b { display: block; font-weight: 600; color: var(--text); }
 .id-flag small { display: block; font-size: 13px; color: var(--text-muted); }
-.id-flag:has(input:checked) { border-color: var(--accent); background: #eef2ff; }
+.id-flag:has(input:checked) { border-color: var(--accent); background: var(--accent-soft); }
 
 /* Экраны супер-администратора — акценты старой ERP при цветах новой (владелец 14.10.26, вечер: «примени дизайн со старой
    ERP по акцентам, оставь только цвета и элементы дизайна как для новой; акценты, обводки — как на старой; сейчас неясные
@@ -616,7 +616,7 @@ details.feed-archive > summary.feed-section { cursor: pointer; }
 #main:is([data-screen="system"], [data-screen="live"], [data-screen="models"], [data-screen="voices"], [data-screen="units"]) .badge { font-size: 15.5px; }
 #main:is([data-screen="system"], [data-screen="live"], [data-screen="models"], [data-screen="voices"], [data-screen="units"]) .mon-table td { padding-top: 8px; padding-bottom: 8px; }
 #main:is([data-screen="system"], [data-screen="live"], [data-screen="models"], [data-screen="voices"], [data-screen="units"]) :is(.mon-label, .mon-key) { color: var(--text); font-weight: 600; }
-#main:is([data-screen="system"], [data-screen="live"], [data-screen="models"], [data-screen="voices"], [data-screen="units"]) :is(.mon-note, .page-sub, .reg-sub, .mon-lead, .mon-off) { color: #3f3f46; }
+#main:is([data-screen="system"], [data-screen="live"], [data-screen="models"], [data-screen="voices"], [data-screen="units"]) :is(.mon-note, .page-sub, .reg-sub, .mon-lead, .mon-off) { color: var(--text-muted); }
 #main:is([data-screen="system"], [data-screen="live"], [data-screen="models"], [data-screen="voices"], [data-screen="units"]) .svc-bad-row .mon-label { color: var(--reg-over); }
 
 /* Поля ввода в окнах — мягкая тень (владелец 14.10.26 в чате Планёрки, «сделать аналогично для ERP»; Планёрка 6a8b058):
@@ -629,19 +629,19 @@ details.feed-archive > summary.feed-section { cursor: pointer; }
    #71717a (10,4:1 вместо 4,8:1). Приоритет низкий (:where): цветные состояния — сливовая просрочка, акцентные ссылки,
    отметки — остаются своими. Размеры не менялись. */
 :where(#main) :is(.page-sub, .reg-sub, .doc-cell-sub, .proto-state, .proto-tasks, .feed-sub, .feed-h-note, .mt-sub,
-  .empty-state, .doc-head-meta, .mp-label, .mon-note, .team-prole-sub) { color: #3f3f46; }
-#reg-list .task-table .doc-cell-sub { color: #3f3f46; }   /* «поставлена … · встреча …» — у реестра своё правило сильнее; «просрочено» (.reg-over) — сильнее этого */
+  .empty-state, .doc-head-meta, .mp-label, .mon-note, .team-prole-sub) { color: var(--text-muted); }
+#reg-list .task-table .doc-cell-sub { color: var(--text-muted); }   /* «поставлена … · встреча …» — у реестра своё правило сильнее; «просрочено» (.reg-over) — сильнее этого */
 /* Токен приглушённого текста — #3f3f46, как в Планёрке (line.css, правило контраста владельца 14.10.26; системы выглядят
    одинаково, 24.10.2026): «решили:», «Предложение ассистента» и прочие места на --text-muted — 10,4:1 к белому вместо 4,83:1.
    Действует последнее определение токена; #71717a в :root выше и в styles.css остаётся исходным значением. */
-:root { --text-muted: #3f3f46; }
+:root:not([data-theme="dark"]) { --text-muted: #3f3f46; }
 
 /* «Встречи по проекту» — подход Планёрки («Список планёрок», владелец 15.10.26), цвета и элементы ERP: форма — карточкой на своей
    строке; строка — месяц · дата полужирным · «Протокол», «Встреча» · название · состояние · «задач N» справа. */
 .feed-new.feed-new-card { margin: 0 0 16px; padding: 12px 16px; }
 .feed-new.feed-new-card input[type="text"] { flex: 1 1 320px; width: auto; }
 #proto-list .proto-row { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 16px; padding: 10px 16px; cursor: pointer; }
-#proto-list .proto-month { flex: 0 0 150px; font-size: 13.5px; letter-spacing: .06em; text-transform: uppercase; color: #3f3f46; }
+#proto-list .proto-month { flex: 0 0 150px; font-size: 13.5px; letter-spacing: .06em; text-transform: uppercase; color: var(--text-muted); }
 #proto-list .proto-date { flex: 0 0 auto; min-width: 96px; font-weight: 700; color: var(--text); text-decoration: none; }
 #proto-list .proto-acts { display: inline-flex; gap: 14px; }
 #proto-list .proto-acts a { color: var(--text); text-decoration: underline; text-decoration-color: #d4d4d8; text-underline-offset: 3px; }
@@ -654,7 +654,7 @@ details.feed-archive > summary.feed-section { cursor: pointer; }
 /* «Модели»: выбранная (основная) строка цепочки — контрастнее (владелец 15.10.26: «более контрастной сделать выбранную строку,
    и для Планёрки, и для ERP»). Было: фон --accent-soft (#fafafa в новой теме) — почти не отличим от белого, отличала только
    полоса 3 px. Стало: фон #eef2ff (лаванда акцента, как плашка «Внешний контакт»), полоса 4 px. */
-.route-row-on > td { background: #eef2ff; }
+.route-row-on > td { background: var(--accent-soft); }
 .route-row-on > td:first-child { box-shadow: inset 4px 0 0 var(--accent); }
 
 /* Шире шаг между колонками (владелец 15.10.26 в Планёрке, «сделай ширину между колонками… сделай также для ERP»; Планёрка
@@ -725,7 +725,7 @@ details.feed-archive > summary.feed-section { cursor: pointer; }
 #conflicts-list .cf-row > .cf-main { grid-column: 2; min-width: 0; }
 #conflicts-list .cf-row > .cf-act { grid-column: 3; }
 #conflicts-list .cf-main :is(div, b, .page-sub) { font-size: 15.5px; max-width: none; }
-#conflicts-list .cf-main .page-sub { font-style: italic; color: #3f3f46; line-height: 1.45; margin-top: 4px; }
+#conflicts-list .cf-main .page-sub { font-style: italic; color: var(--text-muted); line-height: 1.45; margin-top: 4px; }
 #conflicts-list .cf-act { display: flex; flex-direction: column; align-items: stretch; gap: 3px; width: 300px; }
 #conflicts-list .cf-act > :not(.cf-act-icons):not(.cf-dismiss) { display: block; width: 100%; box-sizing: border-box; text-align: left;
   margin: 0; padding: 5px 10px !important; border-radius: 6px; border: 0 !important; background: #f6f6fd !important;
@@ -756,7 +756,7 @@ details.feed-archive > summary.feed-section { cursor: pointer; }
 #decisions-list .cf-row.conflict-card[hidden] { display: none !important; }
 #decisions-list .cf-ico { color: var(--text-muted); padding-top: 2px; }
 #decisions-list .cf-main b { font-size: 15.5px; font-weight: 500; }
-#decisions-list .cf-main .page-sub { font-size: 15.5px !important; font-style: italic; color: #3f3f46; margin-top: 4px; max-width: none; }
+#decisions-list .cf-main .page-sub { font-size: 15.5px !important; font-style: italic; color: var(--text-muted); margin-top: 4px; max-width: none; }
 #decisions-list .dec-meta { font-size: 13.5px; color: #52525b; margin-top: 4px; }
 #decisions-list .cf-act { display: flex; flex-direction: column; gap: 3px; width: 300px; }
 #decisions-list .cf-act > .btn-sm { display: block; width: 100%; text-align: left; padding: 5px 10px !important; border-radius: 6px; border: 0 !important;
@@ -822,13 +822,13 @@ details.feed-archive > summary.feed-section { cursor: pointer; }
    перекрыто нейтральным тоном (`line.css`: button:hover — белый фон, цвет текста, серая рамка; кнопки-ссылки — без подложки).
    Здесь — то же, слово в слово по смыслу: системы выглядят одинаково. Кнопки со своим наведением (блок «Наведение и курсор»,
    правила с #id) сильнее этого правила и не меняются. */
-button:hover, .btn:hover { background: #fff; color: var(--text); border-color: #a1a1aa; }
+button:hover, .btn:hover { background: var(--surface); color: var(--text); border-color: var(--text-muted); }
 button.link:hover, .btn-link:hover, .linkbtn:hover, .search-reset-link:hover { background: none; color: var(--text); }
 
 /* --- «Подтвердить» / «Снять» во вкладке «Под вопросом» (19.10.2026, как в Планёрке 18.10): под «Актуализировать», тем же видом */
 #reg-list .task-table td.task-note-cell .pod-acts { display: inline-flex; flex-wrap: wrap; gap: 6px; margin-top: 6px; }
-#reg-list .task-table .btn-sm.task-pod { background: #eef2ff; border: 1px solid rgba(104, 99, 191, .16);
-  border-radius: 10px; font-weight: 500; font-size: 13px; padding: 5px 10px; color: #18181b; }
+#reg-list .task-table .btn-sm.task-pod { background: var(--accent-soft); border: 1px solid rgba(104, 99, 191, .16);
+  border-radius: 10px; font-weight: 500; font-size: 13px; padding: 5px 10px; color: var(--text); }
 #reg-list .task-table .btn-sm.task-pod:is(:hover, :focus-visible) { background: var(--tint-hover); }
 
 /* --- Плашка поиска и вида над лентой задач (.live-views) — от «Экрана встречи» 19–20.10.2026; с 21.10.2026 экран убран
@@ -845,7 +845,7 @@ button.link:hover, .btn-link:hover, .linkbtn:hover, .search-reset-link:hover { b
 /* --- «Как пользоваться» (Е17, 20.10.2026; образец — Планёрка, решение владелицы 18.10.2026) -----------------------------
    Пункт в самом низу блока «Вы работаете как» — тихой ссылкой цвета пунктов меню со значком «воспроизвести»; страница —
    встроенный проигрыватель во всю ширину карточки, не выше окна. Вид — как в Планёрке (line.css), цвет активного — акцент ERP. */
-.whoami-help { display: flex; align-items: center; gap: 8px; margin-top: 14px; padding: 6px 0; color: #3f3f46;
+.whoami-help { display: flex; align-items: center; gap: 8px; margin-top: 14px; padding: 6px 0; color: var(--text-muted);
   font-size: 14.5px; text-decoration: none; }
 .whoami-help::before { content: ""; width: 16px; height: 16px; flex-shrink: 0; background: currentColor; opacity: .75;
   -webkit-mask: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23000' stroke-width='1.6' stroke-linejoin='round'><circle cx='12' cy='12' r='9'/><path d='M10 8.5l5.5 3.5-5.5 3.5z'/></svg>") center/contain no-repeat;
@@ -854,7 +854,7 @@ button.link:hover, .btn-link:hover, .linkbtn:hover, .search-reset-link:hover { b
 .whoami-help.active { font-weight: 600; }
 .whoami-help.active::before { opacity: 1; background: var(--accent); }
 .help-card { padding: 16px; }
-.help-video { display: block; width: 100%; max-height: calc(100vh - 190px); background: #fafafa; border-radius: 8px; }
+.help-video { display: block; width: 100%; max-height: calc(100vh - 190px); background: var(--field-bg); border-radius: 8px; }
 .help-sub { margin: 10px 0 0; }
 
 /* ==== Таблица задач внутри протокола (решение владелицы 18.10.2026, п. 2–3) ====
@@ -1038,7 +1038,7 @@ a.mt-btn { text-decoration: none; }
    отбора колонок ленты экрана убрано вместе с ним. */
 .live-views .scr-search { flex: 1 1 420px; max-width: none; padding: 4px 8px; }
 .live-views .scr-search input { height: 42px; font-size: 16.5px; padding: 8px 10px; }
-.live-views .live-view-select { flex: 0 0 auto; width: auto; font: inherit; font-size: 14.5px; padding: 6px 8px; border: 1px solid var(--border); border-radius: 8px; background: #fff; color: var(--text); max-width: 100%; }
+.live-views .live-view-select { flex: 0 0 auto; width: auto; font: inherit; font-size: 14.5px; padding: 6px 8px; border: 1px solid var(--border); border-radius: 8px; background: var(--surface); color: var(--text); max-width: 100%; }
 .live-views .tip { margin-left: 0; }
 .live-chips { display: flex; flex-wrap: wrap; gap: 6px; margin: 6px 0 0; }
 .live-chips[hidden] { display: none; }

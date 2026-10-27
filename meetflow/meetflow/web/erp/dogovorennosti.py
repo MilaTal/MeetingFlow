@@ -78,10 +78,25 @@ def mount(r: APIRouter, ctx: Ctx) -> None:
         admin = ctx.is_admin(u)
         pid = ctx.project(request)
         projects = {p["id"]: p["name"] for p in store.q("SELECT id, name FROM projects")}
-        subs = [str(x) for x in (store.get_setting("subprojects", pid, []) or [])] if pid else []
-        pf = ({"all": f"Весь проект {projects.get(pid, '')}".strip(), "options": subs,
-               "none": "без подпроекта" if subs else "", "none_value": "__none__"} if pid
-              else {"all": "Все проекты", "options": sorted(projects.values()), "none": "", "none_value": "__none__"})
+        # Фильтр проекта (вид ERP `podproekty.фильтр`): при выбранном проекте — «Весь проект X», его подпроекты и «без
+        # подпроекта»; при «Все проекты» — проекты и подпроекты подписью «Проект – Подпроект» (многопроектность MeetFlow)
+        live = [p for p in store.q("SELECT id, parent_id FROM projects WHERE COALESCE(archived,0)=0")]
+        fam = ctx.family(pid) if pid else []
+        if pid:
+            label_ids = {ctx.project_names(i)[1]: i for i in fam if i != pid and ctx.project_names(i)[1]}
+            subs = sorted(label_ids)
+            pf = {"all": f"Весь проект {ctx.project_label(pid)}".strip(), "options": subs,
+                  "none": "без подпроекта" if subs else "", "none_value": "__none__"}
+        else:
+            label_ids = {ctx.project_label(p["id"]): p["id"] for p in live}
+            pf = {"all": "Все проекты", "options": sorted(label_ids), "none": "", "none_value": "__none__"}
+        if project == "__none__":
+            want_ids = {pid} if pid else None
+        elif project:
+            hit = label_ids.get(project)
+            want_ids = set(ctx.family(hit)) if hit else set()
+        else:
+            want_ids = None
         base = {"kinds": KINDS, "statuses": sorted(set(STATUS_AGR.values())), "projects": pf["options"], "project_filter": pf,
                 "mode": mode()}
         if u is None or (not admin and mode() == "shadow"):
@@ -91,8 +106,8 @@ def mount(r: APIRouter, ctx: Ctx) -> None:
             where.append("u.meeting_id=?")
             args.append(meeting_id)
         elif pid:
-            where.append("u.project_id=?")
-            args.append(pid)
+            where.append(f"u.project_id IN ({','.join('?' * len(fam))})")
+            args += fam
         rows = store.q("SELECT u.*, m.date AS mdate FROM units u LEFT JOIN meetings m ON m.id=u.meeting_id WHERE "
                        + " AND ".join(where) + " ORDER BY COALESCE(m.date,'') DESC, u.id", tuple(args))
         status_map = {t["id"]: t["status"] for t in store.q("SELECT id, status FROM tasks")}
@@ -113,16 +128,14 @@ def mount(r: APIRouter, ctx: Ctx) -> None:
                 continue
             if to_date(date_to) and d > to_date(date_to).isoformat():
                 continue
-            if project and not pid and projects.get(x.get("project_id")) != project:
+            if want_ids is not None and x.get("project_id") not in want_ids:
                 continue
-            if project == "__none__" and pid:
-                pass
             roles = loads(x.get("roles"), [])
             people = lambda role: ", ".join(r.get("person") or r.get("name") or "" for r in roles  # noqa: E731
                                             if isinstance(r, dict) and r.get("role") == role)
             item = {"id": x["id"], "meeting_id": x["meeting_id"], "date": d,
-                    "project": projects.get(x.get("project_id"), ""),
-                    "subproject": "" if pid else projects.get(x.get("project_id"), ""),
+                    "project": ctx.project_names(x.get("project_id"))[0],
+                    "subproject": ctx.project_names(x.get("project_id"))[1] if pid else ctx.project_label(x.get("project_id")),
                     "topic": "", "kind": k, "text": x.get("text") or "",
                     "decided_by": x.get("decided_by") or people("ответственный"), "agreed_by": people("участник"),
                     "proposed_by": people("влияющий"), "quote": (x.get("quote") or "") if admin else "",
@@ -171,12 +184,15 @@ def mount(r: APIRouter, ctx: Ctx) -> None:
     def summary_md(pid: int) -> str:
         p = store.get("projects", pid) or {}
         today = date.today().isoformat()
-        tasks = store.q("SELECT status, due_date, description, assignee FROM tasks WHERE project_id=?", (pid,))
+        # проект — вместе с подпроектами (выбор проекта показывает его с подпроектами)
+        fam = ctx.family(pid) or [pid]
+        inn = f"IN ({','.join('?' * len(fam))})"
+        tasks = store.q(f"SELECT status, due_date, description, assignee FROM tasks WHERE project_id {inn}", tuple(fam))
         active = [t for t in tasks if t["status"] == "active"]
         over = [t for t in active if t.get("due_date") and t["due_date"] < today]
-        units = store.q("SELECT kind, status, text FROM units WHERE project_id=?", (pid,))
-        meetings = store.q("SELECT date, protocol_built_at FROM meetings WHERE project_id=? AND COALESCE(status,'')!='cancelled'",
-                           (pid,))
+        units = store.q(f"SELECT kind, status, text FROM units WHERE project_id {inn}", tuple(fam))
+        meetings = store.q(f"SELECT date, protocol_built_at FROM meetings WHERE project_id {inn} AND COALESCE(status,'')!='cancelled'",
+                           tuple(fam))
         past = sorted(m["date"] for m in meetings if (m["date"] or "") <= today)
         lines = [f"Сводка по проекту «{p.get('name', '')}» на {ru_date(today)}", "",
                  "1 Задачи", "",

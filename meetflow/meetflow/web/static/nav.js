@@ -98,7 +98,7 @@ async function renderProtocols() {
         <a class="proto-date" href="#meetings/${m.id}">${esc(fmtRuDate(m.date))}</a>
         <span class="proto-acts"><a href="#meetings/${m.id}/protocol">Протокол</a><a href="#meetings/${m.id}">Встреча</a></span>
         ${название ? `<span class="proto-label">${esc(название)}</span>` : ""}
-        ${!выбранныйПроект() && m.project_name ? `<span class="proto-label">${esc(m.project_name)}</span>` : ""}
+        ${(!выбранныйПроект() && m.project_label) || m.subproject ? `<span class="proto-label">${esc(выбранныйПроект() ? m.subproject : m.project_label)}</span>` : ""}
         <span class="proto-state${с.акцент ? " proto-state-acc" : ""}">${НАВ_ЗНАКИ[с.знак] || ""}${esc(с.текст)}</span>
         ${m.предложена_пересборка && isAdmin() ? `<a class="proto-state proto-state-acc" href="#razbor" title="Пришёл источник, добавляющий новое. Протокол правили вручную, встреча старше пяти рабочих дней или автопересборок уже две — сами не пересобираем. Решение — в «Разборе»">есть новые материалы — пересобрать?</a>` : ""}
         <span class="proto-tasks">задач ${m.tasks_count || 0}</span></div></li>`;
@@ -525,21 +525,30 @@ renderPrep = сПрокруткойНаМесте(renderPrep);
 // несколько — это одно из двух разрешённых отличий. Папка-приёмник у каждого проекта своя: задаётся на «Мониторинге
 // RealTime», когда проект выбран внизу левой панели.
 async function renderProjectsAdmin() {
-  $main.innerHTML = системаВкладкиHtml("projects") + `<div class="page-sub">Проекты компании. Новый проект сразу появляется
-    в выборе внизу левой панели; проект в архиве из выбора убирается, его встречи и задачи сохраняются.</div>
+  // Справочник проектов и подпроектов (ЛМ 6c6933f, возвращён 27.10.2026): проект, под ним подпроекты; у подпроекта —
+  // надпроект. Варианты написания, архив и возврат. Выбор проекта внизу левой панели показывает проект с подпроектами.
+  $main.innerHTML = системаВкладкиHtml("projects") + `<div class="page-sub">Проекты и подпроекты компании. Новый проект сразу
+    появляется в выборе внизу левой панели; проект показывается вместе со своими подпроектами. Подпроект — проект с
+    надпроектом. Проект в архиве из выбора убирается, его встречи и задачи сохраняются.</div>
     <div class="card"><form id="prj-new" class="hstack" style="flex-wrap:wrap; gap:8px">
-      <input id="prj-new-name" placeholder="Название проекта" maxlength="200" style="min-width:240px">
-      <input id="prj-new-aliases" placeholder="Варианты написания через «;»" maxlength="2000" style="min-width:280px">
-      <button class="btn-sm btn-primary" type="submit">Завести проект</button></form></div>
+      <input id="prj-new-name" placeholder="Название проекта или подпроекта" maxlength="200" style="min-width:240px">
+      <input id="prj-new-aliases" placeholder="Варианты написания через «;»" maxlength="2000" style="min-width:240px">
+      <label>Надпроект <select id="prj-new-parent"><option value="">— проект верхнего уровня —</option></select></label>
+      <button class="btn-sm btn-primary" type="submit">Завести</button></form></div>
     <div id="prj-list" class="card empty-state">Загрузка…</div>`;
   const список = document.getElementById("prj-list");
+  const варианты = (rows, свой, выбран) => '<option value="">— нет (проект верхнего уровня) —</option>' + rows
+    .filter(x => !x.archived && x.id !== свой && !(x.label || "").startsWith((rows.find(r => r.id === свой) || {}).label + " – "))
+    .map(x => `<option value="${x.id}"${x.id === выбран ? " selected" : ""}>${esc(x.label || x.name)}</option>`).join("");
   const нарисовать = async () => {
     let rows;
     try { rows = await api("/projects-list/all"); } catch (err) { список.textContent = "Не удалось загрузить: " + err.message; return; }
     список.classList.remove("empty-state");
-    список.innerHTML = `<table class="tbl"><thead><tr><th>Проект</th><th>Варианты написания</th><th>Встреч</th>
+    document.getElementById("prj-new-parent").innerHTML = варианты(rows, null, null).replace("— нет (проект верхнего уровня) —", "— проект верхнего уровня —");
+    список.innerHTML = `<table class="tbl"><thead><tr><th>Проект</th><th>Надпроект</th><th>Варианты написания</th><th>Встреч</th>
       <th>Активных задач</th><th>Папка-приёмник</th><th></th></tr></thead><tbody>${rows.map(p => `<tr data-id="${p.id}">
-      <td><input class="prj-name" value="${esc(p.name)}" maxlength="200"${p.archived ? " disabled" : ""}>${p.archived ? ' <span class="page-sub">в архиве</span>' : ""}</td>
+      <td style="padding-left:${8 + 18 * (p.level || 0)}px">${p.level ? "– " : ""}<input class="prj-name" value="${esc(p.name)}" maxlength="200"${p.archived ? " disabled" : ""}>${p.archived ? ' <span class="page-sub">в архиве</span>' : ""}</td>
+      <td><select class="prj-parent"${p.archived ? " disabled" : ""}>${варианты(rows, p.id, p.parent_id)}</select></td>
       <td><input class="prj-aliases" value="${esc((p.aliases || []).join("; "))}" maxlength="2000"${p.archived ? " disabled" : ""}></td>
       <td>${p.meetings}</td><td>${p.active_tasks}</td><td>${p.watch_folder ? esc(p.watch_folder) : "не задана"}</td>
       <td class="hstack">${p.archived ? `<button class="btn-sm prj-restore">Вернуть из архива</button>`
@@ -551,9 +560,10 @@ async function renderProjectsAdmin() {
         catch (err) { toast(err.message, true); }
       };
       tr.querySelector(".prj-save")?.addEventListener("click", () => изменить(
-        { name: tr.querySelector(".prj-name").value, aliases: tr.querySelector(".prj-aliases").value }, "Проект сохранён"));
+        { name: tr.querySelector(".prj-name").value, aliases: tr.querySelector(".prj-aliases").value,
+          parent_id: Number(tr.querySelector(".prj-parent").value) || null }, "Проект сохранён"));
       tr.querySelector(".prj-archive")?.addEventListener("click", () => {
-        if (confirm("Убрать проект в архив? Встречи и задачи сохранятся, папка-приёмник проекта выключится.")) изменить({ archived: true }, "Проект в архиве");
+        if (confirm("Убрать в архив? Встречи и задачи сохранятся, папка-приёмник выключится.")) изменить({ archived: true }, "Проект в архиве");
       });
       tr.querySelector(".prj-restore")?.addEventListener("click", () => изменить({ archived: false }, "Проект возвращён"));
     });
@@ -562,8 +572,9 @@ async function renderProjectsAdmin() {
     e.preventDefault();
     try {
       await api("/projects-list", { method: "POST", json: { name: document.getElementById("prj-new-name").value,
-        aliases: document.getElementById("prj-new-aliases").value } });
-      toast("Проект заведён");
+        aliases: document.getElementById("prj-new-aliases").value,
+        parent_id: Number(document.getElementById("prj-new-parent").value) || null } });
+      toast("Заведено");
       document.getElementById("prj-new-name").value = ""; document.getElementById("prj-new-aliases").value = "";
       await загрузитьПроекты(); await нарисовать();
     } catch (err) { toast(err.message, true); }

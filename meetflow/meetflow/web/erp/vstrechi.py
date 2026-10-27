@@ -76,6 +76,10 @@ class MeetingDateIn(InModel):
         return _date_in(v)
 
 
+class MeetingSubprojectIn(InModel):
+    subproject: str | None = Field(default=None, max_length=200)
+
+
 class MeetingLeaderIn(InModel):
     user_id: int | None
 
@@ -205,8 +209,10 @@ def mount(r: APIRouter, ctx: Ctx) -> None:
                         "building": bool(b["running"]), "предложена_пересборка": False,
                         "has_plan": bool(m.get("plan_md")), "plan_generated_at": iso_dt(m.get("plan_built_at")),
                         "materials_count": len(sources_of(m["id"], True))})
-            p = store.get("projects", m.get("project_id") or 0)
-            out["project_name"] = p["name"] if p else ""
+        # проект и подпроект встречи (справочник проектов, `projects.parent_id`): подпись «Проект – Подпроект»
+        root_name, sub_name = ctx.project_names(m.get("project_id"))
+        out.update(project_name=root_name, subproject=sub_name or None, project_label=ctx.project_label(m.get("project_id")),
+                   project_root_id=ctx.root_of(m.get("project_id")))
         return out
 
     def describe(m: dict) -> dict:
@@ -896,6 +902,42 @@ def mount(r: APIRouter, ctx: Ctx) -> None:
                 raise HTTPException(400, "Такого человека нет в «Команде» среди активных")
             store.update("meetings", mid, leader_user_id=u["id"], leader=u["full_name"], leader_speaker=None,
                          leader_source="вручную", leader_note=f"указан вручную: {ctx.name(admin)}")
+        return meeting_out(store.get("meetings", mid))
+
+    @r.get("/meetings/{mid}/subprojects")
+    def meeting_subprojects(mid: int, request: Request):
+        """Подпроекты, в которые можно отнести встречу: подпроекты её проекта верхнего уровня (не архивные)."""
+        ctx.need_user(request)
+        m = ctx.meeting_or_404(mid)
+        root = ctx.root_of(m.get("project_id"))
+        fam = ctx.family(root)
+        items = [{"id": p["id"], "name": ctx.project_names(p["id"])[1]} for p in store.q(
+            "SELECT id FROM projects WHERE COALESCE(archived,0)=0 ORDER BY name") if p["id"] in fam and p["id"] != root]
+        return {"project": ctx.project_names(root)[0], "current": ctx.project_names(m.get("project_id"))[1] or "",
+                "items": items}
+
+    @r.patch("/meetings/{mid}/subproject")
+    def set_meeting_subproject(mid: int, payload: MeetingSubprojectIn, request: Request):
+        """Подпроект встречи внутри того же проекта верхнего уровня; пусто — весь проект. Задачи, уже поставленные на встрече,
+        остаются в своём подпроекте (протокол и реестр задним числом не переписываются); следующая сборка ставит новые задачи
+        в подпроект встречи. Перенос встречи в другой проект — отдельное действие (агент протокола, 27.10.2026)."""
+        admin = ctx.need_admin(request)
+        m = ctx.meeting_or_404(mid)
+        root = ctx.root_of(m.get("project_id"))
+        target = root
+        sp = " ".join((payload.subproject or "").split())
+        if sp:
+            key = lambda s: " ".join((s or "").lower().replace("ё", "е").split())  # noqa: E731
+            fam = ctx.family(root)
+            hit = [p for p in store.q("SELECT id, name FROM projects WHERE COALESCE(archived,0)=0")
+                   if p["id"] in fam and p["id"] != root and key(p["name"]) == key(sp)]
+            if not hit:
+                raise HTTPException(400, f"Подпроекта «{sp}» нет в справочнике подпроектов проекта "
+                                         f"«{ctx.project_names(root)[0]}».")
+            target = hit[0]["id"]
+        store.update("meetings", mid, project_id=target)
+        ctx.sys_msg(f"Встреча {ru_date(m.get('date'))}: {ctx.project_label(target)}",
+                    f"Отнёс: {ctx.name(admin)}. Было: {ctx.project_label(m.get('project_id'))}.", "settings")
         return meeting_out(store.get("meetings", mid))
 
     @r.post("/meetings/{mid}/accept-draft")
