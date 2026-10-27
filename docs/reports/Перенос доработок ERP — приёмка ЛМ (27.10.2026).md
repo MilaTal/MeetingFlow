@@ -38,4 +38,4 @@
 
 ## 4. Хэш
 
-Развёрнуто с `aa456a9`; отчёт — следующим коммитом. Ветка `dogonyaem-planerku`, GitHub.
+Развёрнуто с `aa456a9`; отчёт — `6a1b31d`. Ветка `dogonyaem-planerku`, GitHub.
