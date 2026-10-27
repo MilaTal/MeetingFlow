@@ -658,7 +658,14 @@ def test_темы_планёрок_день_недели_и_выбор_вруч�
 def test_словарь_распознавания(env):
     c, h = env, env.h
     d = c.get("/recognition-settings", headers=h()).json()
-    assert {"asr_vocab", "project_only_heard"} <= set(d) and "Склад" in d["asr_vocab"]["preview"]
+    assert {"asr_vocab", "project_only_heard"} <= set(d)
+    # экран показывает то же, что уходит в распознавание и действует в сборке (core/slovar_whisper, iskazheniya_nazvaniy)
+    from meetflow.core import iskazheniya_nazvaniy as iz
+    from meetflow.core import slovar_whisper
+    assert d["asr_vocab"]["preview"] == slovar_whisper.собрать(c.st, c.pid)
+    assert d["asr_vocab"]["limit"] == slovar_whisper.ЛИМИТ_ТОКЕНОВ == 223
+    assert d["asr_vocab"]["tokens"] == slovar_whisper.токенов(d["asr_vocab"]["preview"])
+    assert d["project_only_heard"]["window"] == iz.ОКНО_СТРОК == 20
     d2 = c.put("/recognition-settings", json={"key": "asr_vocab", "enabled": True}, headers=h()).json()
     assert d2["asr_vocab"]["enabled"] is True and d2["asr_vocab"]["setting"] is True
     assert c.put("/recognition-settings", json={"key": "лишнее", "enabled": True}, headers=h()).status_code == 400

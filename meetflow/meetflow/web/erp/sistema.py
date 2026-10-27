@@ -844,28 +844,27 @@ def mount(r: APIRouter, ctx: Ctx) -> None:
         return meeting_topic(mid, request)
 
     # ------------------------------------------------------------------ словарь распознавания
+    # Те же выключатели и те же модули, что читают распознавание и сборка (core/slovar_whisper.py,
+    # core/iskazheniya_nazvaniy.py): экран показывает словарь, который уходит в распознавание, и действующее окно правила
     REC = {"asr_vocab": ("MEETFLOW_ASR_VOCAB", "Словарь проектов в подсказке распознавания"),
            "project_only_heard": ("MEETFLOW_PROJECT_ONLY_HEARD", "Проект только при прозвучавшем названии")}
 
-    def rec_state() -> dict:
+    def rec_state(project_id: int | None = None) -> dict:
+        from ...core import iskazheniya_nazvaniy as iz
+        from ...core import slovar_whisper
         out = {}
         for k, (env, _title) in REC.items():
-            setting = store.get_setting(f"rec:{k}", None, None)
-            env_on = os.environ.get(env, "").strip().lower() in ("1", "on", "true", "yes")
-            out[k] = {"enabled": bool(setting) if setting is not None else env_on, "setting": setting, "env": env_on,
-                      "env_name": env}
-        names = []
-        for p in store.q("SELECT name, aliases FROM projects WHERE COALESCE(archived,0)=0"):
-            names += [p["name"]] + loads(p.get("aliases"), [])
-        preview = ", ".join(dict.fromkeys(n for n in names if n))
-        out["asr_vocab"].update(tokens=len(preview.split()), limit=200, preview=preview[:300])
-        out["project_only_heard"]["window"] = 3
+            out[k] = {"enabled": iz.включено(store, k, env), "setting": iz.настройка(store, k),
+                      "env": (os.environ.get(env) or "").strip().lower() in iz._ДА, "env_name": env}
+        словарь = slovar_whisper.собрать(store, project_id)
+        out["asr_vocab"].update(preview=словарь, tokens=slovar_whisper.токенов(словарь), limit=slovar_whisper.ЛИМИТ_ТОКЕНОВ)
+        out["project_only_heard"]["window"] = iz.ОКНО_СТРОК
         return out
 
     @r.get("/recognition-settings")
     def rec_get(request: Request):
         ctx.need_super(request)
-        return rec_state()
+        return rec_state(ctx.project(request))
 
     @r.put("/recognition-settings")
     def rec_put(body: RecSettingIn, request: Request):
@@ -875,7 +874,7 @@ def mount(r: APIRouter, ctx: Ctx) -> None:
         store.set_setting(f"rec:{body.key}", body.enabled, None, ctx.name(u))
         ctx.sys_msg(f"{REC[body.key][1]}: {'включено' if body.enabled else 'выключено' if body.enabled is False else 'по переменной'}",
                     f"Поменял: {ctx.name(u)}.", "settings")
-        return rec_state()
+        return rec_state(ctx.project(request))
 
     # ------------------------------------------------------------------ разбор голосов
     def base() -> str:
