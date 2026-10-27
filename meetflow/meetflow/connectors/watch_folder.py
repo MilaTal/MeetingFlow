@@ -78,23 +78,18 @@ class ScanResult:
 
 
 class FolderIntake:
-    def __init__(self, folder: str | Path, known_digests: set[str] | None = None, today: date | None = None,
-                 top_level_only: bool = False):
+    def __init__(self, folder: str | Path, known_digests: set[str] | None = None, today: date | None = None):
         self.folder = Path(folder)
         self.known = known_digests if known_digests is not None else set()
         self._sizes: dict[Path, int] = {}
         self._reported_no_date: set[str] = set()
         self.today = today
-        # Общая папка («Встречи по всем проектам») берёт только файлы верхнего уровня: её подпапки — приёмники
-        # своих проектов, иначе одна запись стала бы двумя встречами (замечание 26.10.2026, п. 3).
-        self.top_level_only = top_level_only
 
     def scan(self) -> ScanResult:
         if not self.folder.exists() or not self.folder.is_dir():
             raise ConnectorError(f"Папка-приёмник недоступна: {self.folder}")
         res = ScanResult()
-        files = self.folder.iterdir() if self.top_level_only else self.folder.rglob("*")
-        for f in sorted(files):
+        for f in sorted(self.folder.rglob("*")):
             parts = f.relative_to(self.folder).parts
             if (not f.is_file() or DONE_DIR in parts or STOPPED_DIR in parts or is_marker(f.name) or _sluzhebnyy(f)
                     or f.suffix.lower() == ".md"):

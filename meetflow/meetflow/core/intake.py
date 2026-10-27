@@ -183,14 +183,12 @@ class IntakeService:
 
     def _scan(self, project_id: int, path: str, today=None) -> dict[str, Any]:
         self._check_pending(project_id)
-        from . import proekt_zapisi as pz
-        top_level_only = pz.общая_папка(self.s, project_id, Path(path))
         with self._lock:
             fi = self._intakes.get(project_id)
-            if fi is None or str(fi.folder) != path or fi.top_level_only != top_level_only:
+            if fi is None or str(fi.folder) != path:
                 # FolderIntake сравнивает байты файлов; повтор ручной загрузки
                 # ловит конвейер по отпечатку текста (ingest -> duplicate)
-                fi = self._intakes[project_id] = FolderIntake(path, set(), today, top_level_only=top_level_only)
+                fi = self._intakes[project_id] = FolderIntake(path, set(), today)
         result: dict[str, Any] = {"at": now(), "folder": path, "ingested": [], "held": [], "rejected": [],
                                   "waiting": [], "no_date": [], "duplicates": []}
         try:
@@ -205,6 +203,7 @@ class IntakeService:
         for name in scan.no_date:
             self.pipe.cards.open(project_id, "technical", f"В имени файла нет одной даты: {name}",
                                  {"folder": path, "file": name})
+        from . import proekt_zapisi as pz
         другие = pz.папки_других(self.s, project_id)
         for item in scan.ready:
             if pz.под_другим(item.path, другие):
@@ -298,10 +297,7 @@ class IntakeService:
             info["exists"] = p.is_dir()
             info["marker"] = p.is_dir() and any(f.is_file() and is_marker(f.name) for f in p.iterdir())
             if p.is_dir():
-                from . import proekt_zapisi as pz
-                top_level_only = pz.общая_папка(self.s, project_id, p)
-                files = [f for f in (p.iterdir() if top_level_only else p.rglob("*"))
-                         if f.is_file() and DONE_DIR not in f.relative_to(p).parts
+                files = [f for f in p.rglob("*") if f.is_file() and DONE_DIR not in f.relative_to(p).parts
                          and not is_marker(f.name) and f.name != HINT_FILE]
                 info["files_waiting"] = len(files)
         return info
