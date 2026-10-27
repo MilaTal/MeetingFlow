@@ -151,3 +151,14 @@ def test_прежние_подпроекты_переносятся_в_спра�
     assert otg["parent_id"] == pid and s.get("tasks", tid)["project_id"] == otg["id"] and not s.get("tasks", tid)["subproject"]
     create_app("erp_rollout", db, str(tmp_path / "j.jsonl"), watch=False)
     assert len(s.q("SELECT * FROM projects WHERE name='Отгрузка'")) == 1
+
+
+def test_окно_правки_задачи_проект_и_подпроект(env):
+    c, h = env, env.h
+    rows = c.get("/tasks/projects", headers=h("project_admin", c.sklad)).json()
+    assert [r["name"] for r in rows] == ["Склад", "Склад – Приёмка", "Цех"]
+    t = task(c.st, c.sklad, "Сверить остатки")
+    r = c.patch(f"/tasks/{t}/project", json={"project_id": c.priemka}, headers=h("project_admin", c.sklad)).json()
+    assert r["subproject"] == "Приёмка"
+    app = (STATIC / "app.js").read_text(encoding="utf-8")
+    assert '<label for="modal-project">Проект и подпроект</label>' in app

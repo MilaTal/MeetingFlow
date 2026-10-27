@@ -2628,7 +2628,7 @@ function wireTaskActions() {
         ${STATUS_OPTIONS.map(([v, label]) => `<option value="${v}"${v === currentStatus ? " selected" : ""}>${esc(label)}</option>`).join("")}
       </select></div>
       <div class="field"><label>Срок</label><input type="text" id="modal-due" value="${esc(currentDue)}" placeholder="ДД.ММ.ГГГГ, пусто — без срока" autocomplete="off"></div>
-      ${проекты.length ? `<div class="field"><label for="modal-project">Проект</label><select id="modal-project">
+      ${проекты.length ? `<div class="field"><label for="modal-project">Проект и подпроект</label><select id="modal-project">
         <option value="">— не указан —</option>
         ${проекты.map(п => `<option value="${п.id}"${String(п.id) === currentProject ? " selected" : ""}>${esc(п.name)}</option>`).join("")}
       </select></div>` : ""}

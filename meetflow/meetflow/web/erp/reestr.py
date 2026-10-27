@@ -308,9 +308,11 @@ def mount(r: APIRouter, ctx: Ctx) -> None:
 
     @r.get("/tasks/projects")
     def task_projects():
-        """Справочник проектов для окна правки задачи — проекты MeetFlow (проект ведения)."""
-        return [{"id": p["id"], "name": p["name"], "category": None}
-                for p in store.q("SELECT id, name, archived FROM projects ORDER BY name") if not p.get("archived")]
+        """Справочник для окна правки задачи: проекты и подпроекты MeetFlow подписью «Проект – Подпроект», деревом —
+        выбор подпроекта здесь и есть поле «подпроект» задачи (задача переходит в подпроект)."""
+        rows = [p for p in store.q("SELECT id, name, parent_id, archived FROM projects") if not p.get("archived")]
+        rows.sort(key=lambda p: (ctx.project_label(p["id"]).lower()))
+        return [{"id": p["id"], "name": ctx.project_label(p["id"]), "category": None} for p in rows]
 
     @r.post("/tasks", status_code=201)
     def create_task(payload: TaskCreate, request: Request):
@@ -430,7 +432,7 @@ def mount(r: APIRouter, ctx: Ctx) -> None:
             if not p or p.get("archived"):
                 raise HTTPException(400, "Такого проекта нет в справочнике — выберите из списка")
             store.update("tasks", tid, project_id=p["id"])
-            history(tid, t["status"], t["status"], "operator", f"проект: {p['name']}", ctx.name(admin))
+            history(tid, t["status"], t["status"], "operator", f"проект: {ctx.project_label(p['id'])}", ctx.name(admin))
         return fresh(tid, admin, request)
 
     @r.patch("/tasks/{tid}/subproject")
