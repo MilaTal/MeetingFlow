@@ -121,6 +121,18 @@ platform.claude.com/docs/en/api/openai-sdk, проверено 15.10.2026). У C
 stream_options, reasoning_effort, response_format не уходят; `thinking` не задаётся (адаптивное по умолчанию, `disabled`
 у Sonnet 5.5 и Opus 5.5 — 400). Поток Messages API понимает `stream_piece`, расход в словах OpenAI — `normalize_usage`.
 
+Рассуждение по решению владелицы 27.10.2026 (продолжение решения 16.10.2026 «вернуть в статус 0» и отчёта варианта Д:
+на 12.10 «Т» рассуждение DeepSeek при `auto` съело весь потолок 48 000 токенов, ответ пуст). У модели DeepSeek (имя
+содержит `deepseek`, точка openai или openrouter) значение `auto` означает «выключено»: в тело уходит
+`reasoning_effort: "none"`, у openrouter — `reasoning: {"enabled": false}` (`reasoning_effort`, `reasoning_off_by_default`).
+Явные `low` и `high` — как раньше. У Claude по адресу api.anthropic.com поле точки теперь управляющее: `auto` — `low`
+(`CLAUDE_EFFORT_DEFAULT`, как было), `low` и `high` — `output_config.effort` тем же словом (`claude_effort(route)`);
+`none` — отказ при загрузке и записи файла: у Sonnet 5.5 и Opus 5.5 рассуждение не выключается (`thinking: disabled` —
+400). Переменная `LLM_CLAUDE_EFFORT` осталась только переопределением: задана верным словом — сильнее поля точки. С
+каким рассуждением ушёл вызов, пишет строка журнала вызовов полем `reasoning_effort` (`reasoning_sent`) и «Проверить
+связь» — словом и числом знаков хода мысли (`reasoning_chars`). Рабочий вызов, пробный запрос и «Проверить связь» —
+одинаково: решение в одном месте.
+
 Переход на запасную модель (задание владелицы 20.10.2026, «закончились лимиты на дипсик — система бы переключилась?»).
 Запасная — вторая точка роли («Добавить запасной»), назначает администратор, по умолчанию её нет: правило 13.10.26 не
 нарушается, молчаливой подстановки нет. Переход — только по недоступности основной (402, 401, 403, 404, 429 и 5xx после
@@ -207,18 +219,22 @@ REASONING_MODES = ("auto", "low", "high", "none")   # как у модели (у
 REASONING_EFFORTS = ("low", "high")
 REASONING_MANDATORY = ("muse",)             # у этих рассуждение обязательное — опцию им не передаём (ответят 400)
 REASONING_KINDS = ("openai", "openrouter")  # у ollama и распознавания этого поля нет
+# У этих моделей «как у модели» (auto) = выключено (решение владелицы 27.10.2026, продолжение решения 16.10.2026)
+REASONING_OFF_BY_DEFAULT = ("deepseek",)
 # Claude по ключу (15.10.26): адрес Anthropic reasoning_effort не читает; у моделей Claude temperature ниже 1 и top_p — 400
 ANTHROPIC_HOSTS = ("api.anthropic.com",)
 SAMPLING_FIELDS = ("temperature", "top_p")
 _REASONING_FIELD = {"key": "reasoning", "label": "Рассуждение модели", "choices": list(REASONING_MODES),
-                    "choice_titles": {"auto": "как у модели (по умолчанию)",
+                    "choice_titles": {"auto": "как у модели (по умолчанию; у DeepSeek — выключено, у Claude — low)",
                                       "low": "понемногу (low) — ход мысли короче",
                                       "high": "полностью (high)",
                                       "none": "выключено — весь потолок ответа уходит на ответ"},
                     # подсказка под списком в пульте «Модели» (14.10.26; low/high — 15.10.26)
                     "help": "выключено — модель отвечает сразу, без хода мысли; весь потолок ответа уходит на ответ. "
-                            "Для DeepSeek проверено. Для muse нельзя. Рассуждение тратит тот же потолок ответа — "
-                            "при low/high задайте потолок у точки побольше"}
+                            "Для DeepSeek проверено; у DeepSeek «как у модели» — тоже выключено (27.10.2026). Для muse "
+                            "нельзя. У Claude (api.anthropic.com) выключить нельзя: «как у модели» — понемногу (low), "
+                            "high — полностью. Рассуждение тратит тот же потолок ответа — при low/high задайте потолок у "
+                            "точки побольше"}
 # Тариф точки (решение владельца 15.10.26): цены за 1 млн токенов и часы пик — в поле `tariff` точки. В форме — две
 # строки; пустые — у точки своего тарифа нет, и для модели из справочника открытых прейскурантов берётся он.
 _TARIFF_FIELDS = (
@@ -534,7 +550,10 @@ def reasoning_effort(route: "Route") -> str | None:
     знаков хода мысли 0 против 171, весь потолок уходит на ответ (1 токен против 47 на том же вопросе).
     Моделям из `REASONING_MANDATORY` опция не подставляется: у них рассуждение обязательное, выключение
     даёт ошибку 400 — им поле не отправляем ни при какой настройке.
-    Точке с адресом Anthropic поле не отправляем никогда (15.10.26): адрес его не читает, рассуждение задаёт модель."""
+    Точке с адресом Anthropic поле не отправляем никогда (15.10.26): у неё родной Messages API и своё усилие
+    (`claude_effort`, 27.10.2026).
+    С 27.10.2026 (решение владелицы, продолжение решения 16.10.2026) у модели DeepSeek на точке openai или openrouter
+    `auto` — тоже «выключено»: на 12.10 «Т» рассуждение при `auto` съело весь потолок 48 000 токенов."""
     if anthropic_url(route.url):
         return None
     режим = str(route.opt("reasoning", "auto") or "auto").strip().lower()
@@ -542,7 +561,17 @@ def reasoning_effort(route: "Route") -> str | None:
         return режим           # low / high (15.10.26) — не выключение, у muse тоже можно
     if any(метка in (route.model or "").lower() for метка in REASONING_MANDATORY):
         return None
-    return "none" if режим == "none" else None
+    if режим == "none":
+        return "none"
+    if режим == "auto" and route.kind in REASONING_KINDS and reasoning_off_by_default(route.model):
+        return "none"          # DeepSeek: «как у модели» = выключено (27.10.2026)
+    return None
+
+
+def reasoning_off_by_default(model) -> bool:
+    """У модели «как у модели» означает «выключено» (27.10.2026): метки — `REASONING_OFF_BY_DEFAULT` (DeepSeek)."""
+    name = str(model or "").strip().lower()
+    return any(метка in name for метка in REASONING_OFF_BY_DEFAULT)
 
 
 def reasoning_mandatory(model) -> bool:
@@ -627,15 +656,47 @@ def messages_api(route) -> bool:
     return getattr(route, "kind", None) == "openai" and anthropic_url(getattr(route, "url", ""))
 
 
-def claude_effort() -> str:
-    """Усилие рассуждения Claude: `LLM_CLAUDE_EFFORT`, если значение из `CLAUDE_EFFORTS`, иначе `CLAUDE_EFFORT_DEFAULT`."""
+def claude_effort(route=None) -> str:
+    """Усилие рассуждения Claude (27.10.2026: поле точки управляющее). `LLM_CLAUDE_EFFORT` с верным словом из
+    `CLAUDE_EFFORTS` — переопределение, сильнее всего; иначе поле `reasoning` точки: low или high — то же слово;
+    auto (и точки нет) — `CLAUDE_EFFORT_DEFAULT` (`low`). `none` у такой точки в файл не попадает (`_validate`)."""
     значение = str(os.environ.get(CLAUDE_EFFORT_ENV) or "").strip().lower()
-    return значение if значение in CLAUDE_EFFORTS else CLAUDE_EFFORT_DEFAULT
+    if значение in CLAUDE_EFFORTS:
+        return значение
+    режим = str((route.opt("reasoning", "auto") if route is not None else "auto") or "auto").strip().lower()
+    return режим if режим in REASONING_EFFORTS else CLAUDE_EFFORT_DEFAULT
 
 
-def to_messages_api(body: dict) -> dict:
+def claude_has_effort(model) -> bool:
+    """У модели Claude есть поле усилия: старым моделям из `CLAUDE_БЕЗ_УСИЛИЯ` оно даёт ошибку."""
+    return not str(model or "").strip().lower().startswith(CLAUDE_БЕЗ_УСИЛИЯ)
+
+
+def reasoning_sent(route, model=None) -> str | None:
+    """С каким рассуждением уходит вызов — для строки журнала вызовов и «Проверить связь» (27.10.2026). low / high /
+    none… — то, что уходит в тело; `auto` — поле не отправляется, модель по своему умолчанию; None — у точки такого
+    поля нет (ollama, распознавание) или точки нет. У Claude по адресу Anthropic — усилие `output_config.effort`."""
+    if route is None or getattr(route, "kind", None) not in REASONING_KINDS:
+        return None
+    if messages_api(route):
+        return claude_effort(route) if claude_has_effort(model or route.model) else "auto"
+    return reasoning_effort(route) or "auto"
+
+
+def journal_reasoning(route, model=None) -> dict:
+    """Поле строки журнала вызовов (27.10.2026): {"reasoning_effort": …} — с каким рассуждением ушёл вызов
+    (`reasoning_sent`); у точки без такого поля — пусто. Строку журнала поле не роняет: сбой — поля нет."""
+    try:
+        значение = reasoning_sent(route, model)
+    except Exception:  # noqa: BLE001 — журнал не должен терять строку из-за подписи рассуждения
+        return {}
+    return {"reasoning_effort": значение} if значение else {}
+
+
+def to_messages_api(body: dict, effort: str | None = None) -> dict:
     """Тело OpenAI-совместимого вызова продукта → тело Messages API. Системные реплики — полем `system`, остальные
-    реплики как есть; потолок, модель и поток — те же; усилие — `claude_effort()`. Поля совместимого входа (temperature,
+    реплики как есть; потолок, модель и поток — те же; усилие — `effort` (от точки, `claude_effort(route)`,
+    27.10.2026), не задано — `claude_effort()`. Поля совместимого входа (temperature,
     top_p, stream_options, reasoning_effort, response_format, usage) не переносятся. `thinking` не задаётся: у Sonnet 5.5 и
     Opus 5.5 рассуждение адаптивное по умолчанию, а `disabled` — 400."""
     система, реплики = [], []
@@ -649,9 +710,8 @@ def to_messages_api(body: dict) -> dict:
         итог["system"] = СИСТЕМА_РАЗДЕЛИТЕЛЬ.join(система)
     if body.get("stream"):
         итог["stream"] = True
-    модель = str(body.get("model") or "").strip().lower()
-    if not модель.startswith(CLAUDE_БЕЗ_УСИЛИЯ):
-        итог["output_config"] = {"effort": claude_effort()}
+    if claude_has_effort(body.get("model")):
+        итог["output_config"] = {"effort": effort or claude_effort()}
     return итог
 
 
@@ -664,7 +724,7 @@ def wire_request(route, body: dict, api_key: str | None = "") -> tuple[str, dict
         if api_key:
             headers["x-api-key"] = api_key
         headers["anthropic-version"] = ANTHROPIC_VERSION
-        return route.endpoint, to_messages_api(body), headers
+        return route.endpoint, to_messages_api(body, claude_effort(route)), headers
     if api_key:
         headers["Authorization"] = f"Bearer {api_key}"
     return route.endpoint, body, headers
@@ -700,6 +760,20 @@ def response_text(raw) -> str:
     if isinstance(raw.get("message"), dict) and not raw.get("choices"):
         return str(raw["message"].get("content") or "")
     return str((((raw.get("choices") or [{}])[0] or {}).get("message") or {}).get("content") or "")
+
+
+def response_reasoning_chars(raw) -> int:
+    """Знаков хода мысли в ответе без потока (27.10.2026, для «Проверить связь»): Messages API — блоки thinking,
+    OpenAI-совместимый — `reasoning_content` / `reasoning` сообщения."""
+    if not isinstance(raw, dict):
+        return 0
+    if isinstance(raw.get("content"), list):
+        return sum(len(str(б.get("thinking") or "")) for б in raw["content"]
+                   if isinstance(б, dict) and б.get("type") == "thinking")
+    сообщение = raw.get("message") if isinstance(raw.get("message"), dict) and not raw.get("choices") else \
+        (((raw.get("choices") or [{}])[0] or {}).get("message") or {})
+    return sum(len(str(сообщение.get(поле) or "")) for поле in ("reasoning_content", "reasoning", "thinking")
+               if isinstance(сообщение.get(поле), str))
 
 
 def forbidden_reason(detail, extra=()) -> str:
@@ -901,9 +975,9 @@ def _check_point(name: str, ep: dict) -> None:
         raise RoutesError(f"точка «{name}»: рассуждение выключается только у точек openai и openrouter")
     if reasoning == "none" and reasoning_mandatory(ep.get("model")):
         raise RoutesError(f"точка «{name}»: у модели «{ep.get('model')}» обязательное рассуждение — выключить нельзя")
-    if reasoning != "auto" and anthropic_url(ep.get("url")):
-        raise RoutesError(f"точка «{name}»: у адреса Anthropic рассуждение задаёт сама модель — поле «Рассуждение "
-                          f"модели» оставьте «как у модели»")
+    if reasoning == "none" and anthropic_url(ep.get("url")):
+        raise RoutesError(f"точка «{name}»: у Claude рассуждение не выключается (у Sonnet 5.5 и Opus 5.5 выключение — "
+                          f"ошибка 400 поставщика) — выберите «как у модели» (понемногу, low), low или high")
     if kind == "python" and ep.get("callable") and ":" not in str(ep["callable"]):
         raise RoutesError(f"точка «{name}»: для python нужна ссылка на код callable вида «модуль:функция»")
     url = str(ep.get("url") or "")
@@ -2105,7 +2179,10 @@ def _ping(route: Route, timeout: float, api_key: str | None) -> tuple[bool, str]
         with urllib.request.urlopen(req, timeout=timeout) as resp:
             raw = json.loads(resp.read().decode("utf-8"))
         text = response_text(raw)
-        return True, f"ответ за {time.time() - started:.1f} с: {(text or '').strip()[:40]!r}"
+        рассуждение = reasoning_sent(route, model)
+        return True, (f"ответ за {time.time() - started:.1f} с: {(text or '').strip()[:40]!r}"
+                      + (f" · рассуждение {рассуждение} · reasoning_chars {response_reasoning_chars(raw)}"
+                         if рассуждение else ""))
     except urllib.error.HTTPError as exc:
         try:
             тело = exc.read().decode("utf-8", "replace")
