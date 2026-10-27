@@ -180,6 +180,7 @@ async function renderMeetingReader(id) {
           : ближайшая ? `<a href="#meetings/${ближайшая.id}/planprep">Материалы к плану ближайшей встречи ${esc(fmtRuDate(ближайшая.date))} — добавить файл</a>`
           : canPrepare() ? `<a href="#prep">Ближайшая встреча не заведена — «Подготовка встречи»</a>` : ""}
         ${вёл ? `<div class="reg-sub">Вёл встречу: ${esc(вёл)}</div>` : ""}
+        ${встреча.project_label ? `<div class="reg-sub" id="mt-subproject">Проект: ${esc(встреча.project_label)}</div>` : ""}
         ${isAdmin() && документ && документ.generated_at ? `<div class="reg-sub">Собран ${esc(fmtRuDateTime(документ.generated_at))}${источники ? ` · источники: ${источники}` : ""}</div>` : ""}`;
     }
     // «Свернуть» — в шапке панели справа от заголовка, акцентом системы (правка владелицы 20.10.2026, как в Планёрке): заголовок
@@ -193,6 +194,24 @@ async function renderMeetingReader(id) {
     const ряд = $main.querySelector(".mt-title-row"), слой = $main.querySelector(".mt-layout");
     $d.style.top = k === "tasks" && ряд && слой && getComputedStyle($d).position === "absolute"
       ? `${Math.round(ряд.getBoundingClientRect().bottom - слой.getBoundingClientRect().top + 8)}px` : "";
+    // Подпроект встречи (MeetFlow, справочник проектов 27.10.2026): администратор относит встречу к подпроекту её проекта
+    if (k === "more" && isAdmin()) {
+      const $sp = document.getElementById("mt-subproject");
+      api(`/meetings/${id}/subprojects`).then(сп => {
+        if (!$sp || !(сп.items || []).length) return;
+        $sp.innerHTML = `<label>Подпроект встречи <select id="mt-subproject-select">
+          <option value="">весь проект ${esc(сп.project)}</option>${сп.items.map(x =>
+            `<option value="${esc(x.name)}"${x.name === сп.current ? " selected" : ""}>${esc(x.name)}</option>`).join("")}</select></label>
+          <span class="page-sub">задачи, уже поставленные на встрече, остаются где были; новые — в подпроект встречи</span>`;
+        document.getElementById("mt-subproject-select").addEventListener("change", async (e) => {
+          try {
+            const m = await api(`/meetings/${id}/subproject`, { method: "PATCH", json: { subproject: e.target.value } });
+            встреча.project_label = m.project_label;
+            toast(`Встреча отнесена: ${m.project_label}`);
+          } catch (err) { toast(err.message, true); }
+        });
+      }).catch(() => {});
+    }
     document.getElementById("mt-close").addEventListener("click", () => { $d.hidden = true; $d.dataset.k = ""; кнопка.setAttribute("aria-expanded", "false"); });
     document.getElementById("mt-all-tasks")?.addEventListener("click", () => реестрПоВстрече(id, встреча.date));
   };

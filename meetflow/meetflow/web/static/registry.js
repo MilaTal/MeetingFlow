@@ -93,12 +93,45 @@ function реестрЧасти(v) {
   return String(v || "").split("/").map(x => x.trim()).filter(Boolean);
 }
 
+// Проект и подпроект задачи (MeetFlow, справочник проектов 27.10.2026): «Проект – Подпроект» или «Проект». Приставка
+// формулировки — как приставка «Проект: » ERP (её ставит извлечение по темам), только из полей задачи, на экране.
+function реестрМеткаПроекта(t) {
+  if (!t.project_root) return "";
+  return t.subproject ? `${t.project_root} – ${t.subproject}` : t.project_root;
+}
+function реестрПриставка(t) {
+  const метка = выбранныйПроект() ? (t.subproject ? реестрМеткаПроекта(t) : "") : реестрМеткаПроекта(t);
+  if (!метка) return "";
+  const нр = s => String(s || "").toLowerCase().replace(/ё/g, "е").replace(/\s+/g, " ").trim();
+  const текст = нр(t.description);
+  if (текст.startsWith(нр(метка) + ":") || текст.startsWith(нр(t.subproject || t.project_root) + ":")) return "";
+  return `${метка}: `;
+}
+// Пункты отбора проекта над реестром: при выбранном проекте — «Весь проект X», подпроекты, «без подпроекта» (вид ERP
+// `фильтрПроектаHtml`); при «Все проекты» — проекты и подпроекты подписью «Проект – Подпроект»
+function реестрПунктыПроекта() {
+  const id = выбранныйПроект();
+  const все = Array.isArray(_проекты) ? _проекты : [];
+  if (!id) return [{ v: "", l: "Все проекты" }, ...все.map(п => ({ v: п.label || п.name, l: п.label || п.name }))];
+  const п = все.find(x => x.id === id);
+  if (!п) return [];
+  const своя = п.label || п.name;
+  const подпроекты = все.filter(x => (x.label || "").startsWith(своя + " – ") && x.id !== id);
+  if (!подпроекты.length) return [];
+  return [{ v: "", l: `Весь проект ${своя}` }, ...подпроекты.map(x => ({ v: x.label, l: x.label.slice(своя.length + 3) })),
+    { v: "__none__", l: "без подпроекта" }];
+}
+
 function реестрПрименитьЧипы(list, chips) {
   const нр = s => String(s || "").toLowerCase().replace(/ё/g, "е");
   return chips.reduce((acc, c) => acc.filter(t => {
     if (c.k === "who") return реестрИсполнителиОтбора(t).includes(c.v);
     if (c.k === "meet") return String(t.source_meeting_id) === String(c.v);
-    if (c.k === "proj") return c.v === "" ? !t.project_name : реестрЧасти(t.project_name).includes(c.v);
+    if (c.k === "proj") {
+      if (c.v === "__none__") return t.project_id === выбранныйПроект();
+      const метка = реестрМеткаПроекта(t);
+      return c.v === "" ? !t.subproject : (метка === c.v || метка.startsWith(c.v + " – "));
+    }
     if (c.k === "text") return нр(t.description).includes(нр(c.v));
     if (c.k === "comment") return нр(t.last_comment).includes(нр(c.v));
     if (c.k === "due") {
@@ -158,8 +191,7 @@ function реестрИтог(t) {
 function реестрОписание(t, closed) {
   const части = [];
   if (t.date_set) части.push(`поставлена ${esc(fmtRuDate(t.date_set))}`);
-  if (t.project_name) части.push(`проект ${esc(t.project_name)}`);
-  if (t.subproject) части.push(`подпроект ${esc(t.subproject)}`);      // подпроект проекта системы (25.10.2026)
+  // проект и подпроект — приставкой «Проект – Подпроект:» перед формулировкой (MeetFlow, 27.10.2026), не подписью
   const встреча = реестрСтрокаНаВстречу(t);
   const под = части.join(" · ") + встреча;
   // у закрытых колонки «Комментарии» нет (решение 13.10.26) — последний комментарий не теряется: служебной строкой под задачей
@@ -170,7 +202,8 @@ function реестрОписание(t, closed) {
   // operativnaya.js — близнец Планёрки); менять пометку может тот, кто правит задачи (в ERP — администратор)
   const можно = isAdmin() && !closed;
   const ссылка = оперативнаяСсылка(t, можно);
-  return `${esc(t.description)}${точкаВопроса(t)}${оперативнаяМетка(t, можно)}${под || ссылка ? ` <span class="doc-cell-sub">${под ? под + ссылка : ссылка.replace(/^ · /, "")}</span>` : ""}${коммент ? ` ${коммент}` : ""}`;
+  const приставка = реестрПриставка(t);
+  return `${приставка ? `<span class="task-project-prefix">${esc(приставка)}</span>` : ""}${esc(t.description)}${точкаВопроса(t)}${оперативнаяМетка(t, можно)}${под || ссылка ? ` <span class="doc-cell-sub">${под ? под + ссылка : ссылка.replace(/^ · /, "")}</span>` : ""}${коммент ? ` ${коммент}` : ""}`;
 }
 
 // Строка реестра в работе — 1 в 1 со строкой старого реестра рабочей ERP (renderTaskTable, порт 8000): № | Описание (ниже
@@ -400,6 +433,7 @@ async function renderRegistry(опции = {}) {
       ${/* «Искать везде» — полнотекстовый поиск по тому же запросу в окне справа (решение владелицы 17.10.2026) */ ""}
       ${кнопкаИскатьВездеHtml()}
       <select class="live-view-select" id="reg-view" aria-label="Вид списка задач"></select>
+      <select class="live-view-select" id="reg-proj" aria-label="Проект и подпроект" hidden></select>
       <span class="tip"><button type="button" class="tip-ico" aria-label="Как искать">i</button><span class="tip-body" role="tooltip">${esc(РЕЕСТР_ПОДСКАЗКА)} ${esc(ПОДСКАЗКА_МАРКЕРОВ)}</span></span>
       <button type="button" class="reg-archive" id="reg-archive" aria-label="${РЕЕСТР_ЗАКРЫТЫЕ} задачи" title="${РЕЕСТР_ЗАКРЫТЫЕ} задачи">${РЕЕСТР_АРХИВ_ЗНАЧОК}<span class="reg-archive-t">${РЕЕСТР_ЗАКРЫТЫЕ}</span></button>
     </div></div>
@@ -519,6 +553,19 @@ async function renderRegistry(опции = {}) {
       }
     }
     if (!страница) {
+    {
+      const пункты = реестрПунктыПроекта();
+      const $p = document.getElementById("reg-proj");
+      const чип = s.chips.find(c => c.k === "proj");
+      $p.hidden = !пункты.length;
+      $p.innerHTML = пункты.map(o => `<option value="${esc(o.v)}"${(чип ? чип.v : "") === o.v ? " selected" : ""}>${esc(o.l)}</option>`).join("");
+      $p.onchange = (e) => {
+        const v = e.target.value;
+        const о = пункты.find(x => x.v === v);
+        s.chips = s.chips.filter(c => c.k !== "proj").concat(v ? [{ k: "proj", v, label: `Проект: ${о ? о.l : v}` }] : []);
+        показать();
+      };
+    }
     document.getElementById("reg-view").onchange = async (e) => {
       s.view = e.target.value;
       if (s.q) await искать();

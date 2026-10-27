@@ -1597,7 +1597,7 @@ function выбранныйПроект() {
 function названиеСистемы() {
   const id = выбранныйПроект();
   const п = _проекты.find(x => x.id === id);
-  if (id && п) return `Проект — ${п.name}`;
+  if (id && п) return `Проект — ${п.label || п.name}`;          // подпроект — «Проект — Проект – Подпроект»
   return id ? "MeetFlow" : "Все проекты компании";
 }
 function показатьНазваниеПроекта() {
@@ -1616,7 +1616,9 @@ async function загрузитьПроекты() {
   if (localStorage.getItem("currentProjectId") === null && _проекты.length) localStorage.setItem("currentProjectId", String(_проекты[0].id));
   const $s = document.getElementById("project-select");
   if ($s) {
-    $s.innerHTML = '<option value="0">Все проекты</option>' + _проекты.map(п => `<option value="${п.id}">${esc(п.name)}</option>`).join("");
+    // проект, под ним его подпроекты с отступом (справочник проектов, 27.10.2026); выбор проекта — вместе с подпроектами
+    $s.innerHTML = '<option value="0">Все проекты</option>' + _проекты.map(п =>
+      `<option value="${п.id}">${"\u00a0\u00a0\u00a0".repeat(п.level || 0)}${п.level ? "– " : ""}${esc(п.name)}</option>`).join("");
     $s.value = String(выбранныйПроект());
   }
   показатьНазваниеПроекта();
@@ -5945,11 +5947,12 @@ async function карточкаПроектаСистемы() {
       проект (или вариант написания), задачи реестра и пункты по теме повестки; пункты про другие проекты — одной строкой
       «Прочие проекты из материала». Действует со следующей сборки плана, собранные планы не меняются.</div>
     <div><button class="btn-sm" id="system-project-save-btn">Сохранить проект</button></div>
-    <div class="field"><label for="system-subprojects">Подпроекты проекта системы</label>
+    <div class="field"><label for="system-subprojects">Подпроекты проекта</label>
       <textarea id="system-subprojects" rows="3" placeholder="подпроектов нет — по одному названию в строке">${esc((подпроекты.items || []).map(x => x.name).join("\n"))}</textarea></div>
-    <div class="page-sub">Решение владелицы 25.10.2026: задача и договорённость относятся к проекту системы всегда, подпроект — необязательное
-      поле записи и только из этого списка. Нет подпроектов — список пуст, фильтр проекта показывает один пункт
-      «${esc(подпроекты.all || "Весь Проект ERP")}». Проекты компании подпроектами не подставляются.</div>
+    <div class="page-sub">Подпроекты — те же записи, что на вкладке «Проекты» (проект с надпроектом): новое название здесь заводит
+      подпроект, убранное уходит в архив, его встречи и задачи остаются при нём. Задача и встреча относятся к проекту всегда,
+      подпроект — необязательно и только из этого списка. Нет подпроектов — фильтр проекта показывает один пункт
+      «${esc(подпроекты.all || "Весь проект")}». Варианты написания подпроекта и надпроект — на вкладке «Проекты».</div>
     <div><button class="btn-sm" id="system-subprojects-save-btn">Сохранить подпроекты</button></div>`;
   document.getElementById("system-subprojects-save-btn")?.addEventListener("click", async (e) => {
     const btn = e.currentTarget;
