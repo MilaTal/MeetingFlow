@@ -394,3 +394,60 @@ def test_точечная_правка_и_единицы(env):
     assert c.patch(f"/units/{uid}", json={"action": "reject"}, headers=h()).json()["status"] == "убрано"
     assert c.patch(f"/units/{uid}", json={"action": "reopen"}, headers=h()).json()["status"] in ("действует", "открыт")
     assert c.get("/units/meetings", headers=h()).json()[0]["id"] == mid
+
+
+# --- группа д: договорённости, статус проекта, поиск -------------------------------------------------------------------
+
+def test_договорённости_виды_режим_тени_и_поиск(env):
+    c, h, st = env, env.h, env.st
+    mid = st.insert("meetings", project_id=env.pid, date=iso(-3))
+    st.insert("units", meeting_id=mid, project_id=env.pid, kind="decision", text="Монтаж второго ряда — до конца месяца",
+              quote="договорились", status="active")
+    st.insert("units", meeting_id=mid, project_id=env.pid, kind="open_question", text="Кто принимает погрузчик", status="open")
+    d = c.get("/agreements", headers=h()).json()
+    assert d["total"] == 2 and d["mode"] == "on" and {x["kind"] for x in d["items"]} == {"решение", "открытый вопрос"}
+    assert c.get("/agreements?kind=открытые", headers=h()).json()["total"] == 1
+    assert c.get("/agreements?q=погрузчик", headers=h()).json()["items"][0]["text"] == "Кто принимает погрузчик"
+    assert c.get(f"/agreements?meeting_id={mid}", headers=h()).json()["total"] == 2
+    assert c.post("/agreements/settings", json={"agreements_mode": "shadow"}, headers=h("project_admin")).status_code == 403
+    c.post("/agreements/settings", json={"agreements_mode": "shadow"}, headers=h())
+    assert c.get("/agreements", headers=h("member")).json()["items"] == []
+    assert c.get("/agreements", headers=h()).json()["total"] == 2
+
+
+def test_статус_проекта_пересчёт_и_полотно(env):
+    c, h = env, env.h
+    _task(env, due_date=iso(-5))
+    assert c.get("/project-status/summary", headers=h()).json()["available"] is False
+    assert c.get("/project-status/staleness", headers=h()).json()["reason"] == "not_generated_yet"
+    r = c.post("/project-status/refresh", headers=h("member"))
+    assert r.status_code == 200 and r.json()["result"]["status"] == "saved"
+    s = c.get("/project-status/summary", headers=h()).json()
+    assert s["available"] and "просрочено — 1" in s["content_md"]
+    assert c.get("/project-status/roadmap", headers=h()).json()["available"]
+    assert c.get("/project-status/summary/export", headers=h()).content[:2] == b"PK"
+    assert c.get("/project-status/summary", headers=h(project=0)).status_code == 400
+    ctx_ = c.get("/project-status/summary/edit-context", headers=h()).json()
+    first = ctx_["display_md"].split("\n")[0]
+    c.post("/project-status/summary/edits", json={"ops": [{"kind": "block", "old": first, "new": first + " (уточнено)"}]},
+           headers=h())
+    c.post("/project-status/summary/edits/finish", json={}, headers=h())
+    assert "(уточнено)" in c.get("/project-status/summary", headers=h()).json()["content_md"]
+    c.post("/project-status/refresh", headers=h())
+    assert "(уточнено)" in c.get("/project-status/summary", headers=h()).json()["content_md"]     # правленное не затирается
+
+
+def test_поиск_два_этапа(env):
+    c, h, st = env, env.h, env.st
+    _task(env, description="Смонтировать стеллажи второго ряда")
+    mid = st.insert("meetings", project_id=env.pid, date=iso(-2))
+    st.insert("sources", meeting_id=mid, name="Расшифровка.txt", kind="transcript", digest="d9", meta="{}",
+              text="00:00:01\tПетров Илья\tПогрузчик привезут в четверг\n00:00:09\tОрлова Анна\tХорошо")
+    r = c.get("/search?q=стеллажи", headers=h()).json()
+    assert r["stage"] == 1 and r["results"][0]["source_type"] == "task"
+    deep = c.get("/search?q=погрузчик четверг", headers=h()).json()
+    assert deep["deep"] is True and deep["message"].startswith("Идёт глубокий поиск")
+    d2 = c.get("/search/deep?q=погрузчик четверг", headers=h()).json()
+    assert d2["results"][0]["source_type"] == "transcript_hit" and d2["results"][0]["speaker"] == "Петров Илья"
+    assert c.get("/search/deep?q=несуществующее слово", headers=h()).json()["message"] == "По запросу информации нет"
+    assert c.get("/search/markers", headers=h()).json()["examples"]

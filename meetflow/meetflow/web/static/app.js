@@ -5392,6 +5392,7 @@ async function renderStatus(rest) {
     await renderSearchTab(q);
     return;
   }
+  if (нуженПроект("Статус проекта")) return;          // MeetFlow: Сводка и Дорожная карта — по одному проекту
   заставкаЗагрузки();   // тот же экран — прежнее содержимое до новой отрисовки (26.10.2026)
   const [roadmap, summary] = await Promise.all([api("/project-status/roadmap"), api("/project-status/summary")]);
   const doc = active === "roadmap" ? roadmap : summary;
