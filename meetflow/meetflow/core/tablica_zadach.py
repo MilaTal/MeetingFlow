@@ -190,9 +190,13 @@ def строки_встречи(store, meeting: dict, срок_текстом, �
     предыдущая = предыдущая_встреча(store, meeting)
     день = _д(meeting.get("date"))
     ids = [meeting.get("id")] + ([предыдущая["id"]] if предыдущая else [])
-    задачи = store.q(f"SELECT * FROM tasks WHERE project_id=? AND status<>'dropped' AND "
+    # проект встречи с его подпроектами (`projects.parent_id`, 27.10.2026): задача, переведённая в подпроект, остаётся
+    # задачей своей встречи и строкой её таблицы
+    семья = [meeting.get("project_id")] + [r["id"] for r in store.q("SELECT id FROM projects WHERE parent_id=?",
+                                                                     (meeting.get("project_id"),))]
+    задачи = store.q(f"SELECT * FROM tasks WHERE project_id IN ({','.join('?' * len(семья))}) AND status<>'dropped' AND "
                      f"(source_meeting_id IN ({','.join('?' * len(ids))}) OR operational=1) ORDER BY id",
-                     (meeting.get("project_id"), *ids))
+                     (*семья, *ids))
     порядок: list[tuple[int, Строка]] = []
     for t in задачи:
         раздел = в_горизонте(t, meeting, предыдущая)
@@ -329,4 +333,147 @@ def без_снятых(md: str | None, снятые: set[str], живые: set[
             ячейки[0] = str(номер)
             ln = "| " + " | ".join(ячейки) + " |"
         out.append(ln)
+    return "\n".join(out)
+
+
+# --- строки из реестра одной строкой (ERP 3550fc6, решение владелицы 27.10.2026, «Подпроекты + реестр», п. 2) -------------
+
+def справочники_укрупнения(store, project_id: int | None = None):
+    """Справочники близнеца `ukrupnenie_zadach` из базы MeetFlow (своё у MeetFlow — ERP берёт их из моделей SQLAlchemy,
+    `ukrupnenie_zadach.справочники(db)`): семейства проектов — справочник проектов (подпроект — запись с `parent_id`),
+    отделы — свои подтверждённые люди «Команды» проекта с отделом."""
+    from types import SimpleNamespace
+    from . import ukrupnenie_zadach as u
+    проекты = [{"id": r["id"], "name": r["name"], "aliases": _варианты(r.get("aliases")), "parent_id": r.get("parent_id"),
+                "is_active": bool(r.get("active", 1))}
+               for r in store.q("SELECT * FROM projects WHERE COALESCE(archived, 0) = 0")]
+    люди = store.q("SELECT * FROM people WHERE project_id=?", (project_id,)) if project_id else []
+    команда = [SimpleNamespace(full_name=p["full_name"], department=p.get("department") or "",
+                               is_external=bool(p.get("external")), is_confirmed=bool(p.get("confirmed", 1)))
+               for p in люди]
+    return u.справочник_проектов(проекты), u.справочник_отделов(команда)
+
+
+def _варианты(aliases) -> str:
+    import json
+    if isinstance(aliases, str):
+        try:
+            aliases = json.loads(aliases or "[]")
+        except ValueError:
+            return aliases
+    return "; ".join(str(a) for a in (aliases or []) if str(a).strip())
+
+
+def _семейство_задачи(store, t: dict, справочник) -> tuple[str, str, str]:
+    """(проект, подпроект, тело) задачи реестра MeetFlow — как ERP `tablica_zadach._семейство`: проект задачи (подпроект —
+    с родителем по `parent_id`), иначе приставка формулировки; подпроект — ещё и поле `subproject`."""
+    from . import ukrupnenie_zadach as u
+    приставка, тело = u.приставка(t.get("description") or "")
+    пр = store.get("projects", t["project_id"]) if t.get("project_id") else None
+    if пр is not None and (пр.get("name") or "").strip():
+        род = store.get("projects", пр["parent_id"]) if пр.get("parent_id") else None
+        корень, под = (род["name"], пр["name"]) if род and род.get("name") else (пр["name"], "")
+        if приставка and u._н(u.семейство(приставка, справочник)[0]) != u._н(корень):
+            тело = t.get("description") or ""
+    else:
+        корень, под = u.семейство(приставка, справочник)
+        if not приставка:
+            тело = t.get("description") or ""
+    if (t.get("subproject") or "").strip() and not под and корень:
+        под = t["subproject"]
+    return корень, под, тело
+
+
+def _ячейки(строка: str) -> list[str]:
+    return [c.strip() for c in re.split(r"(?<!\\)\|", строка.strip().strip("|"))]
+
+
+def укрупнить_показ(store, meeting: dict, md: str | None) -> str:
+    """Открытые задачи из реестра в таблице протокола — одной строкой по правилу укрупнения (близнец ERP
+    `tablica_zadach.укрупнить_показ`, выключатель `WEBAPP_UKRUPNENIE_POKAZ`): один непустой исполнитель (или человек и его
+    отдел), один проект с подпроектами, совместимые сроки, одна тема встречи при теме с переходящими задачами, не больше
+    трёх. Строка — «Проект: Подпроект1 — действие 1 (№12); Подпроект2 — действие 2 (№15)». Только показ: в реестре задачи
+    отдельные, хранимый текст не меняется. Новые задачи встречи (Откуда не «реестр»), «под вопросом», с открытой карточкой,
+    отмеченные протоколом секретаря — сами по себе; строки разных разделов не сводятся. Своё у MeetFlow: таблица хранится в
+    тексте протокола, поэтому показ разбирает строки таблицы и находит задачу по формулировке; полотно правки зовёт дверь
+    показа без встречи и строк не собирает."""
+    from . import ukrupnenie_zadach as u
+    if not md or not meeting or not u.показ_включён():
+        return md or ""
+    pid = meeting.get("project_id")
+    справочник, отделы = справочники_укрупнения(store, pid)
+    from .topics import встречи_той_же_темы
+    по_теме = встречи_той_же_темы(store, meeting) is not None
+    задачи = {}
+    семья = [pid] + [r["id"] for r in store.q("SELECT id FROM projects WHERE parent_id=?", (pid,))]
+    for t in store.q(f"SELECT * FROM tasks WHERE project_id IN ({','.join('?' * len(семья))}) AND status<>'dropped' "
+                     "ORDER BY id", tuple(семья)):
+        задачи.setdefault(_ключ(t["description"]), t)
+    с_карточкой = set()
+    for c in store.q(f"SELECT payload FROM cards WHERE project_id IN ({','.join('?' * len(семья))}) AND status='open'",
+                     tuple(семья)):
+        try:
+            import json
+            tid = json.loads(c["payload"] or "{}").get("task_id")
+        except (ValueError, AttributeError):
+            tid = None
+        if tid:
+            с_карточкой.add(tid)
+    секретарские = {h["task_id"] for h in store.q("SELECT task_id FROM task_history WHERE source=?", (ИСТОЧНИК_СЕКРЕТАРЯ,))}
+    день = _д(meeting.get("date"))
+    строки = md.split("\n")
+    out: list[str] = []
+    i = 0
+    раздел = 0
+    while i < len(строки):
+        ln = строки[i]
+        if not (ln.strip().startswith("|") and i + 1 < len(строки) and строки[i + 1].strip().startswith("|---")):
+            out.append(ln)
+            i += 1
+            continue
+        шапка = [c.lower() for c in _ячейки(ln)]
+        if шапка[:3] != ["№", "задача", "статус"] or len(шапка) != len(ШАПКА):
+            out.append(ln)
+            i += 1
+            continue
+        раздел += 1
+        out += [ln, строки[i + 1]]
+        i += 2
+        тело_таблицы = []
+        while i < len(строки) and строки[i].strip().startswith("|"):
+            тело_таблицы.append(_ячейки(строки[i]))
+            i += 1
+        сведения = []
+        for яч in тело_таблицы:
+            t = задачи.get(_ключ(яч[1])) if len(яч) == len(ШАПКА) else None
+            можно = (t is not None and (яч[6] or "").lower() == РЕЕСТР and not встреча_задачи(t, meeting)
+                     and открыта_на_дату(t, день) and t["id"] not in с_карточкой and not (t.get("doubt_reason") or "")
+                     and t["id"] not in секретарские)
+            корень, под, тело = _семейство_задачи(store, t, справочник) if можно else ("", "", "")
+            тема = None
+            if можно and по_теме and t.get("source_meeting_id"):
+                тема = (store.get("meetings", t["source_meeting_id"]) or {}).get("topic_id") or 0
+            сведения.append({"можно": можно and bool(корень), "раздел": раздел, "responsible": яч[3] if len(яч) > 3 else "",
+                             "проект": корень, "подпроект": под, "тело": тело,
+                             "due": (t or {}).get("due_date") or None, "тема": тема, "id": (t or {}).get("id")})
+        новые: list[list[str]] = []
+        for группа, отдел in u.группы_показа(сведения, отделы=отделы):
+            if len(группа) == 1:
+                новые.append(тело_таблицы[группа[0]])
+                continue
+            части = [тело_таблицы[k] for k in группа]
+
+            def общее(значения) -> str:
+                return ", ".join(dict.fromkeys(з for з in значения if з))
+            человек = next((ч[3] for ч in части if ч[3] and ч[3] != НЕ_НАЗНАЧЕН
+                            and not u.исполнитель_отдел(ч[3], отделы)), части[0][3])
+            задача = u.строка_подпроектов([(сведения[k]["проект"], сведения[k]["подпроект"], сведения[k]["тело"])
+                                           for k in группа], [сведения[k]["id"] for k in группа])
+            новые.append(["", _ячейка(задача), общее(ч[2] for ч in части), человек if отдел else части[0][3],
+                          next((ч[4] for ч in части if ч[4] and ч[4] != НЕ_УКАЗАН), части[0][4]),
+                          общее(ч[5] for ч in части), общее(ч[6] for ч in части)])
+        for n, яч in enumerate(новые, 1):
+            if яч and (яч[0].isdigit() or яч[0] == ""):
+                яч = [str(n)] + яч[1:]
+            out.append("| " + " | ".join(яч) + " |")
     return "\n".join(out)

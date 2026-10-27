@@ -710,9 +710,22 @@ def _write(path: Path, data: dict, record: dict, backup: bool = True) -> dict:
             old.unlink()
     tmp = path.with_suffix(".json.tmp")
     tmp.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
-    os.replace(tmp, path)
+    _replace(tmp, path)
     mr._log(path, record)
     return data
+
+
+def _replace(tmp: Path, path: Path, tries: int = 10, pause: float = 0.1) -> None:
+    """Атомарная замена файла. На Windows `os.replace` отказывает (PermissionError), пока файл держит открытым другой
+    процесс или чтение соседнего потока; короткая пауза и повтор, затем отказ словами наверх (27.10.2026)."""
+    for n in range(tries):
+        try:
+            os.replace(tmp, path)
+            return
+        except PermissionError:
+            if n == tries - 1:
+                raise
+            time.sleep(pause)
 
 
 def _role_and_point(data: dict, role: str, name: str) -> None:

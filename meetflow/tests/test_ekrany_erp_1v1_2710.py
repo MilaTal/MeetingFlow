@@ -56,9 +56,10 @@ def test_фронт_erp_целиком_светлая_тема_и_выбор_п�
     assert 'id="project-select"' in html and "Все проекты" in html
     js = (STATIC / "app.js").read_text(encoding="utf-8")
     assert 'headers["X-Project-Id"] = String(выбранныйПроект());' in js
-    assert "`Проект — ${п.name}`" in js and '"Все проекты компании"' in js
+    assert "`Проект — ${п.label || п.name}`" in js and '"Все проекты компании"' in js
     css = (STATIC / "styles.css").read_text(encoding="utf-8")
-    assert "--bg: #fafafa;" in css and "prefers-color-scheme: dark" not in css
+    # светлая основа ERP; палитры и тёмная тема MeetFlow возвращены 4af9cfa («Оформление» после переноса фронта ERP)
+    assert "--bg: #fafafa;" in css
 
 
 def test_встречи_без_формы_создания_и_подготовка_с_ближайшей():
@@ -597,7 +598,7 @@ def test_выключатели_и_сроки(env):
     assert c.get("/project-status/monitoring", headers=h()).json()["service_log_keep_days"] == 14
     sub = c.post("/project-status/system-subprojects", json={"items": [{"name": "Склад А"}, {"name": "Склад А"}]},
                  headers=h()).json()
-    assert sub["items"] == [{"name": "Склад А"}] and sub["all"] == "Весь проект Склад"
+    assert [x["name"] for x in sub["items"]] == ["Склад А"] and sub["all"] == "Весь проект Склад"
     sp = c.post("/project-status/system-project", json={"name": "Склад Северный", "aliases": "Северный; СС"}, headers=h())
     assert sp.json() == {"name": "Склад Северный", "aliases": "Северный; СС"}
 

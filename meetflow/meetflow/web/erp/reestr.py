@@ -160,7 +160,7 @@ def mount(r: APIRouter, ctx: Ctx) -> None:
             return reason
 
     def task_out(t: dict, u: dict | None, *, ids: dict | None = None, mdates: dict | None = None,
-                 dates_by_project: dict | None = None, all_projects: bool = False) -> dict:
+                 dates_by_project: dict | None = None, all_projects: bool = False, labels: dict | None = None) -> dict:
         from ...core import tablica_zadach
         admin = ctx.is_admin(u)
         ids = ids if ids is not None else team_ids()
@@ -182,10 +182,14 @@ def mount(r: APIRouter, ctx: Ctx) -> None:
         label = doubt_label(reason) if reason and bool(store.get_setting("show_doubt_mark", None, True)) else None
         if label and not admin and "см." in label:
             label = "требует подтверждения"
-        project_name = None
-        if all_projects:
-            p = store.get("projects", pid)
-            project_name = p["name"] if p else None
+        # проект и подпроект записи (справочник проектов, `projects.parent_id`): подпроект — проект задачи, если у него есть
+        # надпроект; приставка «Проект – Подпроект:» формулировки — на экране, из этих полей
+        names = (labels or {}).get(pid) if labels is not None else None
+        if names is None:
+            names = ctx.project_names(pid)
+            if labels is not None:
+                labels[pid] = names
+        project_name = names[0] if (all_projects and names[0]) else None
         out = {"id": t["id"], "description": t.get("description") or "", "responsible_user_id": rid,
                "responsible_text": t.get("assignee") or None, "status": t.get("status") or "active",
                "status_detail": t.get("status_detail") or None, "date_set": (t.get("date_set") or "")[:10] or None,
@@ -199,7 +203,8 @@ def mount(r: APIRouter, ctx: Ctx) -> None:
                "due_phrase": None, "due_kind": t.get("due_kind") or None,
                "due_original": (t.get("due_original") or "")[:10] or None,
                "source_meeting_id": t.get("source_meeting_id"), "source_meeting_date": (mdate or "")[:10] or None,
-               "project_id": pid or None, "project_name": project_name, "subproject": t.get("subproject") or None,
+               "project_id": pid or None, "project_name": project_name, "subproject": names[1] or None,
+               "project_root": names[0] or None,
                "operational": bool(t.get("operational")), "operational_hint": bool(hint),
                "updated_at": iso_dt(t.get("updated_at") or t.get("date_set")) or now(),
                "version": int(t.get("version") or 1)}
@@ -209,8 +214,9 @@ def mount(r: APIRouter, ctx: Ctx) -> None:
         ids = team_ids()
         mdates = {m["id"]: m["date"] for m in store.q("SELECT id, date FROM meetings")}
         dbp: dict = {}
+        labels: dict = {}
         all_p = ctx.project(request) is None
-        return [task_out(t, u, ids=ids, mdates=mdates, dates_by_project=dbp, all_projects=all_p) for t in rows]
+        return [task_out(t, u, ids=ids, mdates=mdates, dates_by_project=dbp, all_projects=all_p, labels=labels) for t in rows]
 
     def take(t: dict, version: int | None, who: str) -> None:
         """Замок на данных: правка проходит, только если экран видел текущую версию задачи."""
@@ -302,9 +308,11 @@ def mount(r: APIRouter, ctx: Ctx) -> None:
 
     @r.get("/tasks/projects")
     def task_projects():
-        """Справочник проектов для окна правки задачи — проекты MeetFlow (проект ведения)."""
-        return [{"id": p["id"], "name": p["name"], "category": None}
-                for p in store.q("SELECT id, name, archived FROM projects ORDER BY name") if not p.get("archived")]
+        """Справочник для окна правки задачи: проекты и подпроекты MeetFlow подписью «Проект – Подпроект», деревом —
+        выбор подпроекта здесь и есть поле «подпроект» задачи (задача переходит в подпроект)."""
+        rows = [p for p in store.q("SELECT id, name, parent_id, archived FROM projects") if not p.get("archived")]
+        rows.sort(key=lambda p: (ctx.project_label(p["id"]).lower()))
+        return [{"id": p["id"], "name": ctx.project_label(p["id"]), "category": None} for p in rows]
 
     @r.post("/tasks", status_code=201)
     def create_task(payload: TaskCreate, request: Request):
@@ -424,7 +432,7 @@ def mount(r: APIRouter, ctx: Ctx) -> None:
             if not p or p.get("archived"):
                 raise HTTPException(400, "Такого проекта нет в справочнике — выберите из списка")
             store.update("tasks", tid, project_id=p["id"])
-            history(tid, t["status"], t["status"], "operator", f"проект: {p['name']}", ctx.name(admin))
+            history(tid, t["status"], t["status"], "operator", f"проект: {ctx.project_label(p['id'])}", ctx.name(admin))
         return fresh(tid, admin, request)
 
     @r.patch("/tasks/{tid}/subproject")
@@ -433,12 +441,22 @@ def mount(r: APIRouter, ctx: Ctx) -> None:
         with lock:
             t = get_or_404(tid)
             take(t, payload.version, ctx.name(admin))
-            sp = (payload.subproject or "").strip()
-            allowed = [str(x) for x in (store.get_setting("subprojects", t["project_id"], []) or [])]
-            if sp and sp not in allowed:
-                raise HTTPException(400, "Такого подпроекта нет в справочнике подпроектов проекта")
-            store.update("tasks", tid, subproject=sp)
-            history(tid, t["status"], t["status"], "operator", f"подпроект: {sp or 'весь проект'}", ctx.name(admin))
+            # подпроект — запись справочника проектов под тем же проектом верхнего уровня (как ERP podproekty.проверить:
+            # только из справочника; пусто — весь проект); задача переходит в подпроект целиком (project_id)
+            sp = " ".join((payload.subproject or "").split())
+            root = ctx.root_of(t["project_id"])
+            target = root
+            if sp:
+                key = lambda s: " ".join((s or "").lower().replace("ё", "е").split())  # noqa: E731
+                found = [p for p in store.q("SELECT id, name FROM projects WHERE COALESCE(archived,0)=0")
+                         if p["id"] in ctx.family(root) and p["id"] != root and key(p["name"]) == key(sp)]
+                if not found:
+                    raise HTTPException(400, f"Подпроекта «{sp}» нет в справочнике подпроектов проекта "
+                                             f"«{(store.get('projects', root) or {}).get('name', '')}».")
+                target = found[0]["id"]
+            store.update("tasks", tid, project_id=target)
+            history(tid, t["status"], t["status"], "operator",
+                    f"подпроект -> {ctx.project_names(target)[1] or 'весь проект'}", ctx.name(admin))
         return fresh(tid, admin, request)
 
     @r.patch("/tasks/{tid}/description")

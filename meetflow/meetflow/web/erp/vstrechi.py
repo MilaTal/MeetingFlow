@@ -34,6 +34,12 @@ MEDIA_EXT = (".mp4", ".mkv", ".avi", ".mov", ".webm", ".m4a", ".mp3", ".wav", ".
 DOCX = "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
 
 
+class MoveProjectIn(BaseModel):
+    """«Перенести встречу в другой проект» (27.10.2026): номер проекта и пересобрать ли протокол после переноса."""
+    project_id: int
+    rebuild: bool = True
+
+
 class InModel(BaseModel):
     model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
 
@@ -68,6 +74,10 @@ class MeetingDateIn(InModel):
     @classmethod
     def _d(cls, v):
         return _date_in(v)
+
+
+class MeetingSubprojectIn(InModel):
+    subproject: str | None = Field(default=None, max_length=200)
 
 
 class MeetingLeaderIn(InModel):
@@ -199,8 +209,10 @@ def mount(r: APIRouter, ctx: Ctx) -> None:
                         "building": bool(b["running"]), "предложена_пересборка": False,
                         "has_plan": bool(m.get("plan_md")), "plan_generated_at": iso_dt(m.get("plan_built_at")),
                         "materials_count": len(sources_of(m["id"], True))})
-            p = store.get("projects", m.get("project_id") or 0)
-            out["project_name"] = p["name"] if p else ""
+        # проект и подпроект встречи (справочник проектов, `projects.parent_id`): подпись «Проект – Подпроект»
+        root_name, sub_name = ctx.project_names(m.get("project_id"))
+        out.update(project_name=root_name, subproject=sub_name or None, project_label=ctx.project_label(m.get("project_id")),
+                   project_root_id=ctx.root_of(m.get("project_id")))
         return out
 
     def describe(m: dict) -> dict:
@@ -432,6 +444,24 @@ def mount(r: APIRouter, ctx: Ctx) -> None:
         ctx.sys_msg(f"Сводка возвращена на новую дату {ru_date(day)}", f"{ctx.name(admin)}: материалов {moved}.",
                     "meetings")
         return {"meeting": meeting_out(store.get("meetings", nid)), "moved": moved}
+
+    @r.post("/meetings/{mid}/move-project")
+    def move_project(mid: int, payload: MoveProjectIn, request: Request):
+        """«Перенести встречу в другой проект» вместе с её задачами (27.10.2026): встреча из общей папки попала не в свой
+        проект. Протокол не переписывается — после переноса сборка встаёт в очередь заново (`rebuild`)."""
+        from ...core import proekt_zapisi as pz
+        admin = ctx.need_admin(request)
+        ctx.meeting_or_404(mid)
+        try:
+            out = pz.перенести_встречу(store, mid, payload.project_id, ctx.name(admin))
+        except ValueError as exc:
+            raise HTTPException(404, str(exc)) from exc
+        rid = pz.собрать_после_выбора(store, getattr(ctx.pipe, "queue", None), mid, ctx.name(admin)) \
+            if payload.rebuild else None
+        ctx.sys_msg("Встреча перенесена в другой проект",
+                    f"{ctx.name(admin)}: задач {out['tasks']}" + ("; сборка поставлена в очередь" if rid else ""),
+                    "meetings")
+        return {**out, "queued": bool(rid), "meeting": meeting_out(store.get("meetings", mid))}
 
     @r.post("/meetings/{mid}/move-materials")
     def move_mats(mid: int, payload: MeetingMoveIn, request: Request):
@@ -874,6 +904,42 @@ def mount(r: APIRouter, ctx: Ctx) -> None:
                          leader_source="вручную", leader_note=f"указан вручную: {ctx.name(admin)}")
         return meeting_out(store.get("meetings", mid))
 
+    @r.get("/meetings/{mid}/subprojects")
+    def meeting_subprojects(mid: int, request: Request):
+        """Подпроекты, в которые можно отнести встречу: подпроекты её проекта верхнего уровня (не архивные)."""
+        ctx.need_user(request)
+        m = ctx.meeting_or_404(mid)
+        root = ctx.root_of(m.get("project_id"))
+        fam = ctx.family(root)
+        items = [{"id": p["id"], "name": ctx.project_names(p["id"])[1]} for p in store.q(
+            "SELECT id FROM projects WHERE COALESCE(archived,0)=0 ORDER BY name") if p["id"] in fam and p["id"] != root]
+        return {"project": ctx.project_names(root)[0], "current": ctx.project_names(m.get("project_id"))[1] or "",
+                "items": items}
+
+    @r.patch("/meetings/{mid}/subproject")
+    def set_meeting_subproject(mid: int, payload: MeetingSubprojectIn, request: Request):
+        """Подпроект встречи внутри того же проекта верхнего уровня; пусто — весь проект. Задачи, уже поставленные на встрече,
+        остаются в своём подпроекте (протокол и реестр задним числом не переписываются); следующая сборка ставит новые задачи
+        в подпроект встречи. Перенос встречи в другой проект — отдельное действие (агент протокола, 27.10.2026)."""
+        admin = ctx.need_admin(request)
+        m = ctx.meeting_or_404(mid)
+        root = ctx.root_of(m.get("project_id"))
+        target = root
+        sp = " ".join((payload.subproject or "").split())
+        if sp:
+            key = lambda s: " ".join((s or "").lower().replace("ё", "е").split())  # noqa: E731
+            fam = ctx.family(root)
+            hit = [p for p in store.q("SELECT id, name FROM projects WHERE COALESCE(archived,0)=0")
+                   if p["id"] in fam and p["id"] != root and key(p["name"]) == key(sp)]
+            if not hit:
+                raise HTTPException(400, f"Подпроекта «{sp}» нет в справочнике подпроектов проекта "
+                                         f"«{ctx.project_names(root)[0]}».")
+            target = hit[0]["id"]
+        store.update("meetings", mid, project_id=target)
+        ctx.sys_msg(f"Встреча {ru_date(m.get('date'))}: {ctx.project_label(target)}",
+                    f"Отнёс: {ctx.name(admin)}. Было: {ctx.project_label(m.get('project_id'))}.", "settings")
+        return meeting_out(store.get("meetings", mid))
+
     @r.post("/meetings/{mid}/accept-draft")
     def accept_draft(mid: int, request: Request):
         ctx.need_admin(request)
@@ -944,13 +1010,16 @@ def mount(r: APIRouter, ctx: Ctx) -> None:
         return {"show": bool(tasks or findings), "tasks": tasks, "tasks_count": len(tasks), "findings": findings,
                 "findings_count": len(findings)}
 
-    def shown(md: str | None, project_id: int | None) -> str:
-        from ...core.tablica_zadach import без_снятых
+    def shown(md: str | None, project_id: int | None, meeting: dict | None = None) -> str:
+        """Дверь показа: снятые задачи не показываются; с `meeting` (протокол на экране и в Word, не полотно правки) —
+        открытые задачи из реестра одной строкой (ERP 3550fc6, `tablica_zadach.укрупнить_показ`, 27.10.2026)."""
+        from ...core.tablica_zadach import без_снятых, укрупнить_показ
         if not md or project_id is None:
             return md or ""
         rows = store.q("SELECT description, status FROM tasks WHERE project_id=?", (project_id,))
-        return без_снятых(md, {r["description"] for r in rows if r["status"] == "dropped"},
-                          {r["description"] for r in rows if r["status"] != "dropped"})
+        md = без_снятых(md, {r["description"] for r in rows if r["status"] == "dropped"},
+                        {r["description"] for r in rows if r["status"] != "dropped"})
+        return укрупнить_показ(store, meeting, md) if meeting else md
     ctx.shown = shown
 
     def notes_of(m: dict) -> list[dict]:
@@ -973,7 +1042,7 @@ def mount(r: APIRouter, ctx: Ctx) -> None:
         if not m.get("protocol_md"):
             return {"available": False, "message": "Протокола этой встречи пока нет"}
         srcs = [{"kind": s.get("kind") or "other", "original_filename": s.get("name") or ""} for s in text_sources(mid)]
-        return {"available": True, "content_md": shown(m["protocol_md"], m["project_id"]),
+        return {"available": True, "content_md": shown(m["protocol_md"], m["project_id"], m),
                 "generated_at": iso_dt(m.get("protocol_built_at")), "sources": srcs, "build_note": m.get("build_note") or "",
                 "hand_edited": bool(m.get("protocol_hand_edited")), "minor_findings": notes_of(m)}
 
@@ -994,7 +1063,7 @@ def mount(r: APIRouter, ctx: Ctx) -> None:
         m = ctx.meeting_or_404(mid)
         if not m.get("protocol_md"):
             raise HTTPException(404, "Протокола этой встречи пока нет")
-        return docx_response(shown(m["protocol_md"], m["project_id"]), f"Протокол встречи {ru_date(m['date'])}")
+        return docx_response(shown(m["protocol_md"], m["project_id"], m), f"Протокол встречи {ru_date(m['date'])}")
 
     @r.get("/meetings/{mid}/plan/export")
     def export_plan(mid: int):

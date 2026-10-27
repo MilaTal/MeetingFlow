@@ -555,23 +555,48 @@ def mount(r: APIRouter, ctx: Ctx) -> None:
         ctx.sys_msg(f"Проект: {name}", f"Поменял: {ctx.name(u)}. Вариантов написания: {len(aliases)}.", "settings")
         return {"name": name, "aliases": "; ".join(aliases)}
 
+    # Подпроекты карточки «Проект системы» — те же записи справочника проектов (`projects.parent_id`, ЛМ 6c6933f), что на
+    # «Проектах»: строка списка — подпроект выбранного проекта (при выбранном подпроекте — его надпроекта верхнего уровня).
+    def root_pid(request: Request) -> int:
+        return ctx.root_of(need_pid(request, "Подпроекты"))
+
     @r.get("/project-status/system-subprojects")
     def get_subprojects(request: Request):
-        pid = need_pid(request, "Подпроекты")
+        pid = root_pid(request)
         p = store.get("projects", pid) or {}
-        items = [{"name": str(x)} for x in (store.get_setting("subprojects", pid, []) or [])]
+        items = [{"id": x["id"], "name": x["name"], "aliases": "; ".join(loads(x.get("aliases"), []))}
+                 for x in store.q("SELECT * FROM projects WHERE parent_id=? AND COALESCE(archived,0)=0 ORDER BY name", (pid,))]
         return {"items": items, "all": f"Весь проект {p.get('name', '')}".strip()}
 
     @r.post("/project-status/system-subprojects")
     def set_subprojects(body: SubprojectsIn, request: Request):
+        """Список целиком: новое название — новый подпроект, убранное — в архив (записи остаются при нём, протокол и реестр
+        задним числом не переписываются), вернувшееся — из архива."""
         u = ctx.need_super(request)
-        pid = need_pid(request, "Подпроекты")
-        names = []
+        pid = root_pid(request)
+        key = lambda s: " ".join((s or "").lower().replace("ё", "е").split())  # noqa: E731
+        want: dict = {}
         for x in body.items:
-            n = " ".join(str(x.get("name") or "").split())
-            if n and n not in names:
-                names.append(n)
-        store.set_setting("subprojects", names, pid, ctx.name(u))
+            n = " ".join(str(x.get("name") or "").split())[:200]
+            if n and key(n) not in want and key(n) != key((store.get("projects", pid) or {}).get("name")):
+                want[key(n)] = n
+        kids = {key(x["name"]): x for x in store.q("SELECT * FROM projects WHERE parent_id=?", (pid,))}
+        others = {key(x["name"]) for x in store.q("SELECT name, parent_id FROM projects WHERE COALESCE(parent_id,0)!=?", (pid,))}
+        clash = [n for k, n in want.items() if k not in kids and k in others]
+        if clash:
+            raise HTTPException(409, f"Проект «{clash[0]}» уже есть в справочнике проектов — подпроектом его делает "
+                                     "«Параметры системы» → «Проекты», поле «Надпроект».")
+        for k, x in kids.items():
+            if k not in want and not x.get("archived"):
+                store.update("projects", x["id"], archived=1)
+        for k, n in want.items():
+            if k in kids:
+                store.update("projects", kids[k]["id"], name=n, archived=0)
+            else:
+                store.insert("projects", name=n, theme=ctx.theme.id, aliases="[]", active=1, archived=0, parent_id=pid,
+                             created_at=now())
+        ctx.sys_msg(f"Подпроекты проекта «{(store.get('projects', pid) or {}).get('name', '')}»: {len(want)}",
+                    f"Поменял: {ctx.name(u)}.", "settings")
         return get_subprojects(request)
 
     # ------------------------------------------------------------------ папка-приёмник проекта

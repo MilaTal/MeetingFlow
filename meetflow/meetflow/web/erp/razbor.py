@@ -26,7 +26,7 @@ FIELD_OF = {"held_task": "ungrounded_task", "task_doubt": "ungrounded_task", "as
             "mass_closing": "status", "review_finding": "review_finding", "member_note": "member_note",
             "held_recording": "held_recording", "waiting_tools": "held_recording", "department_mismatch": "responsible",
             "suspicious_source": "suspicious_source", "source_kind": "source_kind", "stopped_by_limit": "build_failed",
-            "limit_cut": "build_failed", "rebuild_kept": "rebuild_order"}
+            "limit_cut": "build_failed", "rebuild_kept": "rebuild_order", "project_undetermined": "project_hint"}
 VIEW_OF = {"ungrounded_task": "tasks", "duplicate_task": "tasks", "due_date": "tasks", "status": "tasks",
            "member_note": "tasks", "build_failed": "tasks", "rebuild_order": "tasks", "responsible": "people",
            "person": "people", "held_recording": "people", "voice_hint": "people", "project_hint": "projects",
@@ -118,6 +118,11 @@ def mount(r: APIRouter, ctx: Ctx) -> None:
         elif kind == "member_note":
             out.update(current_value=p.get("note") or "", proposed_value=p.get("proposed"),
                        evidence_quote=f"Отметка: {p.get('by') or ''}", task_description=p.get("description"))
+        elif kind == "project_undetermined":
+            # «Проект записи не определён» (27.10.2026): кандидаты — проекты справочника, выбор переносит встречу
+            out.update(current_value=p.get("file") or "", evidence_quote=p.get("why") or "",
+                       candidates=[{"id": x.get("id"), "name": x.get("name"), "note": ", ".join(x.get("hints") or [])}
+                                   for x in (p.get("candidates") or [])], answers=["accept", "custom"])
         elif kind in ("held_recording", "waiting_tools"):
             out.update(current_value=p.get("file") or "", proposed_value=c["title"], answers=["accept", "reject"])
         else:
@@ -157,6 +162,18 @@ def mount(r: APIRouter, ctx: Ctx) -> None:
                         pipe.reg.set_due(tid, d.isoformat(), who, "по отметке исполнителя")
             store.update("cards", c["id"], status="accepted" if act == "accept" else "rejected",
                          resolution="принято" if act == "accept" else "оставлено как есть", resolved_at=now())
+            return store.get("cards", c["id"])
+        if kind == "project_undetermined" and act in ("accept", "confirm", "custom"):
+            from ...core import proekt_zapisi as pz
+            pid = payload.person_id
+            if act == "custom":
+                val = " ".join((payload.custom_value or "").split()).lower().replace("ё", "е")
+                hit = [x for x in pz.проекты(store) if x["name"].lower().replace("ё", "е") == val]
+                pid = hit[0]["id"] if len(hit) == 1 else None
+            if not pid or not any(x["id"] == pid for x in pz.проекты(store)):
+                raise HTTPException(422, "Выберите проект из справочника")
+            pz.перенести_встречу(store, int(p.get("meeting_id") or c.get("meeting_id")), int(pid), who)
+            pz.собрать_после_выбора(store, getattr(pipe, "queue", None), int(p.get("meeting_id") or c.get("meeting_id")), who)
             return store.get("cards", c["id"])
         if kind == "review_finding" and act == "reject":
             store.delete("cards", c["id"])            # «Замечание неверно» удаляет карточку насовсем (17.10.26)

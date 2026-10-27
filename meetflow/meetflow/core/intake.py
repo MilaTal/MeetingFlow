@@ -203,31 +203,49 @@ class IntakeService:
         for name in scan.no_date:
             self.pipe.cards.open(project_id, "technical", f"В имени файла нет одной даты: {name}",
                                  {"folder": path, "file": name})
+        from . import proekt_zapisi as pz
+        другие = pz.папки_других(self.s, project_id)
         for item in scan.ready:
-            mid = self._meeting_for(project_id, item.meeting_date.isoformat())
+            if pz.под_другим(item.path, другие):
+                continue                     # подпапка — приёмник другого проекта: её обходит тот проект
+            # Проект записи (27.10.2026): подпапка проекта или подпроекта — он; корень общей папки — по названию в имени
+            # файла; не определился — встреча с пометкой «проект не определён» и карточка, сборка ждёт выбора
+            чей = pz.проект_файла(self.s, project_id, Path(path), item.path)
+            цель = чей["project_id"]
+            if цель is None:
+                mid = self.s.insert("meetings", project_id=project_id, date=item.meeting_date.isoformat(),
+                                    label="из папки-приёмника — проект не определён", project_pending=1)
+            else:
+                mid = self._meeting_for(цель, item.meeting_date.isoformat())
+            проект_приёма = цель or project_id
             is_media = self.pipe.plugins.resolve_source(item.path.name) is not None and \
                 self.pipe.plugins.resolve_source(item.path.name).kind == "asr"
             self._beat(project_id, "распознавание записи" if is_media else "приём файла", item.path.name)
             data = None if is_media else item.path.read_bytes()
-            res = self.pipe.ingest(project_id, mid, item.path.name, data, path=item.path if is_media else None)
+            res = self.pipe.ingest(проект_приёма, mid, item.path.name, data, path=item.path if is_media else None)
             st = res.get("status")
+            if st == "ok" and цель is None:
+                pz.открыть_карточку(self.s, self.pipe.cards, project_id, mid, item.path.name, чей)
+            if st == "ok":
+                result.setdefault("projects", []).append({"file": item.path.name, "project_id": цель,
+                                                          "how": чей["how"]})
             if st in ("ok", "duplicate"):
                 fi.known.add(item.digest)
                 moved = None
                 if item.path.exists():  # запись мог уже удалить конвейер после распознавания
                     moved = fi.done(item.path)
                 result["ingested" if st == "ok" else "duplicates"].append(item.path.name)
-                if st == "ok" and res.get("kind") == "transcript" and \
+                if st == "ok" and res.get("kind") == "transcript" and цель is not None and \
                         self.s.get_setting("autorun", project_id, False):
                     self._beat(project_id, "сборка протокола", item.path.name)
                     q = getattr(self.pipe, "queue", None)       # через очередь сборок (стенд 41)
                     if q:
-                        rid = q.enqueue(project_id, mid, "автозапуск из папки-приёмника")
+                        rid = q.enqueue(проект_приёма, mid, "автозапуск из папки-приёмника")
                         rep = q.wait(rid, timeout=AUTORUN_WAIT_SEC)
                         if rep.get("status") == "queued":       # не дождались — сборка идёт сама, итог подберём потом
                             self._pending[rid] = (project_id, mid, item.path.name, moved)
                     else:
-                        rep = self.pipe.run(project_id, mid).__dict__
+                        rep = self.pipe.run(проект_приёма, mid).__dict__
                     result.setdefault("autorun", []).append({"meeting_id": mid, "status": rep.get("status")})
                     if rep.get("status") != "queued":
                         self._after_build(project_id, mid, item.path.name, moved, rep)

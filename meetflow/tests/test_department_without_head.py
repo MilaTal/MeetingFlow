@@ -55,11 +55,9 @@ def test_card_title_and_payload(store, project, make_pipe):
     # перевёрнут 03.10.26 решением владельца (письмо 36): задача отделу без руководителя заводится сразу,
     # рядом карточка «назначить ответственного в отделе». Перевёрнут ещё раз владельцем 10.10.26: исполнитель
     # пустой, отдел — только в карточке (было: в графе исполнителя — отдел)
+    # перевёрнут 27.10.2026 решением владелицы 16.10.2026 (ERP и Планёрка, `test_otdel_tekstom_1610`): в графе
+    # исполнителя — название отдела текстом, как у секретаря, без подстановки человека и без карточки
     assert p.run(project, mid).tasks_added == 1
     t = store.q("SELECT * FROM tasks")[0]
-    assert t["assignee"] is None
-    card = store.q("SELECT * FROM cards WHERE kind='assign_person'")[0]
-    pl = json.loads(card["payload"])
-    assert card["title"].startswith("Отдел без руководителя: назначьте ответственного")
-    assert pl["reason"] == "department" and pl["department"] == "ОТН" and pl["task_id"] == t["id"]
-    assert [c["name"] for c in pl["candidates"]] == ["Осипов Игорь"]
+    assert t["assignee"] == "ОТН"
+    assert not store.q("SELECT * FROM cards WHERE kind='assign_person'")

@@ -145,9 +145,55 @@ class Ctx:
             raise HTTPException(400, "Выберите проект внизу левой панели: «Все проекты» показывают, но не заводят.")
         return pid
 
+    # Проект и подпроекты (справочник ЛМ 6c6933f, `projects.parent_id`; возвращено 27.10.2026): подпроект — запись проекта
+    # с надпроектом. Выбранный проект показывается вместе со всеми своими подпроектами, выбранный подпроект — сам по себе.
+    def family(self, pid: int | None) -> list[int]:
+        """Проект и все его подпроекты (любой глубины), включая архивные: записи архивного подпроекта не пропадают."""
+        if not pid:
+            return []
+        rows = self.store.q("SELECT id, parent_id FROM projects")
+        kids: dict = {}
+        for r in rows:
+            kids.setdefault(r["parent_id"], []).append(r["id"])
+        out, todo = [], [pid]
+        while todo:
+            x = todo.pop()
+            if x in out:
+                continue
+            out.append(x)
+            todo += kids.get(x, [])
+        return out
+
+    def root_of(self, pid: int | None) -> int | None:
+        seen = set()
+        while pid and pid not in seen:
+            seen.add(pid)
+            p = self.store.get("projects", pid) or {}
+            if not p.get("parent_id"):
+                return pid
+            pid = p["parent_id"]
+        return pid
+
+    def project_names(self, pid: int | None) -> tuple[str, str]:
+        """(проект, подпроект): у записи подпроекта — название надпроекта верхнего уровня и своё; у проекта — («имя», «»)."""
+        p = self.store.get("projects", pid or 0) or {}
+        if not p:
+            return "", ""
+        root = self.root_of(pid)
+        if root == pid:
+            return p.get("name") or "", ""
+        return (self.store.get("projects", root) or {}).get("name") or "", p.get("name") or ""
+
+    def project_label(self, pid: int | None) -> str:
+        """«Проект – Подпроект» или «Проект» — приставка формулировки и подпись в отборах «Все проекты»."""
+        a, b = self.project_names(pid)
+        return f"{a} – {b}" if b else a
+
     def scope_sql(self, request: Request, col: str = "project_id") -> tuple[str, tuple]:
-        pid = self.project(request)
-        return (f" AND {col}=?", (pid,)) if pid else ("", ())
+        ids = self.family(self.project(request))
+        if not ids:
+            return "", ()
+        return f" AND {col} IN ({','.join('?' * len(ids))})", tuple(ids)
 
     def meeting_or_404(self, mid: int) -> dict:
         m = self.store.get("meetings", mid)
