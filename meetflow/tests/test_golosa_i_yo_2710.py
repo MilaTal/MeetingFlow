@@ -77,10 +77,12 @@ def test_это_он_только_по_команде_другой_челове�
 
 
 def test_экран_два_кандидата_и_серая_кнопка():
+    """С 27.10.2026 «Разбор голосов» — экран ERP 1 в 1: «Это он» по кандидату из «Команды», «Не он», «Другой человек»;
+    строка «без материала» — только при N > 0."""
     js = (Path(__file__).resolve().parents[1] / "meetflow/web/static/app.js").read_text(encoding="utf-8")
-    assert "Похож на: " in js and "Не они" in js and "kandidat_v_komande" in js and "vtoroy_v_komande" in js
-    assert "нет в «Команде» MeetFlow полным ФИО — выберите в «Другой человек»" in js
-    assert "d.bez_materiala ?" in js, "строка «без материала» — только при N > 0"
+    assert "kandidat_v_komande" in js and "vtoroy_v_komande" in js and ">Это он</button>" in js and ">Не он</button>" in js
+    assert "нет в «Команде» полным ФИО — выберите в «Другой человек»" in js
+    assert "д.bez_materiala > 0 ?" in js, "строка «без материала» — только при N > 0"
 
 
 # --- «е» = «ё» -------------------------------------------------------------------------------------------------------

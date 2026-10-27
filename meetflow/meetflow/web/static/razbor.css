@@ -1,0 +1,27 @@
+/* «Разбор» — одна вкладка вместо трёх (решение владелицы 25.10.2026). Файл-близнец: webapp/frontend/razbor.css и
+   planerka/webapp/frontend/razbor.css совпадают до байта. Полоса видов — как вкладки внутри страницы, цвета — переменные
+   темы системы, новых цветов нет. */
+.rz-views { display: flex; flex-wrap: wrap; gap: 4px 18px; margin: 4px 0 12px; }
+.rz-view { display: inline-flex; align-items: center; gap: 6px; padding: 6px 0; text-decoration: none; color: inherit; opacity: .75; }
+.rz-view:hover, .rz-view:focus-visible { opacity: 1; }
+.rz-view-on { opacity: 1; font-weight: 600; box-shadow: inset 0 -2px 0 currentColor; }
+.rz-view .n { font-variant-numeric: tabular-nums; font-weight: 400; opacity: .8; }
+.rz-batch { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-bottom: 8px; }
+.rz-pick { width: 28px; }
+.rz-act { white-space: nowrap; }
+.rz-note { margin: 0 0 10px; }
+.rz-card-pick { display: inline-flex; align-items: center; gap: 4px; font-size: 12px; opacity: .8; margin-right: 8px; }
+/* «Разбор голосов», вид «Опознанные и решённые»: «Не он» в одну строку (25.10.2026, дефекты экранов перед видео, п. 7) */
+.vr-ne-on { white-space: nowrap; }
+.pp-razbor { font-size: 12px; margin-left: 6px; white-space: nowrap; }
+/* Шапка и строки задач — одинаково в обеих системах: у ERP нет общих правил .toolbar и .sub Планёрки (стенд 25.10.2026) */
+#razbor-toolbar { display: flex; align-items: center; gap: 10px; margin-bottom: 6px; }
+#razbor-toolbar .tb-spacer { flex: 1; }
+.rz-table .sub { display: block; margin-top: 2px; font-size: 12.5px; font-style: italic; opacity: .75; }
+/* «Прослушать и решить» из карточки подсказки голоса (26.10.2026): блок говорящего на странице «Разбор голосов» подсвечен
+   на пару секунд — цвет темы системы, новых цветов нет */
+.rz-focus { outline: 3px solid var(--accent); outline-offset: 2px; background-color: var(--accent-soft) !important;
+  transition: outline-color .4s, background-color .4s; }
+/* подпись вместо перехода («отрывка нет — решить можно здесь», «прослушать может суперадминистратор») — прямым шрифтом в обеих
+   системах: в строке «Разбора» ERP .page-sub курсивный, это вид цитаты */
+.rz-listen-note, #conflicts-list .cf-main .rz-listen-note { margin-top: 6px; font-style: normal; }

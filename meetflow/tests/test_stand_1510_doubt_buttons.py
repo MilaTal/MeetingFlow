@@ -84,8 +84,11 @@ def test_duplicate_refused_when_not_offered(env):
 
 
 def test_registry_tooltip_uses_shared_label(env):
-    run(env, "Подготовить регламент склада")
+    run(env, "разработчики выполнили задачу")
     t = env.get(f"/api/projects/{env.pid}/tasks", headers=H).json()[0]
-    assert t["doubt_label"] == "сомнение — см. карточку" or t["doubt_label"]
-    js = (Path(__file__).parents[1] / "meetflow" / "web" / "static" / "app.js").read_text(encoding="utf-8")
-    assert "под вопросом: ${esc(t.doubt_label || t.doubt_reason)}" in js and "data-doubt-act" in js
+    assert t["doubt_label"] == "проверить — см. карточку" or t["doubt_label"]
+    # фронт ERP 1 в 1 (27.10.2026): подпись причины — с сервера (`under_question_label`), решение — в «Разборе»
+    root = Path(__file__).parents[1] / "meetflow" / "web" / "static"
+    js = (root / "app.js").read_text(encoding="utf-8")
+    assert "под вопросом: ${t.under_question_label || t.source_anchor}" in js
+    assert "решить в «Разборе»" in (root / "registry.js").read_text(encoding="utf-8")

@@ -33,7 +33,9 @@ def test_показ_срока():
 
 
 def test_реестр_показывает_due_text():
-    assert "t.due_text || t.due_date" in JS.read_text(encoding="utf-8")
+    """С 27.10.2026 срок в реестре — функцией ERP `taskDueText`: дата дд.мм.гггг, «(оценка)» — у оценочного срока."""
+    js = JS.read_text(encoding="utf-8")
+    assert "function taskDueText(t)" in js and 'if (t.due_kind === "оценка") return `${d} (оценка)`;' in js
 
 
 def test_api_отдаёт_сегодня_и_просрочку(tmp_path):
