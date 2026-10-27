@@ -54,6 +54,9 @@ class WhisperLocalASR(ASRConnector):
         self._model = None
         self._models: dict[tuple, object] = {}
         self.last_route = ""
+        # Подсказка распознаванию на одну запись (словарь проектов, `core/slovar_whisper`, как ERP 24–25.10.2026):
+        # ставит конвейер перед `transcribe` и снимает после; пусто — без подсказки, как было
+        self.initial_prompt = ""
 
     def available(self) -> bool:
         """Установлен ли faster-whisper — поиском модуля, без импорта: импорт тянет torch, тысячи модулей и
@@ -106,7 +109,8 @@ class WhisperLocalASR(ASRConnector):
         return self._models[key]
 
     def _run(self, model, path: Path):
-        segments, info = model.transcribe(str(path), language=self.language, vad_filter=True, beam_size=5)
+        доп = {"initial_prompt": self.initial_prompt} if self.initial_prompt else {}
+        segments, info = model.transcribe(str(path), language=self.language, vad_filter=True, beam_size=5, **доп)
         lines, texts, times = [], [], []
         for s in segments:
             text = s.text.strip()
@@ -157,7 +161,8 @@ class WhisperLocalASR(ASRConnector):
         оставляет только строки «ЧЧ:ММ:СС<TAB>текст», а нам нужны времена реплик для разделения по голосам.
         Протокол ответа тот же: текст — строки расшифровки, сводка — `segment_lines`/`segment_times`."""
         from . import asr_service
-        text, meta = asr_service.call(_mr._route(name, ep), path, language=self.language)
+        text, meta = asr_service.call(_mr._route(name, ep), path, language=self.language,
+                                      initial_prompt=self.initial_prompt or "")
         lines = []
         for ln in str(text or "").splitlines():
             if not ln.strip():
@@ -200,6 +205,8 @@ class WhisperLocalASR(ASRConnector):
                     continue
                 llm_routes.mark_up(name)
                 self.last_route = name
+                # подсказка ушла только faster-whisper и сервису; свой код «модуль:функция» её не принимает
+                prompt_sent = bool(self.initial_prompt) and ep["kind"] != "python"
                 break
             else:
                 raise ConnectorError("waiting_tools: ни одна точка распознавания не сработала, запись ждёт — "
@@ -218,6 +225,8 @@ class WhisperLocalASR(ASRConnector):
             if value not in (None, [], ""):
                 meta[key] = value
         meta.setdefault("model", self.last_route)
+        if prompt_sent:
+            meta["asr_prompt_sent"] = True
         return SourceDoc(f"{path.stem} (распознано локально).txt", SourceKind.TRANSCRIPT, "\n".join(lines), meta)
 
 

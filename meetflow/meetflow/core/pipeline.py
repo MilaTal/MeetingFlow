@@ -41,6 +41,7 @@ from . import deadline
 from . import asr_journal, plan as plan_mod, voice_step
 from . import petlya_raspoznavaniya as petlya, polnota_rasshifrovki as polnota
 from . import korotkiy_protokol, schet_zadach, tablica_zadach, tekst_po_zapisi
+from . import iskazheniya_nazvaniy, slovar_whisper
 from .team_sync import sync_people
 from ..connectors.team_shared import team_shared_state
 from .dates import due_text, lenient_date
@@ -376,6 +377,9 @@ class MeetingPipeline:
                 record["line_series"] = meta["asr_loops"].get("серий_строк", 0)
         if meta.get("recognized_share") is not None:
             record["recognized_share"] = meta["recognized_share"]
+        # подсказка распознаванию: токенов из 223, словарь вошло / отброшено (как ERP, 25.10.2026)
+        if meta.get("asr_prompt_journal"):
+            record["prompt_line"] = meta["asr_prompt_journal"]
         try:
             if wav_path is None or not Path(wav_path).is_file():
                 meta["voice_error"] = "записи нет на диске — голоса не разобраны"
@@ -503,7 +507,18 @@ class MeetingPipeline:
             if isinstance(c, ASRConnector):
                 if path is None:
                     return {"status": "rejected", "reason": "Для записи нужен путь к файлу."}
-                doc = c.transcribe(path)
+                # словарь проектов в подсказке распознавания — по выключателю «Параметров системы» (как ERP)
+                сборка = slovar_whisper.подсказка_сборка(self.s, project_id)
+                if сборка.текст and hasattr(c, "initial_prompt"):
+                    c.initial_prompt = сборка.текст
+                try:
+                    doc = c.transcribe(path)
+                finally:
+                    if hasattr(c, "initial_prompt"):
+                        c.initial_prompt = ""
+                if doc.meta.get("asr_prompt_sent"):
+                    doc.meta.update(сборка.meta())
+                    doc.meta["asr_project_vocab"] = bool(сборка.словарь_вошло)
             elif isinstance(c, VisionConnector):
                 doc = c.describe(data or b"", filename)
             else:
@@ -755,6 +770,12 @@ class MeetingPipeline:
             if cut:                               # срез не молча (01/22)
                 self.cards.open(project_id, "limit_cut", f"Модель предложила больше 40 задач на кусок — {cut} не "
                                 f"рассмотрены", {"cut": cut, "what": "поручения"}, meeting_id)
+            # «Проект только при прозвучавшем названии» (выключатель «Параметров системы», как ERP 24.10.2026): другой
+            # проект справочника в начале формулировки без опоры в записи снимается; проект встречи не снимается
+            if drafts:
+                _md, описания, _св = iskazheniya_nazvaniy.применить_к_встрече(
+                    self.s, project_id, "", [d.description for d in drafts], source.text)
+                drafts = [replace(d, description=о) if о != d.description else d for d, о in zip(drafts, описания)]
             # реестр «на дату встречи»: поставленное позже D не делает поручение D дублем (стенд 42, 371f967)
             existing = [(r["description"], r["assignee"]) for r in _as_of(self.reg.list(project_id), meeting.get("date"))]
             this_meeting = self.s.q("SELECT id, source_quote, description, assignee, status FROM tasks "
@@ -1192,6 +1213,9 @@ class MeetingPipeline:
                                                     record=safe_source.text + ("\n" + notes_text if notes_text else ""),
                                                     people=[p.full_name for p in team.people], rep=rep,
                                                     base_kind=source.kind.value)
+                # то же правило для абзацев «**Проект** – …» тела: без опоры — «Проект не определён» (как ERP)
+                protocol_md, _оп, _св = iskazheniya_nazvaniy.применить_к_встрече(self.s, project_id, protocol_md, [],
+                                                                                 safe_source.text)
                 protocol_md, marks = clean_document(protocol_md)   # проверка кодом до сохранения (13.10.26)
                 # задачи по шагам — одной строкой итога сборки (schet_zadach, близнец ERP 26.10.2026). Шага «после
                 # фильтра опоры» у MeetFlow нет: таблица документа строится из реестра, а не из таблицы черновика.
