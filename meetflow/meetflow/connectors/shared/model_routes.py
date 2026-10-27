@@ -491,6 +491,13 @@ class _ProxyByRoute(urllib.request.ProxyHandler):
             return self._point_open(req, type)   # у точки свой прокси — системный и его список обхода не нужны
         if getattr(req, "_model_routes_direct", False):
             return None                       # мимо прокси: следующий обработчик откроет соединение напрямую
+        if _internal_url(req.full_url):
+            # Адрес во внутренней сети или своя машина — всегда напрямую, помечен запрос или нет (27.10.2026). urllib
+            # обходит системный прокси только по списку NO_PROXY и понимает в нём суффиксы имён, а не диапазоны: на
+            # локальной машине NO_PROXY «localhost,172.16/12,…,192.168/16», и запрос к 127.0.0.1 и к «Трансу»
+            # 192.168.100.224 уходил через прокси компании 192.168.100.36:3128 (8 тестов `test_trans_podskazka_2610`
+            # падали, распознавание отправляло голос через прокси). Внутренний адрес через прокси — ошибка всегда.
+            return None
         return super().proxy_open(req, proxy, type)
 
     def _point_open(self, req, type):  # noqa: A002
@@ -1928,6 +1935,13 @@ def _asr_service(route: Route):
         Сжатие идёт во временную папку, она удаляется сразу после чтения; ffmpeg нет или он не справился — уходит wav,
         причина — в сводке (`audio_sent`).
 
+    С 27.10.2026 (отчёт локальной машины: wav и m4a с подсказкой через клиент — RemoteDisconnected, `curl.exe -F` с теми же
+    файлом и подсказкой — HTTP 200 за 20,8 и 53,9 с):
+      * запрос к сервису помечен `mark_request` и идёт мимо системного прокси — у точки распознавания адрес всегда
+        внутренний. До правки он шёл через HTTP(S)_PROXY окружения: NO_PROXY локальной машины «…,192.168/16» urllib не
+        понимает (диапазонов он не знает), и запрос к «Трансу» уходил через прокси компании;
+      * форма — как у curl по сути (`собрать_форму`): файл первым, заголовки частей только ASCII.
+
     Разбор по голосам и разметку слов по умолчанию НЕ просим (`diarization=false`,
     `identify_speakers=false`, `word_timestamps=false`): их делает наш разбор, а лишняя работа на сервисе
     только удлиняет распознавание."""
@@ -1994,23 +2008,12 @@ def _asr_service(route: Route):
         отправка = {"audio_sent": отправлено, "audio_bytes": len(данные)}
 
         def отправить_форму(поля: list[tuple[str, str]]) -> dict:
-            """multipart/form-data собираем руками: своя библиотека тут не нужна, а зависимостей не добавляем."""
-            граница = "----webapp-asr-" + uuid.uuid4().hex
-            поле_файла = str(route.opt("file_field") or "file")
-            части: list[bytes] = []
-            for имя, значение in поля:
-                if значение == "":
-                    continue
-                части.append(f"--{граница}\r\nContent-Disposition: form-data; name=\"{имя}\"\r\n\r\n{значение}\r\n"
-                             .encode("utf-8"))
-            части.append(f"--{граница}\r\nContent-Disposition: form-data; name=\"{поле_файла}\"; "
-                         f"filename=\"{имя_файла}\"\r\nContent-Type: {тип_звука}\r\n\r\n".encode("utf-8"))
-            части.append(данные + b"\r\n")
-            части.append(f"--{граница}--\r\n".encode("utf-8"))
-            тело = b"".join(части)
-            req = urllib.request.Request(route.url, data=тело, method="POST",
-                                         headers={"Content-Type": f"multipart/form-data; boundary={граница}",
-                                                  "Content-Length": str(len(тело))})
+            """multipart/form-data — та же форма, что `curl -F file=@запись -F prompt=…` (27.10.2026): `собрать_форму`."""
+            тело, тип_тела = собрать_форму(поля, str(route.opt("file_field") or "file"), имя_файла, тип_звука, данные)
+            req = mark_request(urllib.request.Request(route.url, data=тело, method="POST",
+                                                      headers={"Content-Type": тип_тела,
+                                                               "Content-Length": str(len(тело)),
+                                                               "Accept": "application/json"}), route)
             with urllib.request.urlopen(req, timeout=float(route.opt("timeout_sec", 4 * 3600))) as resp:
                 return json.loads(resp.read().decode("utf-8"))
 
@@ -2025,7 +2028,8 @@ def _asr_service(route: Route):
             if есть_подсказка:
                 отправка["prompt_sent"] = "строка запроса"
             url = route.url + (("&" if "?" in route.url else "?") + urllib.parse.urlencode(query) if query else "")
-            req = urllib.request.Request(url, data=данные, headers={"Content-Type": тип_звука}, method="POST")
+            req = mark_request(urllib.request.Request(url, data=данные, headers={"Content-Type": тип_звука},
+                                                      method="POST"), route)
             with urllib.request.urlopen(req, timeout=float(route.opt("timeout_sec", 4 * 3600))) as resp:
                 raw = json.loads(resp.read().decode("utf-8"))
             return собрать(raw)
@@ -2038,6 +2042,40 @@ def _asr_service(route: Route):
         return собрать(отправить_форму(поля))
 
     return run
+
+
+def _параметр_части(значение: str) -> str:
+    """Имя поля или файла в заголовке части: только ASCII (RFC 7578, 4.2 — процентное кодирование). Не-ASCII (кириллица
+    имени записи) — %XX по UTF-8; кавычка, обратная косая, перевод строки и `%` — тоже %XX, как у curl и браузеров (WHATWG): иначе
+    кавычка в имени закрыла бы параметр, а перевод строки — заголовок. `filename*` RFC 7578 запрещает."""
+    return "".join(з if 0x20 <= ord(з) < 0x7F and з not in '"%\\' else urllib.parse.quote(з, safe="")
+                   for з in значение)
+
+
+def собрать_форму(поля: list[tuple[str, str]], поле_файла: str, имя_файла: str, тип_звука: str,
+                  данные: bytes) -> tuple[bytes, str]:
+    """multipart/form-data для сервиса распознавания: (тело, Content-Type запроса). По сути та же форма, что
+    `curl -F file=@запись.wav -F prompt=… -F language=ru …` (27.10.2026, отчёт локальной машины: curl с той же
+    подсказкой — HTTP 200, наш клиент — RemoteDisconnected):
+
+    * файл — первой частью, как в вызове curl; текстовые поля — следом, пустые не отправляются;
+    * заголовки частей — только ASCII: имя файла с кириллицей — %XX (`_параметр_части`), до 27.10 уходили сырые
+      байты UTF-8 прямо в `Content-Disposition`;
+    * у текстовой части один заголовок `Content-Disposition`, без `Content-Type` и `Content-Transfer-Encoding`, значение —
+      UTF-8 как есть; у файла — `Content-Type` звука;
+    * строки — CRLF, граница — 1–70 знаков из допустимых RFC 2046, длина тела — `Content-Length` (не chunked).
+    Собирается руками: своя библиотека не нужна, зависимостей не добавляем."""
+    граница = "----webapp-asr-" + uuid.uuid4().hex
+    части = [f"--{граница}\r\nContent-Disposition: form-data; name=\"{_параметр_части(поле_файла)}\"; "
+             f"filename=\"{_параметр_части(имя_файла)}\"\r\nContent-Type: {тип_звука}\r\n\r\n".encode("ascii"),
+             данные, b"\r\n"]
+    for имя, значение in поля:
+        if значение == "":
+            continue
+        части.append(f"--{граница}\r\nContent-Disposition: form-data; name=\"{_параметр_части(имя)}\"\r\n\r\n"
+                     .encode("ascii") + str(значение).encode("utf-8") + b"\r\n")
+    части.append(f"--{граница}--\r\n".encode("ascii"))
+    return b"".join(части), f"multipart/form-data; boundary={граница}"
 
 
 def _ffmpeg() -> str | None:

@@ -20,6 +20,13 @@ from meetflow.connectors.registry import default_registry  # noqa: E402
 from meetflow.core.config import load_theme  # noqa: E402
 from meetflow.core.pipeline import MeetingPipeline  # noqa: E402
 from meetflow.core.store import Store  # noqa: E402
+# 27.10.2026 (как ERP 119a1b7): тесты, которые поднимают свой сервер на 127.0.0.1, не зависят от прокси окружения —
+# на локальной машине заданы HTTP(S)_PROXY, а NO_PROXY без 127.0.0.1. Продукт сам ходит на внутренние адреса мимо прокси
+# (`model_routes._ProxyByRoute`), это — страховка для прочего кода тестов.
+_БЕЗ_ПРОКСИ = ("127.0.0.1", "localhost", "::1")
+for _имя in ("NO_PROXY", "no_proxy"):
+    _было = [ч.strip() for ч in os.environ.get(_имя, "").split(",") if ч.strip()]
+    os.environ[_имя] = ",".join(_было + [ч for ч in _БЕЗ_ПРОКСИ if ч not in _было])
 
 TRANSCRIPT = """[00:00:10] Игнатов Иван: Добрый день, начинаем.
 [00:01:00] Петрова Анастасия: По складу всё идёт по плану.
