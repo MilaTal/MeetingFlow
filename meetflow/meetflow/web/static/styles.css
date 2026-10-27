@@ -1571,3 +1571,97 @@ mark.zapis-mark { background: var(--accent-soft); color: inherit; box-shadow: in
 @media (max-width: 900px) { .se-drawer { width: 100%; } }
 /* Строка после действия (✓, 🗑, «Снять») гаснет на месте до перерисовки; прокрутка списка остаётся (18.10.26) */
 .row-gone { opacity: .3; transition: opacity .2s ease; pointer-events: none; }
+
+
+/* Возврат выбора дизайна (владелица 27.10.2026): палитры из MeetFlow до переноса фронта ERP. */
+:root { --card-top: #f0f1fb; --card-bottom: #ffffff; --accent-shadow: rgba(104,99,191,.18); --accent-text: var(--accent); }
+/* Палитры: принятые в проектах */
+[data-palette="indigo"] { /* Проект ERP, приглушённый индиго 02.10.26 */
+  --accent: #6863bf; --accent-hover: #5a55ad; --accent-fill: #6863bf; --accent-fill-hover: #5a55ad;
+  --accent-soft: #eef2ff; --accent-soft-hover: #e2e7fd; --accent-border: rgba(104, 99, 191, 0.16);
+  --card-top: #e9ecf9; --card-bottom: #f8f9fd; --accent-shadow: rgba(104, 99, 191, 0.2);
+}
+[data-palette="forest"] { /* Планёрка, вариант D «тёмный лес», контраст ≈9.1:1 */
+  --accent: #2f4f41; --accent-hover: #24382e; --accent-fill: #3d4f47; --accent-fill-hover: #313f39;
+  --accent-soft: #e7eeea; --accent-soft-hover: #d9e5df; --accent-border: rgba(47, 79, 65, 0.22);
+  --card-top: #e4ece8; --card-bottom: #f8faf9; --accent-shadow: rgba(47, 79, 65, 0.22);
+}
+/* Палитры: найденные и не использованные — применены здесь */
+[data-palette="emerald"] { /* Atlassian green, вариант B 17.09.26; текст темнее (#1b7a52): #1f845a на фоне страницы давал 4.46 < 4.5 */
+  --accent: #1b7a52; --accent-hover: #186a48; --accent-fill: #1f845a; --accent-fill-hover: #186a48;
+  --accent-soft: #e3f2eb; --accent-soft-hover: #d3eadf; --accent-border: rgba(31, 132, 90, 0.22);
+  --card-top: #e3f0ea; --card-bottom: #f7fbf9; --accent-shadow: rgba(31, 132, 90, 0.18);
+}
+[data-palette="polaris"] { /* Shopify Polaris green, вариант A 17.09.26 */
+  --accent: #008060; --accent-hover: #006e52; --accent-fill: #008060; --accent-fill-hover: #006e52;
+  --accent-soft: #e0f2ec; --accent-soft-hover: #cfe9e0; --accent-border: rgba(0, 128, 96, 0.22);
+  --card-top: #e0f0ea; --card-bottom: #f6fbf9; --accent-shadow: rgba(0, 128, 96, 0.18);
+}
+[data-palette="sage"] { /* серо-зелёный, вариант C; кнопки — заливкой темнее для контраста */
+  --accent: #4b6358; --accent-hover: #3d5148; --accent-fill: #3d5148; --accent-fill-hover: #33443c;
+  --accent-soft: #eaefec; --accent-soft-hover: #dde5e0; --accent-border: rgba(75, 99, 88, 0.24);
+  --card-top: #e8eeea; --card-bottom: #f8faf9; --accent-shadow: rgba(75, 99, 88, 0.2);
+}
+[data-palette="meadow"] { /* первый «слишком зелёный» вариант — как спокойный акцент */
+  --accent: #257e52; --accent-hover: #1d6541; --accent-fill: #257e52; --accent-fill-hover: #1d6541;
+  --accent-soft: #e4f1ea; --accent-soft-hover: #d5e9de; --accent-border: rgba(37, 126, 82, 0.22);
+  --card-top: #e4f0e9; --card-bottom: #f7fbf8; --accent-shadow: rgba(37, 126, 82, 0.18);
+}
+
+/* >>> palettes:generated (scripts/gen_palettes.py) — не править руками */
+[data-palette="petrol"] { /* Mintlify / Supabase, сдвиг в сине-зелёный; медицина, фарма, экология */
+  --accent: #1d5e69; --accent-hover: #15454d; --accent-fill: #1d5e69; --accent-fill-hover: #15454d;
+  --accent-soft: #edf2f3; --accent-soft-hover: #dfe8ea; --accent-border: rgba(29, 94, 105, 0.2);
+  --card-top: #ebf1f2; --card-bottom: #fafcfc; --accent-shadow: rgba(29, 94, 105, 0.18); --accent-dark: #4fa3b1;
+}
+[data-palette="ocean"] { /* Vercel / Otter, приглушён; ИТ, логистика, госзаказчики */
+  --accent: #245a8c; --accent-hover: #1d4870; --accent-fill: #245a8c; --accent-fill-hover: #1d4870;
+  --accent-soft: #edf2f6; --accent-soft-hover: #e0e8ef; --accent-border: rgba(36, 90, 140, 0.2);
+  --card-top: #ebf0f5; --card-bottom: #fbfcfd; --accent-shadow: rgba(36, 90, 140, 0.18); --accent-dark: #6a9fd4;
+}
+[data-palette="slate"] { /* Linear по сдержанности; финансы, аудит, закупки */
+  --accent: #46586f; --accent-hover: #384759; --accent-fill: #46586f; --accent-fill-hover: #384759;
+  --accent-soft: #f0f2f3; --accent-soft-hover: #e5e8eb; --accent-border: rgba(70, 88, 111, 0.2);
+  --card-top: #eef0f2; --card-bottom: #fbfcfc; --accent-shadow: rgba(70, 88, 111, 0.18); --accent-dark: #8a9db6;
+}
+[data-palette="graphite"] { /* Harvey: акцент — это чёрный; юридические документы, договоры */
+  --accent: #3f4249; --accent-hover: #2e3136; --accent-fill: #3f4249; --accent-fill-hover: #2e3136;
+  --accent-soft: #f0f0f0; --accent-soft-hover: #e4e5e6; --accent-border: rgba(63, 66, 73, 0.2);
+  --card-top: #eeeeef; --card-bottom: #fbfbfb; --accent-shadow: rgba(63, 66, 73, 0.18); --accent-dark: #9a9ea8;
+}
+[data-palette="ochre"] { /* Granola, тёплые нейтрали; образование, HR, обучение */
+  --accent: #8a5a12; --accent-hover: #6a450e; --accent-fill: #8a5a12; --accent-fill-hover: #6a450e;
+  --accent-soft: #f6f2ec; --accent-soft-hover: #efe8de; --accent-border: rgba(138, 90, 18, 0.2);
+  --card-top: #f4f0ea; --card-bottom: #fdfcfa; --accent-shadow: rgba(138, 90, 18, 0.18); --accent-dark: #d29a45;
+}
+[data-palette="clay"] { /* Anthropic / Claude, затемнён до AA; стройка, девелопмент, архитектура */
+  --accent: #a14e36; --accent-hover: #86412d; --accent-fill: #a14e36; --accent-fill-hover: #86412d;
+  --accent-soft: #f7f1ef; --accent-soft-hover: #f2e6e3; --accent-border: rgba(161, 78, 54, 0.2);
+  --card-top: #f7efed; --card-bottom: #fdfbfb; --accent-shadow: rgba(161, 78, 54, 0.18); --accent-dark: #d08a74;
+}
+[data-palette="copper"] { /* GitBook, приглушён; производство, энергетика */
+  --accent: #8c5232; --accent-hover: #724329; --accent-fill: #8c5232; --accent-fill-hover: #724329;
+  --accent-soft: #f6f1ef; --accent-soft-hover: #efe7e2; --accent-border: rgba(140, 82, 50, 0.2);
+  --card-top: #f5efed; --card-bottom: #fdfcfb; --accent-shadow: rgba(140, 82, 50, 0.18); --accent-dark: #c99272;
+}
+[data-palette="claret"] { /* палитры консалтинга; консалтинг, корпоративное управление */
+  --accent: #7d3045; --accent-hover: #632637; --accent-fill: #7d3045; --accent-fill-hover: #632637;
+  --accent-soft: #f5eef0; --accent-soft-hover: #ede2e5; --accent-border: rgba(125, 48, 69, 0.2);
+  --card-top: #f3ecee; --card-bottom: #fcfbfb; --accent-shadow: rgba(125, 48, 69, 0.18); --accent-dark: #cc8597;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]):is([data-palette="petrol"], [data-palette="ocean"], [data-palette="slate"], [data-palette="graphite"], [data-palette="ochre"], [data-palette="clay"], [data-palette="copper"], [data-palette="claret"]) { --accent-text: var(--accent-dark); }
+}
+:root[data-theme="dark"]:is([data-palette="petrol"], [data-palette="ocean"], [data-palette="slate"], [data-palette="graphite"], [data-palette="ochre"], [data-palette="clay"], [data-palette="copper"], [data-palette="claret"]) { --accent-text: var(--accent-dark); }
+/* <<< palettes:generated */
+
+:root[data-theme="dark"] {
+  --bg: #121214; --surface: #1b1b1f; --border: #2e2e35;
+  --field-bg: #222228; --field-bg-hover: #2a2a31; --field-border: #3a3a44; --field-border-hover: #50505c;
+  --text: #ececf1; --text-muted: #a1a1aa; --danger-soft: #3a1a1a; --success-soft: #142a1c; --warning-soft: #26262b;
+  --accent-soft: color-mix(in srgb, var(--accent) 22%, #1b1b1f); --accent-soft-hover: color-mix(in srgb, var(--accent) 30%, #1b1b1f); --card-top: color-mix(in srgb, var(--accent) 10%, #1b1b1f); --card-bottom: #1b1b1f;
+  --actor-operator-soft: #1e2a4a; --actor-model-soft: #2a2145; --actor-local-soft: #15301f;
+  --actor-store-soft: #3a2a12; --actor-admin-soft: #3a2314;
+  --accent-text: color-mix(in srgb, var(--accent) 55%, #ffffff); color-scheme: dark;
+}
+

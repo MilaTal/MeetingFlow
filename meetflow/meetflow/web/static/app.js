@@ -1536,7 +1536,7 @@ function canPrepare() {
 // Пункты левого меню блока суперадминистратора — по роли, одним местом (задание 23.10.2026: «Разбор голосов» оставался в меню
 // у участника на стенде ЛМ 22.10.2026). Видимость ставит `применитьМенюПоРоли` — при показе, при переключении «Вы работаете
 // как», после загрузки списка людей и после отказа сервера 403. Тот же перечень по смыслу — `пунктыМенюПоРоли` Планёрки.
-const МЕНЮ_СУПЕРАДМИНА = ["nav-system", "nav-live", "nav-models", "nav-voices", "nav-voice-review", "nav-sa-hr"];
+const МЕНЮ_СУПЕРАДМИНА = ["nav-system", "nav-live", "nav-models", "nav-voices", "nav-voice-review", "nav-design", "nav-sa-hr"];
 function пунктыМенюПоРоли(роль) {
   const супер = роль === "super_admin";
   return Object.fromEntries(МЕНЮ_СУПЕРАДМИНА.map(id => [id, супер]));
@@ -2136,7 +2136,7 @@ async function render() {
   // «Конфликты», «Под вопросом», «Возможные поручения» — одна вкладка «Разбор» (решение владелицы 25.10.2026): прежние адреса
   // ведут в нужный вид, ссылки из «Мониторинга», писем и закладок не ломаются
   if (["conflicts", "pod", "possible"].includes(route)) { location.replace(адресРазбора(route)); return; }
-  if ((route === "system" || route === "voices" || route === "voice-review" || route === "live" || route === "units" || route === "awaiting" || route === "models") && !isSuperAdmin()) { location.replace("#dashboard"); return; }
+  if ((route === "system" || route === "voices" || route === "voice-review" || route === "live" || route === "units" || route === "awaiting" || route === "models" || route === "design") && !isSuperAdmin()) { location.replace("#dashboard"); return; }
   if (route === "units" && !_unitsOn) { location.replace("#dashboard"); return; }
   // «Экран встречи» убран (решение владелицы 21.10.2026): старые ссылки — на «Встречи по проекту» и страницу встречи
   if (route === "screen") { location.replace(rest[0] ? `#meetings/${rest[0]}` : "#meetings"); return; }
