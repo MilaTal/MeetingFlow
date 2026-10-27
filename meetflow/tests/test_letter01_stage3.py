@@ -283,3 +283,31 @@ def test_closing_card_title_without_internal_id(store, project, make_pipe):
     p.run(project, mid)
     t = store.q("SELECT title FROM cards WHERE kind='closing_candidate'")[0]["title"]
     assert f"задача {tid}" not in t and "регламент склада" in t.lower()
+
+
+# 27.10.2026 — автосборка, вставшая в очереди, не держит забор папки: проход ждёт не дольше
+# AUTORUN_WAIT_SEC, следующие файлы забираются, итог сборки подбирает следующий проход
+def test_stuck_build_does_not_block_intake_2710(client, svc, monkeypatch):  # noqa: F811
+    import os
+    from meetflow.core import intake as intake_mod
+    monkeypatch.setattr(intake_mod, "AUTORUN_WAIT_SEC", 0.5)
+    client.post(f"/api/projects/{client.pid}/settings/autorun", json={"enabled": True}, headers=SUPER)
+    store = client.app.state.store
+    other = store.insert("meetings", project_id=client.pid, date="2026-09-01", label="чужая")
+    # «идёт» чужая сборка живого процесса — очередь новую не начнёт
+    store.insert("build_queue", project_id=client.pid, meeting_id=other, meeting_date="2026-09-01",
+                 status="running", pid=os.getpid(), started_at="2026-10-27T09:00:00", reason="кнопка")
+    (svc.d / "Расшифровка 01.10.2026.txt").write_text(TRANSCRIPT, encoding="utf-8")
+    (svc.d / "Расшифровка 02.10.2026.txt").write_text(TRANSCRIPT.replace("01.10", "02.10") + "\n[00:09:00] Б: ещё", encoding="utf-8")
+    t0 = time.monotonic()
+    r = _scan_twice(svc, client.pid)
+    assert time.monotonic() - t0 < 30, "проход не ждёт сборку часами"
+    assert sorted(r["ingested"]) == ["Расшифровка 01.10.2026.txt", "Расшифровка 02.10.2026.txt"]
+    assert [a["status"] for a in r["autorun"]] == ["queued", "queued"]
+    assert len(svc._pending) == 2
+    # сборка первой встречи кончилась остановкой по пределу — следующий проход кладёт файл в «остановлено»
+    rid = next(k for k, v in svc._pending.items() if v[2] == "Расшифровка 01.10.2026.txt")
+    store.update("build_queue", rid, status="done", result=json.dumps({"status": "stopped_by_limit"}))
+    svc.scan_project(client.pid)
+    assert (svc.d / "остановлено" / "Расшифровка 01.10.2026.txt").exists()
+    assert len(svc._pending) == 1
