@@ -1,0 +1,7 @@
+/* Контрастность: полупрозрачные подписи «Разбора» уменьшали контраст текста (владелица 27.10.2026).
+   Файл идёт последним и не трогает общие близнецы razbor.css ERP и Планёрки. */
+.rz-view { opacity: 1; color: var(--text-muted); }
+.rz-view:hover, .rz-view:focus-visible, .rz-view-on { opacity: 1; color: var(--text); }
+.rz-view .n { opacity: 1; }
+.rz-table .sub { opacity: 1; }
+.rz-card-pick { opacity: 1; }
