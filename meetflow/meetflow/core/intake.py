@@ -36,6 +36,10 @@ HINT_TEXT = ("# Папка-приёмник встреч\n\nСюда кладу�
 DEFAULT_INTERVAL = 900
 MIN_INTERVAL = 30
 BIG_FIRST_PASS = int(os.environ.get("MEETFLOW_WATCH_BIG_FIRST_PASS", "25"))
+# Проход, который идёт, — не «завис» (27.10.2026, как сторож обхода ERP): у прохода пульс на каждом шаге и признак
+# «идёт, шаг, файл». Зависшим считается проход без пульса дольше трёх интервалов И дольше этого порога. Отличие от
+# ERP (там 600 с): в MeetFlow распознавание записи и автосборка протокола идут внутри прохода, шаг длится десятки минут.
+STALL_STEP_SEC = int(os.environ.get("MEETFLOW_WATCH_STALL_STEP_SEC", "1800"))
 
 
 class IntakeError(ValueError):
@@ -102,6 +106,13 @@ class IntakeService:
         self._lock = threading.Lock()
         self._stop = threading.Event()
         self._thread: threading.Thread | None = None
+        # идущий проход по проекту: {"started": now(), "step": ..., "file": ..., "pulse": monotonic}
+        self._scanning: dict[int, dict[str, Any]] = {}
+
+    def _beat(self, project_id: int, step: str, file: str | None = None) -> None:
+        cur = self._scanning.get(project_id)
+        if cur is not None:
+            cur.update(step=step, file=file, pulse=time.monotonic())
 
     # ------------------------------------------------------------ настройки
     def folder(self, project_id: int) -> str | None:
@@ -136,6 +147,14 @@ class IntakeService:
         path = self.folder(project_id)
         if not path:
             return {"status": "off"}
+        self._scanning[project_id] = {"started": now(), "step": "обход папки", "file": None,
+                                      "pulse": time.monotonic()}
+        try:
+            return self._scan(project_id, path, today)
+        finally:
+            self._scanning.pop(project_id, None)
+
+    def _scan(self, project_id: int, path: str, today=None) -> dict[str, Any]:
         with self._lock:
             fi = self._intakes.get(project_id)
             if fi is None or str(fi.folder) != path:
@@ -160,6 +179,7 @@ class IntakeService:
             mid = self._meeting_for(project_id, item.meeting_date.isoformat())
             is_media = self.pipe.plugins.resolve_source(item.path.name) is not None and \
                 self.pipe.plugins.resolve_source(item.path.name).kind == "asr"
+            self._beat(project_id, "распознавание записи" if is_media else "приём файла", item.path.name)
             data = None if is_media else item.path.read_bytes()
             res = self.pipe.ingest(project_id, mid, item.path.name, data, path=item.path if is_media else None)
             st = res.get("status")
@@ -171,6 +191,7 @@ class IntakeService:
                 result["ingested" if st == "ok" else "duplicates"].append(item.path.name)
                 if st == "ok" and res.get("kind") == "transcript" and \
                         self.s.get_setting("autorun", project_id, False):
+                    self._beat(project_id, "сборка протокола", item.path.name)
                     q = getattr(self.pipe, "queue", None)       # через очередь сборок (стенд 41)
                     rep = q.wait(q.enqueue(project_id, mid, "автозапуск из папки-приёмника")) if q else \
                         self.pipe.run(project_id, mid).__dict__
@@ -207,14 +228,23 @@ class IntakeService:
         info = {"folder": path, "interval": iv, "interval_source": iv_src, "worker": self.running,
                 "last_scan": last, "last_useful_scan": self.s.get_setting("watch_last_useful_scan", project_id),
                 "autorun": bool(self.s.get_setting("autorun", project_id, False))}
-        # поток жив, а проходов нет дольше трёх интервалов — «завис» (как в ERP)
+        # «завис» (как в ERP): идущий проход без пульса дольше трёх интервалов и порога шага; между проходами —
+        # последний проход старше трёх интервалов. Идущий длинный проход (распознавание, сборка) — не «завис».
         info["stalled"] = False
-        if path and self.running and last and last.get("at"):
-            try:
-                age = (datetime.now() - datetime.fromisoformat(last["at"])).total_seconds()
-                info["stalled"] = age > 3 * iv
-            except ValueError:
-                pass
+        cur = self._scanning.get(project_id)
+        info["scan_in_progress"] = cur is not None
+        if cur is not None:
+            info.update(scan_started_at=cur["started"], scan_step=cur["step"], current_file=cur["file"],
+                        step_seconds=int(time.monotonic() - cur["pulse"]))
+        if path and self.running:
+            if cur is not None:
+                info["stalled"] = info["step_seconds"] > max(3 * iv, STALL_STEP_SEC)
+            elif last and last.get("at"):
+                try:
+                    age = (datetime.now() - datetime.fromisoformat(last["at"])).total_seconds()
+                    info["stalled"] = age > 3 * iv
+                except ValueError:
+                    pass
         if path:
             p = Path(path)
             info["exists"] = p.is_dir()
