@@ -1766,6 +1766,11 @@ def create_app(theme_name: str | None = None, db_path: str | None = None, journa
                     pipe.cards.open(None, "technical", f"Порог изменён: {k}", {"было": old, "стало": v, "кто": by})
         return get_thresholds(u)
 
+    # Фронт — фронт Проекта ERP целиком (задание владелицы 27.10.2026 «все окна и каждое действие 1 в 1»); его адреса
+    # (`/meetings`, `/tasks`, `/users` …) отвечает слой web/erp поверх ядра и базы MeetFlow
+    from . import erp
+    erp.mount(app, store=store, pipe=pipe, theme=theme, accounts=accounts, queue=queue, intake=intake, backups=backups,
+              journal=journal, app_dir=app_dir)
     app.mount("/", StaticFiles(directory=STATIC, html=True), name="static")
     return app
 

@@ -1,0 +1,85 @@
+/* Правка на полотне (решение владелицы 24.10.2026) — к frontend/polotno.js. Близнец в Планёрке и ERP, сверяется аудитом
+   зеркальности до байта. Цвета — переменные линии каждой системы с запасными значениями (у систем разные имена токенов). */
+.pp-switch { display: inline-flex; align-items: center; gap: 0; border: 1px solid var(--line, var(--border, #e4e4e7)); border-radius: 999px;
+  padding: 2px; background: var(--surface, #fff); vertical-align: middle; }
+.pp-switch button { font: inherit; font-size: 13.5px; border: 0; background: transparent; color: var(--ink-soft, var(--text-muted, #52525b));
+  padding: 4px 12px; border-radius: 999px; cursor: pointer; line-height: 1.3; }
+.pp-switch button[aria-pressed="true"] { background: var(--acc-halo, var(--accent-soft, #eef2ff)); color: var(--ink, var(--text, #18181b)); font-weight: 600; }
+.pp-switch button:not([aria-pressed="true"]):is(:hover, :focus-visible) { color: var(--ink, var(--text, #18181b)); }
+.pp-bar { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 18px; margin: 2px 0 12px; }
+.pp-hint, .pp-fix { font-size: 13px; color: var(--ink-muted, var(--text-muted, #71717a)); }
+.pp-fix { display: inline-flex; align-items: center; gap: 6px; font-weight: normal; }
+.pp-fix input { width: auto; margin: 0; }
+.pp-edit [data-src], .pp-edit td.pp-cell { cursor: text; border-radius: 6px; outline: 1px dashed transparent; outline-offset: 2px;
+  transition: background .15s, outline-color .15s; }
+.pp-edit [data-src]:is(:hover, :focus-visible), .pp-edit td.pp-cell:is(:hover, :focus-visible) {
+  background: var(--surface-quiet, var(--field-bg, #f6f6f7)); outline-color: var(--accent-border, #c7d2fe); }
+.pp-edit .pp-sel { background: var(--acc-halo, var(--accent-soft, #eef2ff)) !important; outline: 1px solid var(--acc, var(--accent, #4f46e5)) !important; }
+.pp-edit .pp-fixed { cursor: default; }
+.pp-editor { display: block; font-style: normal; text-decoration: none; }
+.pp-inl { display: block; width: 100%; box-sizing: border-box; font: inherit; color: var(--ink, var(--text, #18181b));
+  background: var(--surface, #fff); border: 1px solid var(--acc, var(--accent, #4f46e5)); border-radius: 6px; padding: 4px 6px;
+  resize: vertical; margin: 0; }
+.pp-inl[hidden] { display: none; }
+.pp-acts { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin-top: 6px; font-style: normal; }
+.pp-err { display: block; color: var(--over, var(--danger, #b91c1c)); font-size: 13px; margin-top: 4px; }
+.pp-err[hidden] { display: none; }
+.pp-new { display: flex; flex-direction: column; gap: 6px; }
+.pp-why { display: block; }
+tr.pp-unlinked td, tr.pp-material td { color: var(--ink-muted, var(--text-muted, #71717a)); }
+.pp-edit tr.pp-dropped td { text-decoration: line-through; text-decoration-color: var(--ink-faint, #a1a1aa);
+  color: var(--ink-muted, var(--text-muted, #71717a)); }
+.pp-edit tr.pp-dropped .pp-row-acts, .pp-edit tr.pp-dropped .pp-editor { text-decoration: none; display: inline-flex; }
+.pp-row-acts { display: inline-flex; flex-wrap: wrap; align-items: center; gap: 4px 10px; margin-left: 6px; font-style: normal; }
+.pp-row-acts .pp-editor { flex-basis: 100%; }
+.pp-st { font: inherit; font-size: 12.5px; border: 1px solid var(--line, var(--border, #e4e4e7)); background: var(--surface, #fff);
+  color: var(--ink-muted, var(--text-muted, #71717a)); border-radius: 999px; padding: 0 8px; cursor: pointer;
+  max-width: 100%; white-space: normal; overflow-wrap: anywhere; text-align: left; }   /* «снято: причина» переносится (25.10.2026) */
+.pp-st::after { content: " ▾"; font-size: 10px; }
+.pp-st-done { color: var(--ink-soft, var(--success, #15803d)); }
+.pp-st-dropped { color: var(--over, var(--danger, #b91c1c)); }
+/* «оперативная» — пометка задачи одним нажатием (решение владелицы 26.10.2026): та же таблетка, что у статуса, без «▾» */
+.pp-op::after { content: none; }
+.pp-op-on { color: var(--ink, var(--text, #18181b)); }
+.pp-st-menu { display: flex; flex-wrap: wrap; gap: 4px 14px; font-size: 13.5px; }
+.pp-st-menu label { display: inline-flex; align-items: center; gap: 4px; font-weight: normal; cursor: pointer; }
+.pp-st-menu input { width: auto; margin: 0; }
+.pp-sync { font-size: 12.5px; }
+tr.pp-add-row td { border-bottom: none; padding-top: 6px; }
+.pp-add-wrap { margin-top: 10px; display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+tr.pp-group td { color: var(--ink-muted, var(--text-muted, #71717a)); font-size: 13px; padding-top: 14px; border-bottom: none; }
+tr.pp-doubt td { font-style: italic; color: var(--ink-muted, var(--text-muted, #71717a)); }
+.pp-dmark { display: inline-flex; align-items: center; gap: 5px; font-size: 12.5px; font-style: normal;
+  color: var(--ink-muted, var(--text-muted, #71717a)); margin-left: 6px; cursor: help; white-space: nowrap; }
+.pp-dmark::before { content: ""; width: 7px; height: 7px; border-radius: 50%; background: var(--ink-faint, #a1a1aa); }
+.pp-del { color: var(--over, var(--danger, #b91c1c)); }
+.pp-log { margin-top: 16px; }
+.pp-log-h { font-size: 17px; font-weight: 600; margin: 0 0 10px; }
+.pp-log-list { list-style: none; margin: 0; padding: 0; font-size: 14px; }
+.pp-log-list li { border-top: 1px solid var(--row-line, var(--border, #eee)); padding: 8px 0; overflow-wrap: anywhere; }
+.pp-log-list li:first-child { border-top: none; }
+.pp-log-w { color: var(--ink-muted, var(--text-muted, #71717a)); }
+.pp-was { color: var(--ink-muted, var(--text-muted, #71717a)); text-decoration: line-through; text-decoration-color: var(--ink-faint, #a1a1aa); }
+.pp-ai { margin-top: 14px; }
+.pp-ai summary { cursor: pointer; font-size: 14px; color: var(--ink-soft, var(--text-muted, #52525b)); }
+.pp-ai .pp-inl { margin-top: 8px; }
+@media (max-width: 600px) {
+  .pp-row-acts { margin-left: 0; display: flex; }
+  .pp-switch button { padding: 4px 10px; }
+}
+.pp-edit td.pp-dirty { background: var(--surface-quiet, var(--field-bg, #f6f6f7)); }
+tr.pp-doubt .pp-acts { margin-top: 4px; }
+.pp-draft { font-size: 13px; color: var(--ink-soft, var(--text-muted, #52525b)); }
+.pp-draft-on { color: var(--ink, var(--text, #18181b)); }
+.pp-draft-stale { color: var(--over, var(--danger, #b91c1c)); }
+.pp-bar-acts { margin-top: 0; }
+/* Таблица задач не шире своей карточки (замечание владелицы 25.10.2026: «справа нарушение границы и перекрытие»). Замер до
+   правки, режим «Правка», строка «под вопросом» с причиной «не найдено в справочниках: …»: у Планёрки служебная строка под
+   формулировкой шла в одну строку (white-space: nowrap у .doc-cell-sub), колонка «Задача» вставала по ней в 1163 px, таблица —
+   в 1477 px при карточке 1022 / 1256 / 1326 (окно 1366 / 1600 / 1920): за правым краем 455 / 221 / 151 px и прокрутка всей
+   страницы. У ERP длинное слово без пробелов (путь к файлу) вылезало из ячейки «Описание» на 57 px. Здесь: служебные строки
+   под формулировкой переносятся, слово без пробелов рвётся только когда иначе не помещается, кнопка статуса со снятием и
+   причиной (.pp-st выше) — тоже. Ячейка формулировки узнаётся и по классу колонки (показ), и по полю правки: у строк
+   «возможное поручение», вставленных полотном, класса колонки нет. Цвета, шрифты и ширины колонок не меняются. */
+.doc-content .doc-table :is(td.c-desc, td[data-field="description"]) { overflow-wrap: anywhere; }
+.doc-content .doc-table :is(td.c-desc, td[data-field="description"]) .doc-cell-sub { white-space: normal; overflow-wrap: anywhere; }

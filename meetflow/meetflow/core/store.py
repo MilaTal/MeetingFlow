@@ -27,7 +27,14 @@ SCHEMA: dict[str, dict[str, str]] = {
                  "protocol_md": "TEXT", "protocol_built_at": "TEXT", "built_from": "TEXT DEFAULT '[]'",
                  "leader": "TEXT", "review_notes": "TEXT DEFAULT '[]'",
                  # план встречи — как в ERP: готовится до встречи из прошлого протокола, задач и материалов
-                 "plan_md": "TEXT", "plan_built_at": "TEXT", "topic": "TEXT DEFAULT ''"},
+                 "plan_md": "TEXT", "plan_built_at": "TEXT", "topic": "TEXT DEFAULT ''",
+                 # экраны ERP 1 в 1 (27.10.2026): состояние встречи, вторая на дату по подтверждению, ключ повтора
+                 # создания, ведущий вручную, сводки «Свести в одну», ручная правка протокола и плана, итог сборки
+                 "status": "TEXT DEFAULT 'scheduled'", "second_same_day": "INTEGER DEFAULT 0", "request_key": "TEXT",
+                 "created_at": "TEXT", "leader_user_id": "INTEGER", "leader_source": "TEXT", "leader_note": "TEXT",
+                 "leader_speaker": "TEXT", "merged": "TEXT DEFAULT '[]'", "protocol_hand_edited": "INTEGER DEFAULT 0",
+                 "plan_hand_edited": "INTEGER DEFAULT 0", "build_note": "TEXT DEFAULT ''",
+                 "plan_sources": "TEXT DEFAULT '[]'"},
     "sources": {"id": "INTEGER PRIMARY KEY", "meeting_id": "INTEGER", "name": "TEXT", "kind": "TEXT",
                 "text": "TEXT", "digest": "TEXT", "removed_at": "TEXT", "removed_reason": "TEXT",
                 "created_at": "TEXT", "local_asr": "INTEGER DEFAULT 0",
@@ -44,7 +51,12 @@ SCHEMA: dict[str, dict[str, str]] = {
               # «под вопросом» — причина сомнения, служебная: в документы не идёт, видна только администраторам (15.10.26)
               "doubt_reason": "TEXT DEFAULT ''",
               # пометка «оперативная» — ставит человек одним нажатием или протокол секретаря (как ERP, 26.10.2026)
-              "operational": "INTEGER DEFAULT 0"},
+              "operational": "INTEGER DEFAULT 0",
+              # экраны ERP 1 в 1 (27.10.2026): версия строки — замок на данных (две правки разом: вторая получает отказ),
+              # время правки, кто оставил последний комментарий и когда, первоначальный срок переходящей задачи, подпроект
+              "version": "INTEGER DEFAULT 1", "updated_at": "TEXT", "last_comment_by": "TEXT DEFAULT ''",
+              "last_comment_date": "TEXT", "due_original": "TEXT", "subproject": "TEXT DEFAULT ''",
+              "status_detail": "TEXT DEFAULT ''"},
     # версии протокола (находки стенда 43, 47; решение владельца 15.10.26): прежняя не затирается; model — модель,
     # которая написала текст (ответившая точка маршрута), а не настроенная основная
     "protocol_versions": {"id": "INTEGER PRIMARY KEY", "meeting_id": "INTEGER", "version": "INTEGER",
@@ -82,9 +94,21 @@ SCHEMA: dict[str, dict[str, str]] = {
     # вход по паролю (как в ERP и Планёрке): пароль — только scrypt-хэш, сессия — только sha256 токена
     "accounts": {"id": "INTEGER PRIMARY KEY", "login": "TEXT", "full_name": "TEXT", "role": "TEXT",
                  "password_hash": "TEXT DEFAULT ''", "active": "INTEGER DEFAULT 1", "failed_attempts": "INTEGER DEFAULT 0",
-                 "locked_until": "TEXT", "last_login_at": "TEXT", "created_at": "TEXT"},
+                 "locked_until": "TEXT", "last_login_at": "TEXT", "created_at": "TEXT",
+                 # «Команда» как в ERP (27.10.2026, экраны 1 в 1): учётная запись — это и запись «Команды»; логин и
+                 # пароль необязательны, у участника — общий пароль (хэш в настройке shared_password_hash)
+                 "position": "TEXT DEFAULT ''", "department": "TEXT DEFAULT ''", "project_role": "TEXT DEFAULT ''",
+                 "external": "INTEGER DEFAULT 0", "organization": "TEXT DEFAULT ''", "confirmed": "INTEGER DEFAULT 1",
+                 "name_short_reason": "TEXT DEFAULT ''", "confirmed_source": "TEXT DEFAULT ''",
+                 "leads_meetings": "INTEGER DEFAULT 0", "must_change_password": "INTEGER DEFAULT 0",
+                 "temp_expires_at": "TEXT"},
+    # реестр корректировок документов (как ERP и Планёрка, 27.10.2026): каждая правка протокола и плана человеком —
+    # кто, когда, где, было и стало; признак «исправление ошибки обработки, не переписывание факта»
+    "doc_corrections": {"id": "INTEGER PRIMARY KEY", "meeting_id": "INTEGER", "doc": "TEXT", "who": "TEXT",
+                        "at": "TEXT", "place": "TEXT", "old_text": "TEXT DEFAULT ''", "new_text": "TEXT DEFAULT ''",
+                        "fix": "INTEGER DEFAULT 1"},
     "sessions": {"id": "INTEGER PRIMARY KEY", "token_hash": "TEXT", "account_id": "INTEGER", "created_at": "TEXT",
-                 "expires_at": "TEXT"},
+                 "expires_at": "TEXT", "remember": "INTEGER DEFAULT 0", "via_shared": "INTEGER DEFAULT 0"},
 }
 
 

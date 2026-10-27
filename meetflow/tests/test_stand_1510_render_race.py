@@ -9,13 +9,13 @@ JS = (Path(__file__).parents[1] / "meetflow" / "web" / "static" / "app.js").read
 
 
 def test_stale_read_never_returns_to_screen():
-    api = JS[JS.index("async function api("):JS.index("function toast(")]
-    assert "const seq = renderSeq" in api and "if (read && seq !== renderSeq) throw new Stale" in api
-    assert api.index("throw new Stale") < api.index("return data")
+    """Устаревший ответ не попадает на новый экран — с 27.10.2026 правило ERP: `api()` сравнивает номер перехода."""
+    api = JS[JS.index("async function api("):JS.index("async function _apiЗапрос(")]
+    assert "const переход = _переходов;" in api and "if (устарел()) return new Promise(() => {});" in api
 
 
 def test_render_stops_after_stale_and_before_banner():
-    r = JS[JS.index("async function render()"):JS.index("function showLogin()")]
-    assert "if (e instanceof Stale || seq !== renderSeq) return;" in r
-    assert r.index("if (seq !== renderSeq) return;") < r.index("stand-banner")
-    assert 'reason instanceof Stale' in JS
+    """Показ решает только самый свежий (`_renderSeq`, ERP 30.09.26) — с 27.10.2026 фронт ERP 1 в 1."""
+    r = JS[JS.index("async function render()"):JS.index('document.getElementById("nav")?.addEventListener')]
+    assert "const seq = ++_renderSeq;" in r and "if (seq !== _renderSeq) {" in r
+    assert r.index("if (seq !== _renderSeq) {") < r.index("if (failed) {")

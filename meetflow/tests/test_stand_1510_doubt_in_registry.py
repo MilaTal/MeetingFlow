@@ -124,16 +124,11 @@ def test_monitoring_counter_first_line(env):
 
 
 def test_ui_dot_and_card_buttons():
-    """Точка без текста с подсказкой «под вопросом: причина — карточка в «Конфликтах»», три действия карточки,
-    выключатель в «Порогах», счётчик первой строкой «Очереди» мониторинга."""
+    """Точка под вопросом в реестре и решение — с 27.10.2026 фронт ERP 1 в 1: точка с подсказкой «под вопросом:
+    причина», решение — в «Разборе» (вид «Задачи»), выключатель отметки — `/project-status/under-question-mark`."""
     from pathlib import Path
-    js = (Path(__file__).parents[1] / "meetflow" / "web" / "static" / "app.js").read_text(encoding="utf-8")
-    assert 'class="doubt-dot" title="под вопросом: ${esc(t.doubt_label || t.doubt_reason)} — карточка в «Конфликтах»"' in js
-    body = js[js.index('if (c.kind === "task_doubt")'):]
-    body = body[:body.index("// задача уже заведена без исполнителя")]
-    # перевёрнут 15.10.26, вечер (решение владельца): кнопки — из общей таблицы doubt_labels в карточке
-    # («Подтвердить» / «Своя формулировка» / «Не задача», «Это дубль» — только где дубль возможен)
-    assert "p.buttons" in body and "data-doubt-act" in body and "Своя формулировка" in body
-    assert 'id="th-doubt"' in js and "show_doubt_mark: $(\"#th-doubt\").checked" in js
-    q = js[js.index('<h2 style="margin-top:0">Очередь</h2>'):]
-    assert q.index("Задачи под вопросом") < q.index("Карточки «Конфликтов»")
+    root = Path(__file__).parents[1] / "meetflow" / "web" / "static"
+    js = (root / "app.js").read_text(encoding="utf-8")
+    assert "function точкаВопроса(t)" in js and "/project-status/under-question-mark" in js
+    reg = (root / "registry.js").read_text(encoding="utf-8")
+    assert 'href="#razbor/tasks"' in reg

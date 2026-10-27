@@ -111,6 +111,10 @@ class TaskRegistry:
     def _history(self, task_id, old, new, source, quote="", by="") -> None:
         self.s.insert("task_history", task_id=task_id, old_status=old, new_status=new, source=source,
                       evidence_quote=quote, changed_by=by, at=now())
+        # версия строки растёт с каждой записью истории — экран с прежней версией получит отказ, а не затрёт правку
+        # (замок на данных, как ERP 19.10.26; экраны 1 в 1, 27.10.2026)
+        with self.s.tx() as c:
+            c.execute("UPDATE tasks SET version=COALESCE(version,1)+1, updated_at=? WHERE id=?", (now(), task_id))
 
     def list(self, project_id: int, status: TaskStatus | None = TaskStatus.ACTIVE) -> list[dict]:
         if status is None:

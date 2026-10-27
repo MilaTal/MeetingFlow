@@ -1,0 +1,1089 @@
+/* Оформление «Линия с элементами» — выбор владельца 13.10.26 (стенд 8020; дополнение к заданию по интерфейсу).
+   Монохром, волосяные линии, шрифт Calibri; акцент ERP #6863bf — только тонкими линиями, кольцами и значками, без
+   заливок; просрочка — приглушённый сливовый, без красного. Слой идёт после styles.css и меняет только переменные и
+   вид элементов: структура страниц не трогается. Снять оформление — убрать подключение этого файла. */
+
+/* Шрифт — Calibri (решение владельца 13.10.26: «Onest меняем на Calibri на все системы»). Системный шрифт Windows: на закрытой
+   машине без загрузки и без внешних запросов. Запасные — Carlito (метрически совместимый, Linux), затем системные. */
+
+:root {
+  --bg: #ffffff;
+  --surface: #ffffff;
+  --border: #e4e4e7;
+  --reg-line: #ececef;
+  --field-bg: #fafafa;
+  --field-bg-hover: #f4f4f5;
+  --field-border: #e4e4e7;
+  --accent-border: #e4e4e7;
+  --text: #18181b;
+  --text-muted: #71717a;
+  --accent: #6863bf;
+  --accent-hover: #4f4aa3;
+  --accent-soft: #fafafa;            /* «мягкий акцент» больше не цветная заливка: нейтральная подложка; #f4f4f5 давал серому тексту 4,4:1 (замер 13.10.26) */
+  --accent-soft-hover: #ececef;
+  --danger: #8e5a92;                  /* красного нет: сливовый, как у просрочки */
+  --danger-soft: #faf7fb;
+  --warning: #71717a;
+  --warning-soft: #ffffff;
+  --success: #18181b;
+  --success-soft: #ffffff;
+  --reg-over: #8e5a92;
+  --tint-hover: #e2e6fa;             /* подложка цвета акцента при наведении — блок «Наведение и курсор» в конце файла (17.10.2026) */
+  --radius: 10px;
+  --radius-sm: 8px;
+}
+
+body { font-family: Calibri, Carlito, "Segoe UI", system-ui, -apple-system, sans-serif; background: #fff; color: var(--text); }
+button, input, select, textarea { font-family: inherit; }   /* поля и кнопки шрифт сами не наследуют */
+h1 { font-weight: 600; letter-spacing: -0.01em; }
+a { color: var(--text); text-decoration-color: #a1a1aa; }
+
+/* Левая колонка: название проекта прописными, без надписи-подзаголовка; пункты — тихо, активный полужирный */
+.sidebar { border-right: 1px solid var(--reg-line); padding: 32px 16px; background: #fff; }
+.brand { font-size: 12.5px; font-weight: 500; letter-spacing: 0.14em; text-transform: uppercase; color: #71717a; line-height: 1.6; }   /* #a1a1aa из образца даёт 2,56:1 — ниже порога 4,5:1 из того же дополнения; #71717a — 4,83:1 */
+.brand-sub { display: none; }
+.nav-item, .nav-item.nav-main, .nav-item.nav-service { border-radius: 0; background: none; }
+.nav-item.nav-main { font-size: 14.5px; font-weight: 500; color: #3f3f46; padding: 8px 12px; }
+.nav-item.nav-main:hover, .nav-item:hover { background: none; color: var(--text); }
+.nav-item.nav-main.active, .nav-item.active { background: none; color: var(--text); font-weight: 600; }
+.nav-item.nav-service { color: var(--text-muted); }
+.nav-item.nav-service.active { color: var(--text); font-weight: 600; }
+.nav-item.active .nav-ico { color: var(--accent); }
+
+/* Рабочая область шире: 36 сверху, 56 сбоку */
+.main { padding: 16px 28px; }   /* рабочая область больше (владелец 13.10.26, обе системы): было 36px 56px */
+
+/* Поверхности: рамка 1 px, скругление 10, без теней и плашек */
+.card, .modal-card, .reg-menu, .reg-filter, .tip-body { box-shadow: none; }
+.card { border: 1px solid var(--reg-line); border-radius: 10px; background: #fff; }
+.reg-menu, .reg-filter, .tip-body { box-shadow: 0 6px 24px rgba(24, 24, 27, 0.06); }
+
+/* Кнопки: главная — рамкой цвета текста, при наведении заливка; обычные — серой рамкой; залитых цветных нет */
+.btn, button.btn, .btn-sm { border: 1px solid #d4d4d8; color: var(--text); background: #fff; border-radius: 8px; }
+.btn:hover, .btn-sm:hover { border-color: #a1a1aa; background: #fff; color: var(--text); }
+.btn-primary, .btn-warning, .btn-danger { background: #fff !important; color: var(--text) !important; border: 1px solid var(--text) !important; }
+.btn-primary:hover, .btn-warning:hover, .btn-danger:hover { background: var(--text) !important; color: #fff !important; }
+.btn-primary:disabled, .btn-primary[disabled] { opacity: 0.5; }
+.btn-primary .tab-badge:not(:empty) { background: none; color: var(--accent); }
+
+/* Вкладки и активное: подчёркивание цветом акцента */
+.doc-tab-on, .reg-views button.on, .sys-tabs a.on { border-bottom-color: var(--accent) !important; color: var(--text); background: none; }
+.doc-tab { background: none; }
+
+/* Таблицы: шапка белая, приглушённая */
+th { background: #fff; color: var(--text-muted); font-weight: 500; }
+.chip { background: #f4f4f5; color: var(--text); border-radius: 6px; }
+
+/* Документ: межстрочный 1,75, заголовок отделён тонкой линией */
+.doc-render, .mt-text { line-height: 1.75; }
+.doc-render h2 { padding-bottom: 12px; border-bottom: 1px solid var(--reg-line); margin-bottom: 18px; }
+
+/* Метка состояния — тонкая рамка без заливки; «ждёт решения» — рамка и текст цвета акцента */
+.mt-state, .reg-tag { background: none; border: 1px solid var(--border); color: #52525b; }
+.mt-state-acc { border-color: var(--accent); color: var(--accent-hover); }
+
+/* Окна: белое окно 460 px, тонкая рамка, тень, затемнение фона 18 % */
+.modal-overlay { background: rgba(24, 24, 27, 0.18) !important; }
+.modal-card { max-width: 460px; border: 1px solid var(--border); border-radius: 10px; box-shadow: 0 16px 48px rgba(24, 24, 27, 0.12); }
+.modal-card h2, .modal-card h3 { font-size: 16px; font-weight: 600; }
+.modal-card label { font-size: 12.5px; color: var(--text-muted); }
+.modal-card input:focus, .modal-card textarea:focus, .modal-card select:focus, .reg-search:focus-within {
+  border-color: var(--accent); outline: none; }
+
+/* Уведомления: белая карточка, тонкая рамка, тень, слева галочка цвета акцента; ошибка — сливовый знак */
+.toast { background: #fff !important; color: var(--text) !important; border: 1px solid var(--border); border-radius: 10px;
+  box-shadow: 0 8px 28px rgba(24, 24, 27, 0.1); padding-left: 38px !important; position: fixed; }
+.toast::before { content: ""; position: absolute; left: 14px; top: 50%; width: 15px; height: 15px; margin-top: -7.5px;
+  background: var(--accent);
+  -webkit-mask: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23000' stroke-width='1.8' stroke-linecap='round' stroke-linejoin='round'><path d='M5 12.5l4.5 4.5L19 7'/></svg>") center/contain no-repeat;
+  mask: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23000' stroke-width='1.8' stroke-linecap='round' stroke-linejoin='round'><path d='M5 12.5l4.5 4.5L19 7'/></svg>") center/contain no-repeat; }
+.toast.error::before { background: var(--reg-over);
+  -webkit-mask: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23000' stroke-width='1.8' stroke-linecap='round' stroke-linejoin='round'><path d='M12 4l9 16H3z'/><path d='M12 10v4M12 17v.5'/></svg>") center/contain no-repeat;
+  mask: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23000' stroke-width='1.8' stroke-linecap='round' stroke-linejoin='round'><path d='M12 4l9 16H3z'/><path d='M12 10v4M12 17v.5'/></svg>") center/contain no-repeat; }
+
+/* Пустое состояние: маленький рисунок, заголовок 14,5/500, одна приглушённая фраза */
+.empty-state { color: var(--text-muted); }
+
+/* Счётчики — тем же размером, цветом акцента */
+.tab-badge:not(:empty), #conflicts-badge:not(:empty), #pod-badge:not(:empty), #system-badge:not(:empty), #voice-review-badge:not(:empty),
+#razbor-badge:not(:empty) { background: none !important; color: var(--accent) !important;
+  font-weight: 500; padding: 0 0 0 6px; }
+
+/* Узкий экран: боковые поля меньше */
+@media (max-width: 700px) {
+  .main { padding: 16px; }
+  .sidebar { padding: 8px 16px; }
+}
+
+/* «Включить рабочий режим» — из боковой колонки в «Систему → Параметры» (задание, раздел 1; кнопка там — nav.js) */
+.sidebar #mode-switch-testing { display: none !important; }
+
+/* «Конфликты» — очередь строками (conflicts.js) */
+#conflicts-list .cf-row { display: grid; grid-template-columns: 26px minmax(0, 1fr); column-gap: 10px; border: none; border-bottom: 1px solid var(--reg-line);
+  border-radius: 0; margin: 0; padding: 12px 4px; background: #fff; }
+#conflicts-list .cf-row > *:not(.cf-ico) { grid-column: 2; }
+#conflicts-list .cf-ico { grid-column: 1; grid-row: 1 / span 6; color: var(--text-muted); padding-top: 2px; }
+#conflicts-list .cf-row b { font-size: 14.5px; font-weight: 500; }
+#conflicts-list .cf-row .page-sub { font-size: 13px; font-style: italic; color: var(--text-muted); }
+#conflicts-list .cf-row .hstack { margin-top: 8px !important; }
+#conflicts-list .cf-row .hstack .btn-primary { background: #fff !important; }
+#conflicts-list { border: 1px solid var(--reg-line); border-radius: 10px; padding: 0 12px; }
+.cf-filter { margin-bottom: 12px; }
+
+/* «Команда» (team.js) */
+.team-add { margin-left: 8px; text-decoration: none; }
+.team-access-text { font-size: 13px; color: var(--text); }
+.team-table td[hidden], .team-table th[hidden] { display: none; }
+.team-table td.team-access { position: relative; }
+.team-table select.team-role-ghost { position: absolute; left: 0; top: 50%; width: 1px; height: 1px; opacity: 0; pointer-events: none; }
+
+/* Узкий экран (аудит 13.10.26): пустая ячейка карточки реестра не показывает голую подпись «Комментарий:»; подписи таблиц
+   мониторинга переносятся, а не обрезаются («Модель проверк…») */
+@media (max-width: 700px) {
+  .reg-table td:empty { display: none; }
+  .mon-table td.mon-label { white-space: normal; overflow-wrap: anywhere; }
+  /* Д9 «Мониторинга» 15.10.26: на 400 px подпись получала ~86 px и рвалась посреди слова («проверк и», «Автобэк ап»,
+     «Папка-приёмн ик»). Таблицы «подпись | значение | пояснение» (monTable) на узком экране — строкой в столбик:
+     подпись над значением, слово переносится только если само не влезает в строку */
+  .mon-table.mon-3, .mon-table.mon-3 tbody, .mon-table.mon-3 tr, .mon-table.mon-3 td { display: block; width: auto; }
+  .mon-table.mon-3 tr { border-bottom: 1px solid var(--border, #e6e9ee); padding: 6px 0; }
+  .mon-table.mon-3 td { border-bottom: none; padding: 2px 10px; overflow-wrap: break-word; word-break: normal; }
+  .mon-table.mon-3 td.mon-label { overflow-wrap: break-word; }
+  .mon-table.mon-3 td.mon-note:empty { display: none; }
+}
+
+/* Вкладки «Системы» — одной строкой (второй проход аудита 13.10.26: десять вкладок ложились в две строки на 1280 и в четыре
+   на 400 — 150 px над содержимым). Не помещаются — строка прокручивается внутри себя; страница поперёк не прокручивается. */
+.sys-tabs { flex-wrap: wrap; overflow: visible; row-gap: 0; gap: 0 14px; }   /* вариант В, владелец 14.10.26: перенос, не прокрутка */
+.sys-tabs a { font-size: 13px; }
+.sys-tabs a { white-space: nowrap; flex: none; }
+
+/* «Система» (system.js): службы точкой, сообщения и «Ожидает ввода» строками */
+.svc-dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; vertical-align: middle; box-sizing: border-box; }
+.svc-ok { background: var(--text); }
+.svc-bad { border: 1.5px solid var(--reg-over); background: #fff; }
+.svc-off { border: 1.5px solid #d4d4d8; background: #fff; }
+.svc-check { border: 1.5px solid var(--accent); background: #fff; }
+.svc-word { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }  /* для чтения с экрана */
+.mon-table td.mon-value:has(.svc-dot) { width: 24px; }
+.svc-bad-row .mon-label { color: var(--reg-over); }
+.svc-fix { white-space: nowrap; }
+.sm-card { padding: 0 16px; }
+.sm-row, .aw-row { display: grid; grid-template-columns: 22px minmax(0, 1fr) auto; column-gap: 10px; align-items: start;
+  padding: 12px 0; border-bottom: 1px solid var(--reg-line); }
+.aw-row { grid-template-columns: minmax(0, 1fr) auto; }
+.sm-ico { padding-top: 2px; color: var(--text-muted); }
+.sm-ico.sm-warn { color: var(--reg-over); }
+.sm-text { font-size: 14.5px; }
+.sm-acts { display: inline-flex; gap: 14px; white-space: nowrap; }
+.sm-row .sys-details { grid-column: 2 / -1; margin-top: 8px; }
+.sm-foot { padding: 12px 0; }
+.sm-more { padding: 10px 0; border-bottom: 1px solid var(--reg-line); }
+.aw-what .n { color: var(--accent); font-weight: 500; }
+.aw-go { white-space: nowrap; }
+@media (max-width: 700px) {
+  .sm-row { grid-template-columns: 22px minmax(0, 1fr); }
+  .sm-acts { grid-column: 2; margin-top: 6px; }
+  .aw-row { grid-template-columns: minmax(0, 1fr); }
+}
+
+/* Раскрытый длинный список — своя лента прокрутки (владелец 13.10.26), как у таблиц (480 px) */
+.list-strip { max-height: 480px; overflow: auto; }
+.list-strip > .list-collapse { position: sticky; bottom: 0; background: #fff; }
+/* Список подключений на «Моделях» раскрывается своей кнопкой — раскрытый в ленте прокрутки */
+.model-book[open] .model-book-scroll, .model-book[open] .table-scroll { max-height: 480px; overflow: auto; }
+
+/* Окна: «Отмена» — ссылкой, главная — в рамке справа внизу («Линия», окна) */
+#modal-cancel, #confirm-cancel { border: none !important; background: none !important; color: var(--text-muted) !important;
+  text-decoration: underline; text-decoration-color: #d4d4d8; text-underline-offset: 3px; padding: 4px 6px; }
+#modal-cancel:hover, #confirm-cancel:hover { color: var(--text) !important; }
+
+/* Шапка подготовки (prep.js): одна строка инструментов 13/500 без рамок, заголовок — документ */
+.doc-head.prep-bar { flex-wrap: nowrap; overflow-x: auto; gap: 14px; padding-bottom: 10px; border-bottom: 1px solid var(--reg-line);
+  font-size: 13px; font-weight: 500; }
+.doc-head.prep-bar .doc-tab { font-size: 13px; font-weight: 500; white-space: nowrap; }
+.doc-head.prep-bar .mt-btn, .doc-head.prep-bar .mt-back { white-space: nowrap; }
+.doc-head.prep-bar .doc-head-spacer { flex: 1; }
+.prep-title { margin: 18px 0 12px; }
+.prep-doc .doc-content, .prep-doc .review-notes { max-height: none !important; min-height: 0 !important; overflow: visible; }
+.prep-doc .doc-with-notes.rn-collapsed { grid-template-columns: minmax(0, 1fr); }
+.prep-doc .doc-with-notes.rn-collapsed .review-notes { display: none; }
+
+/* Страница встречи: документ без своей рамки и прокрутки — страница прокручивается целиком (задание, раздел 3). Класс
+   doc-content документу нужен только для подсветки фрагмента замечания; его прежняя высота 420 px здесь не действует. */
+.mt-text.doc-content { max-height: none; overflow: visible; border: none; box-shadow: none; padding: 0; background: none; }
+.doc-content { box-shadow: none; }      /* «Линия»: без теней, только волосяные линии */
+
+/* Путь встречи: на широком экране — всегда раскрыт (кнопка-заголовок без вида кнопки), на узком — одной строкой */
+.prep-path .path-head { background: none; border: none; padding: 0; font-family: inherit; font-size: 13px; font-weight: 500;
+  color: var(--text-muted); text-align: left; cursor: default; margin-bottom: 10px; }
+.prep-path .path-now { display: none; }
+@media (max-width: 700px) {
+  .prep-path .path-head { cursor: pointer; width: 100%; }
+  .prep-path .path-head::after { content: " ›"; color: var(--text-muted); }
+  .prep-path.open .path-head::after { content: " ⌄"; }
+  .prep-path .path-now { display: inline; color: var(--text-muted); }
+  .prep-path:not(.open) .path, .prep-path:not(.open) .path-links { display: none; }
+}
+
+/* Путь встречи точками в строке инструментов (meeting.js, вариант Б) */
+.mt-path { display: inline-flex; align-items: center; gap: 8px; background: none; border: none; padding: 4px 2px; font: inherit;
+  font-size: 13px; font-weight: 500; color: var(--text-muted); cursor: pointer; white-space: nowrap; }
+.mp-line { position: relative; display: inline-flex; align-items: center; gap: 10px; padding: 0 2px; }
+.mp-line::before { content: ""; position: absolute; left: 2px; right: 2px; top: 50%; height: 1px; background: #d4d4d8; }
+.mp-dot { position: relative; width: 7px; height: 7px; border-radius: 50%; box-sizing: border-box; background: #fff; }
+.mp-done { background: var(--text); }
+.mp-skip, .mp-todo { border: 1.5px solid #d4d4d8; }
+.mp-now { border: 1.5px solid var(--accent); box-shadow: 0 0 0 3px rgba(104, 99, 191, 0.15); }
+.mp-fail { border: 1.5px solid var(--reg-over); }
+.mt-path-fail .mp-label { color: var(--reg-over); }
+.mt-path[aria-expanded="true"] .mp-label { color: var(--text); }
+.mt-path-card { position: fixed; z-index: 60; background: #fff; border: 1px solid var(--border); border-radius: 10px;
+  box-shadow: 0 8px 28px rgba(24, 24, 27, 0.1); padding: 14px 16px; max-height: calc(100vh - 120px); overflow: auto; }
+.mt-path-card .path-head { background: none; border: none; padding: 0; font-family: inherit; font-size: 13px; font-weight: 500;
+  color: var(--text-muted); margin-bottom: 10px; cursor: default; }
+.mt-path-card .path-now { display: none; }
+@media (max-width: 700px) { .mt-path .mp-label { display: none; } }   /* узкий экран: только точки, подпись — в aria-label */
+/* Прежние подписи вкладок «Системы» (решение владельца 13.10.26) длиннее: на 1280 им нужно 1046 px из 938. На широком
+   экране — перенос во вторую строку (вкладка не прячется за прокрутку), на узком — прежняя прокрутка строки. */
+/* (13.10.26, позже) редкие вкладки — в «Ещё ▾»: строка снова одна, переноса нет */
+
+/* «Ещё ▾» во вкладках «Параметров системы» убрано 14.10.26 (вариант В): все вкладки видны, лишние — второй строкой */
+
+/* ---- «Команда проекта» — 1 в 1 как в старой ERP (владелец 13.10.26: «для монитора команд сделать аналогично как в примере
+   на скрине — это пример из старой ерп; сними всё 1 в 1 — и размеры, и инструменты»). Разметку строит прежний renderTeam
+   (надстройка team.js снята); здесь — вычисленные значения старой ERP (рабочая 8000, замер 13.10.26 при 1500 px),
+   которые тема «Линия» перекрывала. Только этот экран. Шрифт — Calibri (решение владельца 13.10.26 для обеих систем). */
+#main:has(#users-list) .doc-head { gap: 8px 14px; margin-bottom: 12px; align-items: center; }
+#main:has(#users-list) .doc-head h1 { font-weight: 700; letter-spacing: normal; }
+#main:has(#users-list) .doc-tabs { background: #f4f4f8; }
+#main:has(#users-list) .doc-tab-on { background: #fff !important; color: #6863bf; border-bottom: 0 !important;
+  box-shadow: 0 1px 3px rgba(24, 24, 27, .1), inset 0 0 0 1px #eef2ff; }
+#main:has(#users-list) #users-list.card { border-radius: 16px; border-color: #e4e4e7; box-shadow: 0 6px 20px rgba(104, 99, 191, .2); }
+#main:has(#users-list) .team-table th { background: #eef2ff; color: #18181b; font-weight: 600; }
+#main:has(#users-list) .team-table thead th:first-child { border-radius: 10px 0 0 0; }
+#main:has(#users-list) .team-table thead th:last-child { border-radius: 0 10px 0 0; }
+#main:has(#users-list) .team-table .btn-icon { width: 30px; height: 30px; padding: 0; background: #eef2ff;
+  border: 1px solid rgba(104, 99, 191, .16); border-radius: 10px; }
+#main:has(#users-list) .team-table select.team-role { border-radius: 10px; }
+#main:has(#users-list) .access-toggle { border-radius: 10px; }
+#main:has(#users-list) .more-row .btn-sm, #main:has(#users-list) .list-more .btn-sm { background: #eef2ff;
+  border-color: rgba(104, 99, 191, .16); border-radius: 10px; }
+
+
+/* ---- Рабочая область больше на всех экранах (поручение владельца 13.10.26 для обеих систем, по образцу «Экрана планёрки»).
+   Цель — первая строка содержания не ниже 150 px от верха окна при 1280×800. Замер до/после — «Ответы веток». ---------- */
+/* карточки документа: одни поля, без вторых полей у блока документа внутри */
+.card.card-output { padding: 20px 28px; }
+.card.card-output > .doc-with-notes > .doc-content, .card.card-output > .doc-content, .prep-doc .doc-content {
+  padding: 0; border: 0; background: none; box-shadow: none; }
+/* у первого подзаголовка документа верхнего отступа нет; 34 px — только между разделами */
+.doc-content .doc-title + .doc-heading, .doc-content > .doc-heading:first-child,
+.doc-protocol > .doc-title + .doc-heading, .doc-protocol > .doc-heading:first-child { margin-top: 0; }
+/* строка «Сводка по проекту — актуализация …» внутри документа повторяет заголовок экрана — на экране не показываем */
+#main:has(.doc-tabs [href="#status/roadmap"]) .doc-content > .doc-title,
+#main:has(.doc-tabs [href="#status/summary"]) .doc-content > .doc-title { display: none; }   /* «Статус проекта»: Поиск, Сводка, Карта */
+/* строка навигации над документом — не выше 40 px, одна волосяная линия снизу */
+.mt-bar { min-height: 0; max-height: 40px; padding: 4px 0 6px; }
+.mt-layout { margin-top: 8px; }
+/* «собран дд.мм.гггг…» (администратор) — вплотную под заголовком, без пустой строки */
+.mt-sub { margin: 2px 0 10px; }
+/* подготовка: заголовок документа и «Вёл встречу» — без лишних полей */
+.prep-title { margin: 8px 0 4px; }
+.prep-title + .mt-sub, .prep-title .mt-sub { margin: 0 0 6px; }
+.meeting-leader { margin: 0 0 6px; }
+/* «Параметры системы»: пояснения вкладок — за «i» у заголовка (system.js копирует текст в подсказку); стилем, потому что
+   вкладка перерисовывается непрерывно и отложенное скрытие не успевало (замер 13.10.26: 65 px пояснения на виду) */
+#system-messages-wrap > .page-sub, #awaiting-wrap > .page-sub { display: none; }
+.sys-head h1 { margin-bottom: 4px; }
+/* подготовка: «собран…» и «Вёл встречу» — в строке заголовка справа, мелко */
+.prep-title .mt-title-row > .mt-sub { margin: 0 0 0 auto; font-size: 13px; }
+.prep-title .mt-title-row > .meeting-leader { margin: 0; font-size: 13px; }
+.prep-title { margin: 8px 0 8px; }
+.doc-head.prep-bar { margin-bottom: 4px; }
+.src-bar-wrap.prep-material:empty, .src-bar-wrap:empty { margin: 0; }   /* пустая полоса источников не занимает 16 px */
+.prep-title { margin-bottom: 0; }
+.prep-title .mt-title-row { padding-bottom: 4px; row-gap: 2px; }
+.prep-title .meeting-leader-select { padding: 1px 6px; font-size: 13px; height: 22px; }
+.card.card-output.prep-doc { padding-top: 14px; }   /* подготовка: заголовок документа уже над карточкой — верхнее поле меньше */
+.doc-head.prep-bar { padding-bottom: 6px; }
+
+/* ==== Пакет оформления 13.10.26 (решения владельца через «Мониторинг»; образец 8032 «В · тёмная шапка», реестр в карточке
+   протокола Планёрки). Реестр — устройство старого реестра рабочей ERP 8000, оформление — новое. ======================== */
+.sr-only { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
+/* фон рабочей области и карточки */
+.main { background: #f8f8fb; }
+.card { background: #fff; border: 1px solid #e4e4e7; border-radius: 12px; box-shadow: 0 2px 10px rgba(104, 99, 191, .08); }
+/* шапки таблиц данных — тёмные (контраст белого на #57529c ≈ 7:1); «Команда» — вид старой ERP (прямое решение владельца) */
+.reg-table thead th, .task-table:not(.reg-old) thead th, #main table.mon-table thead th, #main .card table:not(.team-table):not(.doc-table):not(.reg-old) thead th {
+  background: #57529c; color: #fff; font-weight: 600; font-size: 13.5px; text-transform: uppercase; letter-spacing: .05em;
+  padding: 7px 12px 7px 10px; border-bottom: 0; }
+.reg-table thead th:first-child, .task-table:not(.reg-old) thead th:first-child { border-radius: 8px 0 0 0; }
+.reg-table thead th:last-child, .task-table:not(.reg-old) thead th:last-child { border-radius: 0 8px 0 0; }
+.reg-table thead th .reg-col, .reg-table thead th button { color: #fff; font: inherit; text-transform: inherit; letter-spacing: inherit; }
+/* ячейки — шкала протокола: 15,5 / 400 / 1,35; служебные строки — курсивом, серым, 13,5 */
+.reg-table td, .task-table:not(.reg-old) td { font-size: 15.5px; font-weight: 400; line-height: 1.35; padding: 6px 12px 6px 10px; vertical-align: top; }
+.reg-table .reg-text, .reg-table .reg-resp, .task-table:not(.reg-old) .task-desc-cell { font-weight: 400; font-size: 15.5px; }
+.reg-sub, .tl-sub, .doc-cell-sub, .mt-sub { font-size: 13.5px; font-style: italic; color: #71717a; font-weight: 400; }
+.reg-over, .reg-table .reg-over { color: #8e5a92; }
+.reg-table td.reg-resp { white-space: normal; }        /* ФИО переносится на вторую строку, а не растягивает колонку */
+/* последний комментарий — не больше двух строк; «Актуализировать» — кнопкой в тонкой рамке, без заливки */
+.reg-comment { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; margin: 0 0 4px; }
+.reg-actualize { background: none; border: 1px solid #d4d4d8; border-radius: 8px; padding: 1px 8px; font: inherit; font-size: 13.5px;
+  color: #6863bf; cursor: pointer; }
+.reg-actualize:hover { border-color: #6863bf; }
+/* действия строки — линейные значки в цвете #6863bf, без заливных квадратов */
+.reg-table .ri { color: #6863bf; }
+.reg-table .ri:hover, .reg-table .ri:focus-visible { color: #57529c; background: #f3f2fb !important; }
+/* ширины колонок по содержанию (раскладка fixed): «Описание» — остаток; на узком экране — прежняя раскладка */
+@media (min-width: 769px) {
+  .reg-table { table-layout: fixed; width: 100%; }
+  .reg-table col.cg-num { width: 40px; }
+  .reg-table col.cg-resp { width: 140px; }
+  .reg-table col.cg-due { width: 100px; }
+  .reg-table col.cg-status { width: 100px; }
+  .reg-table col.cg-note { width: 15%; }
+  .reg-table col.cg-act { width: 80px; }
+  .reg-table th.reg-act, .reg-table td.reg-act { padding-left: 3px; padding-right: 3px; }   /* два значка по 36 + зазор — 74 px без вылета */
+  .reg-table th, .reg-table td { width: auto !important; }   /* прежние доли колонок по классам ячеек не действуют */
+}
+/* остальные таблицы данных («Параметры системы», мониторинг) — та же плотность ячеек */
+#main table.mon-table td, #main .card table:not(.team-table):not(.doc-table):not(.reg-old) td { font-size: 15.5px; line-height: 1.35;
+  padding-top: 6px; padding-bottom: 6px; }
+/* «Команда» — вид старой ERP; от новой шкалы только шрифт и вертикальные поля строки (горизонтальные не растим:
+   под администратором семь колонок и так шире окна 1280) */
+#main:has(#users-list) .team-table td { font-size: 15.5px; line-height: 1.35; padding-top: 6px; padding-bottom: 6px; }
+/* панели задач — та же шкала */
+.mt-drawer .tl-item { font-size: 15.5px; line-height: 1.35; }
+/* поле справа после последнего элемента — не меньше 16 px (правило владельца 13.10.26 для всех мест с задачами); панель задач —
+   белая поверх серого фона, без поля текст упирался в её край (замер 1280: 4 px) */
+@media (min-width: 901px) { .mt-drawer[data-k="tasks"] { padding-right: 16px; } }
+.mt-drawer .tl-sub, .mt-tasks .tl-sub { font-size: 13.5px; }
+/* зона поиска (реестр, «Статус проекта → Поиск»): белая, рамка 1,5 px #6863bf, скругление 12, ореол; поле без своей рамки */
+.reg-search, .search-box { background: #fff; border: 1.5px solid #6863bf !important; border-radius: 12px; box-shadow: 0 0 0 4px rgba(104, 99, 191, .10); }
+.reg-search input, .search-box textarea, .search-box input { border: 0 !important; box-shadow: none !important; background: transparent;
+  font-size: 15.5px; color: #18181b; outline: none; }
+.search-box .search-submit { background: #57529c; color: #fff; border: 0; border-radius: 8px; }
+/* подсказка во всех полях поиска — 13 px, курсив, #a1a1aa (решение владельца 13.10.26) */
+input[type="search"]::placeholder, #search-input::placeholder, .search-box textarea::placeholder { font-size: 13px; font-style: italic;
+  color: #a1a1aa; opacity: 1; }
+
+
+/* ---- Реестр задач — 1 в 1 со старым реестром рабочей ERP (владелец 13.10.26 вечером через «Мониторинг»: «как с „Командой“ —
+   структура, шрифты, светлая шапка #eef2ff, „Актуализировать“ таблеткой, карандаш и галочка в квадратах 30×30, поля, ширины,
+   подпись „поставлена“»). Разметка — renderTaskTable 8000, стили styles.css — те же, что на 8000; здесь — вычисленные значения
+   8000 (замер 13.10.26 при 1280), которые тема «Линия» перекрывала. Шрифт — Calibri (решение 13.10 для обеих систем).
+   Отличия от 8000 по более поздним решениям того же дня: колонки «Статус на дату» у активных нет — её ширина ушла «Описанию»;
+   поле справа от галочки 16 px; служебные строки курсивом; строка видов и поиска над таблицей; закрытые — серая шапка. ---- */
+#reg-list.card { padding: 16px 18px; border-radius: 16px; border-color: #e4e4e7; box-shadow: 0 6px 20px rgba(104, 99, 191, .2); }
+#reg-list .task-table { font-size: 14.5px; border-collapse: collapse; }
+#reg-list .task-table th { background: #eef2ff; color: #18181b; font-weight: 600; font-size: 12.5px; text-transform: uppercase;
+  letter-spacing: .02em; padding: 10px 8px; border-bottom: 1px solid #e4e4e7; vertical-align: bottom; white-space: nowrap; }
+#reg-list .task-table thead th:first-child { border-radius: 10px 0 0 0; }
+#reg-list .task-table thead th:last-child { border-radius: 0 10px 0 0; }
+#reg-list .task-table th .reg-col { background: none; border: 0; padding: 0; margin: 0; font: inherit; color: inherit;
+  text-transform: inherit; letter-spacing: inherit; cursor: pointer; text-align: left; }
+#reg-list .task-table td { font-size: 14.5px; font-weight: 400; line-height: 1.5; padding: 10px 8px; border-bottom: 1px solid #e4e4e7;
+  vertical-align: top; }
+#reg-list .task-table .task-num { font-weight: 600; }
+#reg-list .task-table .doc-cell-sub { display: block; font-size: 12.5px; color: #71717a; margin-top: 2px; font-style: italic; }
+#reg-list .task-table .doc-cell-sub.reg-over { color: #8e5a92; }
+#reg-list .task-table .task-note-text { margin-bottom: 6px; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical;
+  overflow: hidden; }
+#reg-list .task-table .btn-sm.task-note, #reg-list .task-table .btn-sm.task-revert { background: #eef2ff; border: 1px solid rgba(104, 99, 191, .16);
+  border-radius: 10px; font-weight: 500; font-size: 13px; padding: 5px 10px; color: #18181b; }
+#reg-list .task-table .btn-icon { width: 30px; height: 30px; padding: 0; background: #eef2ff; border: 1px solid rgba(104, 99, 191, .16);
+  border-radius: 10px; font-weight: 500; font-size: 13px; color: #18181b; }
+#reg-list .task-table .task-done-cell { padding-left: 20px !important; }
+#reg-list .task-table tr > td:last-child, #reg-list .task-table tr > th:last-child { padding-right: 16px; }   /* поле справа ≥ 16 px */
+/* «Описание» — остаток ширины: ему ушла бывшая колонка «Статус на дату», остальные колонки (доли 8000) ближе к нему.
+   Значки — по содержимому: карандаш 30 + поле 16 = 46 px, галочка 20 + 30 + 16 = 66 px. На 8000 последняя колонка получала
+   остаток 2,36 % (23 px при 1280) — галочка вылезала за край и таблица прокручивалась вбок (замер стенда 13.10.26: 27 px). */
+@media (min-width: 769px) {
+  #reg-list .task-table .task-desc-cell { width: auto; }
+  #reg-list .task-table th.task-act-cell:nth-last-child(2) { width: 46px; }
+  #reg-list .task-table th.task-act-cell:last-child { width: 66px; }
+  #reg-list .task-table.reg-closed th.task-act-cell:last-child { width: 96px; }
+  #reg-list .task-table.reg-closed .task-result-cell { width: 8.29%; }
+  /* Владелец 14.10.26, вечер: «две последние колонки подвинуть влево — там объективно есть место; справа до края — больше
+     места». Замер 1600: «Комментарии» 222 px при кнопке 116 — пустых 106 px, галочка в 16 px от края. «Комментарии» —
+     по кнопке «Актуализировать» (116 + поля 10 и 28 + запас 14 = 168 px) на любой ширине, поле справа 16 → 48 px. */
+  #reg-list .task-table .task-note-cell { width: 168px; }
+  #reg-list .task-table th.task-act-cell:last-child { width: 98px; }
+  #reg-list .task-table.reg-closed th.task-act-cell:last-child { width: 128px; }
+  #reg-list .task-table tr > td:last-child, #reg-list .task-table tr > th:last-child { padding-right: 48px; }
+}
+/* Закрытые — шапка серая (решение владельца 13.10.26 для обеих систем): #6b6b73, белый, 600 */
+#reg-list .task-table.reg-closed th { background: #6b6b73; color: #fff; font-weight: 600; }
+/* Узкий экран (до 700 px): на 8000 таблица прокручивалась вбок внутри себя; правило 13.10.26 «400 без прокрутки вбок» —
+   строки карточками, как было на стенде. На широком экране — 1 в 1 с 8000 (вопрос владельцу — в файле вопросов). */
+@media (max-width: 700px) {
+  #reg-list .task-table, #reg-list .task-table tbody, #reg-list .task-table tr, #reg-list .task-table td { display: block; width: auto; }
+  #reg-list .task-table { overflow: visible; }
+  #reg-list .task-table thead { display: none; }
+  #reg-list .task-table tr { position: relative; border-bottom: 1px solid #e4e4e7; padding: 8px 0; }
+  #reg-list .task-table td { border: 0; padding: 2px 4px; }
+  #reg-list .task-table td.task-num-cell { display: none; }
+  #reg-list .task-table td.task-desc-cell { padding-right: 84px; }
+  #reg-list .task-table td[data-label]::before { content: attr(data-label) ": "; color: #71717a; font-size: 12.5px; }
+  #reg-list .task-table td.task-act-cell { position: absolute; top: 8px; right: 42px; padding: 0 !important; }
+  #reg-list .task-table td.task-act-cell.task-done-cell, #reg-list .task-table.reg-closed td.task-act-cell { right: 4px; }
+  #reg-list .task-table tr.more-row td, #reg-list .task-table tr.collapse-row td { text-align: center; }
+}
+/* «Конфликты» — группы по видам, свёрнуты до заголовка с числом карточек (решение владельца 13.10.26) */
+.cf-group { border-bottom: 1px solid #e4e4e7; }
+.cf-group-head { display: flex; align-items: center; gap: 8px; width: 100%; background: none; border: 0; padding: 10px 4px;
+  font: inherit; font-size: 15.5px; font-weight: 600; color: var(--text); cursor: pointer; text-align: left; }
+.cf-group-head .n { color: #6863bf; font-weight: 500; font-size: 13.5px; }
+.cf-group-head:hover, .cf-group-head:focus-visible { background: #f8f8fb; }
+.cf-chev { display: inline-block; width: 12px; color: #71717a; transition: transform .15s; }
+.cf-group-head[aria-expanded="true"] .cf-chev { transform: rotate(90deg); }
+.cf-group-body { padding-bottom: 8px; }
+/* Хаос-тест 14.10.26, масштаб 150 % (1280 → 853 px): служебная строка под ссылкой протокола на «Подготовке» не переносилась —
+   таблица уезжала вбок на 248 px. Перенос вместо прокрутки. (Строка вкладок «Системы» прокручивается внутри себя — так решено
+   во втором проходе аудита 13.10.26, не трогаем.) */
+.meetings-table td .page-sub { white-space: normal; }
+/* Владелец 15.10.26: «сделай пошире колонку Протокола — 4 строки высоты выглядят плохо». Подсказка «ждём расшифровку: приложите
+   запись или текст» (303 px) переносилась на любой ширине и сжимала колонку до 196 px — строка 88 px. На широком окне — в одну
+   строку под ссылкой; перенос остаётся для окон уже 1100 px (там таблица иначе уходила вбок). */
+@media (min-width: 1101px) { .meetings-table td .page-sub { white-space: nowrap; } }
+/* при узкой колонке содержимого (подготовка с боковой панелью при 150 %) «Встреча» и «Протокол» тоже переносятся, шаг меньше */
+@media (max-width: 1100px) { .meetings-table td:nth-child(2), .meetings-table td:nth-child(3) { white-space: normal; }
+  .meetings-table th, .meetings-table td { padding-right: 16px; } }
+/* Сквозная проверка стиля 14.10.26 («Мониторинг», проход 1) */
+/* подсказки всех полей — по общему правилу: 13 px, #a1a1aa, курсив (было: в цвете акцента, 14,5) */
+input::placeholder, textarea::placeholder { color: #a1a1aa; font-size: 13px; font-style: italic; opacity: 1; }
+/* «Подготовка»/«Встречи»: форма создания — в строке заголовка справа, первая строка списка ≤ 150 px */
+.meetings-head { display: flex; align-items: center; flex-wrap: wrap; gap: 8px 12px; margin-bottom: 12px; }
+.meetings-head h1 { margin: 0; }
+.meetings-head .meeting-create-head { margin-left: auto; }
+.meetings-head .meeting-create-row { gap: 8px; flex-wrap: wrap; }
+/* протокол: шапка «Реестра задач» — тёмная, как у остальных таблиц данных (у Планёрки так же) */
+.doc-table-tasks thead th, .doc-reg table thead th { background: #57529c; color: #fff; font-weight: 600; font-size: 13.5px;
+  text-transform: uppercase; letter-spacing: .05em; padding: 7px 12px 7px 10px; border-bottom: 0; }
+.doc-table-tasks thead th:first-child { border-radius: 8px 0 0 0; }
+.doc-table-tasks thead th:last-child { border-radius: 0 8px 0 0; }
+.meetings-head .meeting-create-row > #new-meeting-label { flex: 0 1 220px; }
+.meetings-head .meeting-create-row { flex-wrap: nowrap; }
+.meetings-head .meeting-create-row input { padding-top: 6px; padding-bottom: 6px; }
+@media (max-width: 900px) { .meetings-head .meeting-create-head { margin-left: 0; width: 100%; } .meetings-head .meeting-create-row { flex-wrap: wrap; } }
+/* шкала новых экранов: 13,5 служебное и кнопки, 15,5 основной текст, 21 заголовок (без 12,5 / 13 / 14,5); реестр и «Команда» —
+   старая шкала 1 в 1 (вопрос владельцу), их не трогаем */
+#main:not(:has(#reg-list)):not(:has(#users-list)) .btn-sm, #main:not(:has(#reg-list)):not(:has(#users-list)) .btn-primary,
+#main:not(:has(#reg-list)):not(:has(#users-list)) .page-sub, #main:not(:has(#reg-list)):not(:has(#users-list)) .tip-ico,
+#main:not(:has(#reg-list)):not(:has(#users-list)) .conflict-num { font-size: 13.5px; }
+#main .conflict-card b { font-size: 15.5px; }
+.doc-content .doc-table.doc-table-tasks thead th, #main .doc-reg table.doc-table thead th { background: #57529c; color: #fff; }
+/* новая шкала: 13 → 13,5 (служебное), «Мониторинг», проход 1, п. 4 */
+#main:not(:has(#reg-list)):not(:has(#users-list)) :is(.mt-back, .mt-state, .mp-label, .mt-btn, .n, .proto-state, .proto-tasks,
+  .doc-tab, .chip, .tab-badge, .link, .sm-more-btn, .system-resolve) { font-size: 13.5px; }
+#main .sys-tabs a { font-size: 13.5px; }
+/* «Команда» без прокрутки вбок на 1280 под администратором (общее правило; «Мониторинг» 14.10.26): вид старой ERP тот же —
+   подписи ФИО/должности/отдела уже и переносятся, поля у значков и «Входа» меньше (было: 1060 px в 936, прокрутка 124 px) */
+#main:has(#users-list) .team-cap-name { width: clamp(130px, 13vw, 170px); }
+#main:has(#users-list) .team-cap-pos { width: clamp(150px, 15vw, 200px); }
+#main:has(#users-list) .team-cap-dept { width: clamp(110px, 11vw, 140px); }
+#main:has(#users-list) .team-table td.c-act { padding-left: 14px; padding-right: 8px; }
+#main:has(#users-list) .team-table td.c-del.danger-action-cell { padding-left: 8px !important; padding-right: 10px; }
+#main:has(#users-list) .team-table th.access-col, #main:has(#users-list) .team-table td.access-col { padding-left: 16px; }
+#main:has(#users-list) .team-table td.team-access { padding-left: 12px; }
+@media (max-width: 1100px) { #main:has(#users-list) :is(.team-cap-name, .team-cap-pos, .team-cap-dept) { width: auto; } }
+/* Шапка реестра задач — вариант «Г · графит (общий нейтральный)», решение владельца 14.10.26 (по снимку вариантов А–Д):
+   фон #3f3f46, белый текст; размер и начертание — как в старой ERP (12,5 / 600, прописные). Было: светлая #eef2ff 1 в 1.
+   Закрытые — по-прежнему серая #6b6b73 (решение 13.10.26). */
+#reg-list .task-table:not(.reg-closed) th { background: #3f3f46; color: #fff; border-bottom-color: #3f3f46; }
+
+/* ==== Шапки ВСЕХ таблиц — одинаковые, по образцу шапки реестра (решение владельца 14.10.26: «и для команды тоже графит;
+   по всем таблицам выровнять высоту шапки, размер и уровень шрифта — сделать везде одинаково, как на скрине»).
+   Графит #3f3f46, белый 12,5 / 600, межстрочный 1,5, прописные, разрядка .02em, поля 10/8, одна строка, текст посередине
+   по высоте, углы 10. Закрытые задачи — те же размеры, фон серый #6b6b73 (решение 13.10.26). Заменяет прежние шапки:
+   тёмную #57529c (13,5) у таблиц данных и документов, светлую #eef2ff у «Команды». ==== */
+#main table thead th {
+  background: #3f3f46 !important; color: #fff !important; font-family: inherit; font-size: 12.5px !important;
+  font-weight: 600 !important; line-height: 1.5 !important; letter-spacing: .02em !important; text-transform: uppercase !important;
+  padding: 10px 8px !important; white-space: nowrap; vertical-align: middle !important; border-bottom: 1px solid #3f3f46 !important;
+  height: auto; }
+#main table thead th :is(button, a, span) { font: inherit; color: inherit; letter-spacing: inherit; text-transform: inherit; }
+#main table thead tr > th:first-child { border-radius: 10px 0 0 0; }
+#main table thead tr > th:last-child { border-radius: 0 10px 0 0; }
+#main table.reg-closed thead th { background: #6b6b73 !important; border-bottom-color: #6b6b73 !important; }
+/* значки в шапке (ключ «Вход по логину» у «Команды») — не выше строки текста: иначе шапка 47 px вместо 39 */
+#main table thead th :is(svg, img) { height: 16px !important; width: auto; vertical-align: -3px; }
+#main table thead th .btn-icon, #main table thead th button:has(svg) { height: 18.75px !important; min-height: 0 !important; padding: 0 !important;
+  line-height: 1 !important; }
+#main table thead th button:has(svg) { display: inline-flex !important; align-items: center; gap: 4px; vertical-align: middle !important;
+  border: 0 !important; background: none !important; }
+#main table thead th button:has(svg) { height: 16px !important; line-height: 16px !important; }
+/* без разделителей между колонками шапки — как у образца (реестр) */
+#main table thead th { border-left: 0 !important; border-right: 0 !important; border-top: 0 !important; box-shadow: none !important; }
+
+/* ==== Зона поиска — вариант А «как в старой» (решение владельца 14.10.26 в чате Планёрки; одинаковый вид — в цвете ERP,
+   образец Планёрки 4e7623a). Заменяет вариант Б (белая зона в акцентной рамке 1,5 px с ореолом). Реестр и «Статус проекта →
+   Поиск». Подложка #f0effa без рамки, скругление 14; поле белое, рамка #dcd9f2, скругление 10; «⏎» — на светлом тоне старой
+   ERP #eef2ff; нажатая быстрая кнопка — белым по #57529c. Подсказка — как была: 13 px, #a1a1aa, курсив. ==== */
+.reg-search, .search-box { background: #f0effa !important; border: 0 !important; border-radius: 14px !important; box-shadow: none !important;
+  padding: 10px 12px; }
+.reg-search:focus-within, .search-box:focus-within { box-shadow: none !important; }
+.reg-search input, .search-box textarea, .search-box input { background: #fff !important; border: 1px solid #dcd9f2 !important;
+  border-radius: 10px !important; box-shadow: none !important; }
+.reg-search input:focus, .search-box textarea:focus, .search-box input:focus { border-color: #6863bf !important; outline: none; }
+.search-box .search-submit { background: #eef2ff !important; color: #18181b !important; border: 1px solid rgba(104, 99, 191, .16) !important;
+  border-radius: 10px !important; }
+.chip:active, .chip.on, .chip[aria-pressed="true"] { background: #57529c !important; color: #fff !important; border-color: #57529c !important; }
+/* Высота шапки — как у Планёрки fcabcac (38,75 px, текст на 11 px от верха): межстрочный в пикселях — коэффициент 1,5
+   в таблице документа давал строку 19,5 и шапку 39,5; кнопка-подпись в шапке (фильтр колонки) — inline-block по верху,
+   высотой в строку, иначе растягивала шапку до 39,4 (перенос из Планёрки, «Мониторинг» 14.10.26) */
+#main table thead th { line-height: 18.75px !important; }
+#main table thead th button:not(:has(svg)) { display: inline-block !important; vertical-align: top !important; height: 18.75px !important;
+  line-height: 18.75px !important; padding: 0 !important; margin: 0 !important; border: 0 !important; }
+#main table thead th { border-bottom: 0 !important; }   /* граница того же цвета невидима, но добавляла высоту (39,25 → 38,75) */
+/* Меню тремя блоками по ролям (владелец 14.10.26, как у Планёрки 79120fc): черта и тихая подпись блока */
+.nav-hr { border: 0; border-top: 1px solid #e4e4e7; margin: 10px 12px 6px; }
+.nav-cap { font-size: 13.5px; color: #71717a; padding: 2px 12px 4px; }
+/* «Встречи по проекту» — устройство старого списка (владелец 14.10.26), оформление новое */
+.feed-head { margin: 0 0 12px; }
+.feed-head h1 { margin: 0 0 4px; }
+.feed-sub { font-size: 13.5px; color: #71717a; font-style: italic; }
+.feed-head { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 16px; }
+.feed-new { display: flex; align-items: center; gap: 8px; margin-left: auto; }
+.feed-new input[type="date"] { width: 150px; padding-top: 6px; padding-bottom: 6px; }
+.feed-new input[type="text"] { width: 220px; padding-top: 6px; padding-bottom: 6px; }
+@media (max-width: 900px) { .feed-new { margin-left: 0; width: 100%; flex-wrap: wrap; } .feed-new input[type="text"] { flex: 1 1 160px; width: auto; } }
+.feed-section { font-size: 15.5px; font-weight: 600; color: #18181b; margin: 8px 0 8px; cursor: default; }
+details.feed-archive > summary.feed-section { cursor: pointer; }
+.feed-section .cnt { color: #6863bf; font-weight: 500; font-size: 13.5px; }
+.feed-h-note { font-size: 13.5px; font-weight: 400; font-style: italic; color: #71717a; }
+.card.feed-empty { padding: 12px 16px; margin: 0; }
+.feed-list { padding: 0; }
+.feed-head-text { flex: 1 1 300px; min-width: 0; }
+/* Проход 3 стиля («Мониторинг», 14.10.26): «Мониторинг RealTime» — 6 размеров, «Модели» — 7. Служебное 13 → 13,5
+   (пояснение под заголовком, «Убрать», заметки, строки маршрутов), «Показать список — N подключений» 14,5 → 13,5 */
+#main:not(:has(#reg-list)):not(:has(#users-list)) :is(.doc-head-meta, .btn-link, .mon-note, .mon-note b, .mon-key, .mon-val,
+  .mon-table td, .mon-table td b, .route-radio, .role-not-set) { font-size: 13.5px; }
+#main .disclosure-summary { font-size: 13.5px; }
+
+/* Узкий экран (< 768 px): строка «Показать все» прилипает к низу окна — реестр, «Команда», «Конфликты» (решение владельца
+   14.10.26, вопрос 8; одинаково с Планёркой). Высокие строки-карточки уводили её ниже края: кнопку не было видно, пока не
+   прокрутишь. Прилипает, пока список в окне; ниже конца списка уходит вместе с ним. */
+/* Таблица — плашкой под её обёрткой (способ Планёрки 19d7f17, 14.10.26): строка таблицы прилипнуть к окну не может,
+   если таблица шире экрана и прокручивается вбок внутри обёртки. Плашка видна только на узком, строка — только на широком. */
+.more-sticky { display: none; }
+@media (max-width: 767px) {
+  .list-more, .more-sticky { position: sticky; bottom: 0; z-index: 5; background: var(--surface); box-shadow: 0 -1px 0 var(--border); }
+  .more-sticky { display: block; text-align: center; padding: 12px 8px; }
+  /* #reg-list .task-table tr (узкий экран) задаёт строкам display — селектор сильнее */
+  tr.more-row, #reg-list .task-table tr.more-row { display: none; }
+}
+
+/* Вкладки при нехватке места — вариант В (решение владельца 14.10.26), все ряды вкладок, обе ширины: все вкладки видны,
+   лишние переносятся на вторую строку, прокрутки вбок нет. Линия ряда — одна, под последней строкой (у контейнера);
+   активная — подчёркивание акцентом, как было. Перекрывает прежние nowrap + overflow-x:auto реестра на узком экране. */
+.reg-top .reg-views, .reg-views-row .reg-views, .sys-tabs { flex-wrap: wrap; overflow: visible; row-gap: 0; }
+.doc-tabs { flex-wrap: wrap; max-width: 100%; }
+@media (max-width: 900px) { .reg-top .reg-views, .reg-views-row .reg-views { overflow: visible; flex-wrap: wrap; } }
+
+/* «Команда» — окно второго слоя (владелец 14.10.26, как у Планёрки a2d52c2): окно 640 px, ФИО в одну строку (.field-trio),
+   остальное парами (.field-pair), признак «Внешний контакт» плашкой; у отмеченной — рамка и фон акцента. */
+.modal-card.modal-wide { max-width: 640px; }
+.field-pair { display: grid; grid-template-columns: 1fr 1fr; column-gap: 12px; }
+.field-trio { display: grid; grid-template-columns: 1fr 1fr 1fr; column-gap: 12px; }
+@media (max-width: 600px) { .field-pair, .field-trio { grid-template-columns: 1fr; } }
+.id-flags { display: flex; flex-wrap: wrap; gap: 8px; margin: 4px 0 10px; }
+.id-flag { flex: 1 1 220px; display: flex; align-items: flex-start; gap: 8px; padding: 8px 12px; border: 1px solid var(--border);
+  border-radius: 10px; cursor: pointer; font-weight: 400; box-shadow: 0 1px 2px rgba(24, 24, 27, .05); }
+.modal-card .id-flag { font-size: 14px; color: var(--text); }
+.id-flag input { width: auto; margin-top: 3px; }
+.id-flag b { display: block; font-weight: 600; color: var(--text); }
+.id-flag small { display: block; font-size: 13px; color: var(--text-muted); }
+.id-flag:has(input:checked) { border-color: var(--accent); background: #eef2ff; }
+
+/* Экраны супер-администратора — акценты старой ERP при цветах новой (владелец 14.10.26, вечер: «примени дизайн со старой
+   ERP по акцентам, оставь только цвета и элементы дизайна как для новой; акценты, обводки — как на старой; сейчас неясные
+   и неразличимые полотна текста» и «добавь контраста для всех мониторов супер-админа — не хватает резкости»).
+   Замер до правки (1440×900): серым #71717a — 88 % текста «Мониторинга», 86 % «Базы голосов», 48 % «Моделей»; размер
+   13,5 у 94–95 %; карточки плоские. Старая ERP: текст 14,5, карточки — скругление 16 и тень, заголовок 700.
+   Стало: названия строк — тёмные полужирные (опора для глаза), пояснения — #3f3f46 (10,4:1 вместо 4,8:1), текст 14,5,
+   карточки и заголовок — как в старой. Палитра прежняя: #18181b, #6863bf, сливовый для сбоев. */
+#main:is([data-screen="system"], [data-screen="live"], [data-screen="models"], [data-screen="voices"], [data-screen="units"]) .card { border: 1px solid var(--border); border-radius: 16px; box-shadow: 0 6px 20px rgba(104, 99, 191, 0.2); }
+#main:is([data-screen="system"], [data-screen="live"], [data-screen="models"], [data-screen="voices"], [data-screen="units"]) .card .card { box-shadow: none; }
+#main:is([data-screen="system"], [data-screen="live"], [data-screen="models"], [data-screen="voices"], [data-screen="units"]) h1 { font-weight: 700; }
+#main:is([data-screen="system"], [data-screen="live"], [data-screen="models"], [data-screen="voices"], [data-screen="units"]) :is(.doc-head-meta, .btn-link, .mon-note, .mon-note b, .mon-key, .mon-val, .mon-table td, .mon-table td b, .route-radio,
+  .role-not-set, .page-sub, .reg-sub, .mon-lead) { font-size: 15.5px !important; }   /* сильнее правила «прохода 3» (13,5) — у него три # через :has */
+/* Выравнивание вида 17.10.26 (решение владельца): шкала экранов супер-администратора — как у Планёрки стенда: текст и
+   подписи 15,5, заголовок раздела 19, заголовок блока 15,5 полужирный (Планёрка line.css, #main.sa-screen). */
+#main:is([data-screen="system"], [data-screen="live"], [data-screen="models"], [data-screen="voices"], [data-screen="units"]) h1 { font-size: 19px; }
+#main:is([data-screen="system"], [data-screen="live"], [data-screen="models"], [data-screen="voices"], [data-screen="units"]) :is(h2, h3, .mon-section h3) { font-size: 15.5px; font-weight: 700; }
+#main:is([data-screen="system"], [data-screen="live"], [data-screen="models"], [data-screen="voices"], [data-screen="units"]) .badge { font-size: 15.5px; }
+#main:is([data-screen="system"], [data-screen="live"], [data-screen="models"], [data-screen="voices"], [data-screen="units"]) .mon-table td { padding-top: 8px; padding-bottom: 8px; }
+#main:is([data-screen="system"], [data-screen="live"], [data-screen="models"], [data-screen="voices"], [data-screen="units"]) :is(.mon-label, .mon-key) { color: var(--text); font-weight: 600; }
+#main:is([data-screen="system"], [data-screen="live"], [data-screen="models"], [data-screen="voices"], [data-screen="units"]) :is(.mon-note, .page-sub, .reg-sub, .mon-lead, .mon-off) { color: #3f3f46; }
+#main:is([data-screen="system"], [data-screen="live"], [data-screen="models"], [data-screen="voices"], [data-screen="units"]) .svc-bad-row .mon-label { color: var(--reg-over); }
+
+/* Поля ввода в окнах — мягкая тень (владелец 14.10.26 в чате Планёрки, «сделать аналогично для ERP»; Планёрка 6a8b058):
+   поле видно как поле, а не как строка текста на белом. */
+.modal-card .field :is(input, textarea, select) { box-shadow: 0 1px 2px rgba(24, 24, 27, .06), 0 2px 8px rgba(24, 24, 27, .07); }
+.modal-card .field :is(input, textarea, select):focus { box-shadow: 0 1px 2px rgba(24, 24, 27, .08), 0 4px 14px rgba(24, 24, 27, .12); }
+
+/* Контраст на всех остальных экранах — как у экранов супер-администратора (владелец 14.10.26, ночь: «добавь такой же
+   контрастности, как для вкладок супер-админа, — для всех остальных вкладок»). Поясняющий текст — #3f3f46 вместо
+   #71717a (10,4:1 вместо 4,8:1). Приоритет низкий (:where): цветные состояния — сливовая просрочка, акцентные ссылки,
+   отметки — остаются своими. Размеры не менялись. */
+:where(#main) :is(.page-sub, .reg-sub, .doc-cell-sub, .proto-state, .proto-tasks, .feed-sub, .feed-h-note, .mt-sub,
+  .empty-state, .doc-head-meta, .mp-label, .mon-note, .team-prole-sub) { color: #3f3f46; }
+#reg-list .task-table .doc-cell-sub { color: #3f3f46; }   /* «поставлена … · встреча …» — у реестра своё правило сильнее; «просрочено» (.reg-over) — сильнее этого */
+/* Токен приглушённого текста — #3f3f46, как в Планёрке (line.css, правило контраста владельца 14.10.26; системы выглядят
+   одинаково, 24.10.2026): «решили:», «Предложение ассистента» и прочие места на --text-muted — 10,4:1 к белому вместо 4,83:1.
+   Действует последнее определение токена; #71717a в :root выше и в styles.css остаётся исходным значением. */
+:root { --text-muted: #3f3f46; }
+
+/* «Встречи по проекту» — подход Планёрки («Список планёрок», владелец 15.10.26), цвета и элементы ERP: форма — карточкой на своей
+   строке; строка — месяц · дата полужирным · «Протокол», «Встреча» · название · состояние · «задач N» справа. */
+.feed-new.feed-new-card { margin: 0 0 16px; padding: 12px 16px; }
+.feed-new.feed-new-card input[type="text"] { flex: 1 1 320px; width: auto; }
+#proto-list .proto-row { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 16px; padding: 10px 16px; cursor: pointer; }
+#proto-list .proto-month { flex: 0 0 150px; font-size: 13.5px; letter-spacing: .06em; text-transform: uppercase; color: #3f3f46; }
+#proto-list .proto-date { flex: 0 0 auto; min-width: 96px; font-weight: 700; color: var(--text); text-decoration: none; }
+#proto-list .proto-acts { display: inline-flex; gap: 14px; }
+#proto-list .proto-acts a { color: var(--text); text-decoration: underline; text-decoration-color: #d4d4d8; text-underline-offset: 3px; }
+#proto-list .proto-acts a:hover { text-decoration-color: var(--accent); }
+#proto-list .proto-label { color: var(--text); }
+#proto-list .proto-tasks { margin-left: auto; text-align: right; }
+.feed-future { margin-top: 12px; }
+@media (max-width: 767px) { #proto-list .proto-month { flex-basis: 100%; } #proto-list .proto-month:empty { display: none; } }
+
+/* «Модели»: выбранная (основная) строка цепочки — контрастнее (владелец 15.10.26: «более контрастной сделать выбранную строку,
+   и для Планёрки, и для ERP»). Было: фон --accent-soft (#fafafa в новой теме) — почти не отличим от белого, отличала только
+   полоса 3 px. Стало: фон #eef2ff (лаванда акцента, как плашка «Внешний контакт»), полоса 4 px. */
+.route-row-on > td { background: #eef2ff; }
+.route-row-on > td:first-child { box-shadow: inset 4px 0 0 var(--accent); }
+
+/* Шире шаг между колонками (владелец 15.10.26 в Планёрке, «сделай ширину между колонками… сделай также для ERP»; Планёрка
+   bb3e9de): поля ячеек по горизонтали 8 → 14 px — реестр (кроме ячеек значков: их ширина — по значку), «Команда»,
+   «Подготовка» (там справа и так 32). */
+@media (min-width: 701px) { #reg-list .task-table :is(td, th):not(.task-act-cell) { padding-left: 14px; padding-right: 14px; } }   /* узкий — строки карточками, свои поля */
+#users-list .team-table :is(td, th) { padding-left: 14px; padding-right: 14px; }
+.meetings-table :is(td, th) { padding-left: 14px; }
+/* с полями 14 дата срока «15.10.2026» при 1280 не помещалась на 1 px (8,29 % = 79 px) — «Срок» 9 %, остаток берёт «Описание» */
+@media (min-width: 769px) and (max-width: 1399px) { #reg-list .task-table .task-due-cell { width: 9%; } }
+
+/* «Удалить насовсем» в строке реестра (владелец 15.10.26 через Планёрку bb3e9de: «иконку сделай совсем в конце, менее
+   заметной и на более дальнем расстоянии от последней иконки»): последним, прозрачность 0,45, без подложки, 22 px от
+   соседа; последняя колонка шире на эти 52 px — поле справа 48 сохраняется. */
+#reg-list .task-table .btn-icon.task-delete { margin-left: 22px; background: none; border-color: transparent; opacity: .45; }
+#reg-list .task-table .btn-icon.task-delete:hover, #reg-list .task-table .btn-icon.task-delete:focus-visible { opacity: 1; }
+@media (min-width: 769px) {
+  #reg-list .task-table th.task-act-cell:last-child { width: 156px; }
+  #reg-list .task-table.reg-closed th.task-act-cell:last-child { width: 186px; }
+}
+/* значки этой ячейки — в строку (у .btn-icon display: flex — вставали друг под друга) */
+#reg-list .task-table td.task-act-cell :is(.task-done, .task-delete) { display: inline-flex; vertical-align: middle; }
+/* узкий экран (строки карточками, значки поверх строки): «Удалить насовсем» встал в ячейку с галочкой справа — карандаш левее
+   на ту же ширину (30 + 22), описанию поле справа под три значка */
+@media (max-width: 700px) {
+  #reg-list .task-table:not(.reg-closed) td.task-act-cell:not(.task-done-cell) { right: 94px; }
+  #reg-list .task-table:not(.reg-closed) td.task-desc-cell { padding-right: 136px; }
+  #reg-list .task-table.reg-closed td.task-desc-cell { padding-right: 140px; }
+}
+
+/* Фильтры колонок реестра (владелец 15.10.26: «проверить, чтобы везде были признаки, что по каждой колонке есть фильтр —
+   сейчас об этом ничего не говорит; сбились шрифты в фильтрах»). Меню фильтра вложено в заголовок колонки и брало его вид:
+   прописные, 12,5 px, разрядка; общее правило шапки («кнопка в шапке — 18,75 px») сжимало строки меню, двустрочные имена
+   наезжали друг на друга. Меню — обычным текстом 14,5, строки по высоте текста; у колонки с фильтром — знак ▾.
+   С 21.10.2026 (дефект владелицы) меню живёт в body, а не в заголовке (`.reg-filter.col-menu`, position: fixed): рамка доски
+   «Экрана встречи» обрезала его при одной строке (130 px из 461). Оформление то же, селектор — по самому меню. */
+.reg-filter.col-menu { position: fixed; z-index: 70; overflow-y: auto; overscroll-behavior: contain; min-width: 220px; max-width: calc(100vw - 16px);
+  color: var(--text); text-transform: none; letter-spacing: normal; font-size: 14.5px; font-weight: 400; line-height: 1.35; }
+.reg-filter.col-menu > * { flex-shrink: 0; }
+.reg-filter.col-menu button:not(.btn-sm) { display: block; height: auto; line-height: 1.35; padding: 6px 8px; font-size: 14.5px;
+  white-space: normal; overflow: visible; color: var(--text); width: 100%; }
+.reg-filter.col-menu label { font-size: 13.5px; text-transform: none; letter-spacing: normal; }
+.reg-filter.col-menu .col-menu-all { font-weight: 600; color: var(--accent); border-bottom: 1px solid var(--border); border-radius: 6px 6px 0 0; margin-bottom: 2px; }
+#reg-list .task-table th .reg-col::after { content: "▾"; margin-left: 5px; font-size: .9em; opacity: .75; }
+#reg-list .task-table th .reg-col:hover::after { opacity: 1; }
+
+/* «Сбросить» у поля поиска (владелец 15.10.26 через Планёрку cf0f764, 1a8834a, 384ede0: «кнопку сбросить поиск перенести ближе
+   к окну ввода… сделай акцент по цвету, иначе не видно… проверь для всех экранов, где есть поиск»). В ERP поиск — в реестре и
+   во вкладке «Поиск» «Статуса проекта». «Сбросить» — сразу за полем, цветом акцента, 500, подчёркивание только при наведении,
+   середина вровень с полем; во вкладке «Поиск» — в строке поиска (была строкой ниже, среди подсказок). */
+.search-reset-link { color: var(--accent) !important; font-weight: 500; text-decoration: none !important; align-self: center;
+  margin-left: 10px; white-space: nowrap; background: none; border: 0; padding: 0; cursor: pointer; }
+.search-reset-link:hover, .search-reset-link:focus-visible { text-decoration: underline !important; text-underline-offset: 3px; }
+.search-reset-link[hidden] { display: none !important; }
+.search-row { display: flex; align-items: center; gap: 0; margin-bottom: 16px; }
+.search-row > .card { flex: 1 1 auto; min-width: 0; margin: 0; }
+.reg-bar .search-reset-link { margin-left: 0; }   /* у ряда реестра свой шаг 10 px — без двойного отступа */
+
+/* «Конфликты» — итоговая раскладка Планёрки (37b0329 … 3039ea8, владелец 15.10.26: «передай всё в ERP для аналогичной
+   страницы»), цвета ERP. Сетка: значок 24 | описание ≤ 68ch (≈ 76 знаков) | столбец действий 300, просвет 32; текст описания
+   15,5. Кнопки столбца — без рамок, самая светлая лаванда #f6f6fd (наведение #eceefb), 14 px, слева, 5 × 10, скругление 6,
+   шаг 3; тихое закрытие — без подложки, 13,5, отступ 22. Ниже 1100 px столбец под описанием.
+   Ловушки Планёрки: grid !important перебивал hidden (свёртка не прятала строки) — [hidden] отдельно; правила шрифта
+   кнопок — мимо значков .ri (у них подпись спрятана, общий размер проявлял текст «Удалить»). */
+#conflicts-list .cf-row.conflict-card { display: grid !important; grid-template-columns: 24px minmax(0, 600px) 300px; column-gap: 32px;
+  justify-content: start; align-items: start; padding-right: 0; }
+#conflicts-list .cf-row.conflict-card[hidden] { display: none !important; }
+#conflicts-list .cf-row > .cf-main { grid-column: 2; min-width: 0; }
+#conflicts-list .cf-row > .cf-act { grid-column: 3; }
+#conflicts-list .cf-main :is(div, b, .page-sub) { font-size: 15.5px; max-width: none; }
+#conflicts-list .cf-main .page-sub { font-style: italic; color: #3f3f46; line-height: 1.45; margin-top: 4px; }
+#conflicts-list .cf-act { display: flex; flex-direction: column; align-items: stretch; gap: 3px; width: 300px; }
+#conflicts-list .cf-act > :not(.cf-act-icons):not(.cf-dismiss) { display: block; width: 100%; box-sizing: border-box; text-align: left;
+  margin: 0; padding: 5px 10px !important; border-radius: 6px; border: 0 !important; background: #f6f6fd !important;
+  color: var(--text) !important; font-size: 14px !important; font-weight: 400 !important; line-height: 1.35; text-decoration: none !important;
+  cursor: pointer; white-space: normal; height: auto; min-height: 0; }
+#conflicts-list .cf-act > :not(.cf-act-icons):not(.cf-dismiss):hover,
+#conflicts-list .cf-act > :not(.cf-act-icons):not(.cf-dismiss):focus-visible { background: #eceefb !important; outline: none; }
+#conflicts-list .cf-act > .cf-dismiss { margin-top: 22px; padding: 0 !important; border: 0 !important; background: none !important;
+  color: #52525b !important; font-size: 13.5px !important; font-weight: 400; text-align: left; text-decoration: none; cursor: pointer; }
+#conflicts-list .cf-act > .cf-dismiss:hover, #conflicts-list .cf-act > .cf-dismiss:focus-visible { text-decoration: underline; text-underline-offset: 3px; }
+#conflicts-list .cf-act .cf-act-icons { display: flex; gap: 8px; justify-content: flex-end; margin-top: 6px; }
+.cf-close-all-row { display: flex; justify-content: flex-end; padding: 4px 16px 8px; }
+@media (max-width: 1100px) {
+  #conflicts-list .cf-row.conflict-card { grid-template-columns: 24px minmax(0, 1fr); }
+  #conflicts-list .cf-row > .cf-act { grid-column: 2; width: 100%; max-width: 420px; margin-top: 8px; }
+}
+#conflicts-list .cf-row.conflict-card { font-size: 15.5px; }   /* ch сетки — от текста описания: 68ch ≈ 76 знаков, как у Планёрки */
+#conflicts-list .cf-main :is(div, b, .page-sub) { font-size: 15.5px !important; }   /* сильнее правила «прохода 3» (13,5) */
+#conflicts-list .cf-act > .cf-dismiss + .cf-dismiss { margin-top: 22px; }
+#conflicts-list .cf-act > .cf-dismiss-danger:hover, #conflicts-list .cf-act > .cf-dismiss-danger:focus-visible { color: #b42318 !important; }
+
+/* «Реестр решений» — тот же вид, что «Конфликты» (владелец 15.10.26; Планёрка 5d034c7, 8e042d8, fde782a). Ширина описания —
+   600 px на обеих страницах (в знаках она зависела от шрифта строки и расходилась); у списка нет своих полей (как у «Конфликтов»),
+   иначе столбец действий съезжал. */
+:is(#conflicts-list, #decisions-list).card { padding: 0; }
+#decisions-list .cf-row.conflict-card { display: grid !important; grid-template-columns: 24px minmax(0, 600px) 300px; column-gap: 32px;
+  justify-content: start; align-items: start; padding: 12px 16px; font-size: 15.5px; border: 0; border-bottom: 1px solid var(--reg-line); }
+#decisions-list .cf-row.conflict-card[hidden] { display: none !important; }
+#decisions-list .cf-ico { color: var(--text-muted); padding-top: 2px; }
+#decisions-list .cf-main b { font-size: 15.5px; font-weight: 500; }
+#decisions-list .cf-main .page-sub { font-size: 15.5px !important; font-style: italic; color: #3f3f46; margin-top: 4px; max-width: none; }
+#decisions-list .dec-meta { font-size: 13.5px; color: #52525b; margin-top: 4px; }
+#decisions-list .cf-act { display: flex; flex-direction: column; gap: 3px; width: 300px; }
+#decisions-list .cf-act > .btn-sm { display: block; width: 100%; text-align: left; padding: 5px 10px !important; border-radius: 6px; border: 0 !important;
+  background: #f6f6fd !important; color: var(--text) !important; font-size: 14px !important; font-weight: 400; line-height: 1.35; }
+#decisions-list .cf-act > .btn-sm:hover, #decisions-list .cf-act > .btn-sm:focus-visible { background: #eceefb !important; }
+.dec-head { display: flex; align-items: center; gap: 6px; margin: 4px 0 10px; font-size: 15.5px; }
+@media (max-width: 1100px) {
+  #decisions-list .cf-row.conflict-card { grid-template-columns: 24px minmax(0, 1fr); }
+  #decisions-list .cf-row > .cf-act { grid-column: 2; width: 100%; max-width: 420px; margin-top: 8px; }
+}
+/* строка без кнопок — описание до края кнопок соседних строк: 600 + 32 + 300 (Планёрка cdb0a3f: «как в одном окне») */
+:is(#conflicts-list, #decisions-list) .cf-row:not(:has(> .cf-act)) > .cf-main { grid-column: 2 / 4; }
+
+/* Неактивная кнопка выглядит неактивной (владелец 15.10.26: «нажимаю на кнопку — нет действий… проверь все кнопки»): стили
+   столбца задают цвет и подложку с !important и делали неактивную неотличимой от рабочей. */
+:is(#conflicts-list, #decisions-list) .cf-act > :disabled { opacity: .45 !important; cursor: not-allowed !important; }
+
+/* «Системные сообщения» — раскладка «Конфликтов» (владелец 15.10.26: «сделай ширину контекстной колонки как у Планёрки…
+   пройди по всем вкладкам техническим, где применимо»): значок | текст 600 px | столбец действий 300, просвет 32; «Подробнее» —
+   мягкой кнопкой, «Закрыть» — тихим закрытием ниже. Остальные вкладки «Параметров системы» — таблицы чисел, им не подходит. */
+#system-messages .sm-row { grid-template-columns: 24px minmax(0, 600px) 300px; column-gap: 32px; justify-content: start; }
+#system-messages .sm-text { font-size: 15.5px; }
+#system-messages .sm-acts { display: flex; flex-direction: column; align-items: stretch; gap: 3px; width: 300px; white-space: normal; }
+#system-messages .sm-acts .sm-more-btn { display: block; width: 100%; text-align: left; padding: 5px 10px; border-radius: 6px; border: 0;
+  background: #f6f6fd; color: var(--text); font-size: 14px; text-decoration: none; cursor: pointer; }
+#system-messages .sm-acts .sm-more-btn:hover, #system-messages .sm-acts .sm-more-btn:focus-visible { background: #eceefb; }
+#system-messages .sm-acts .system-resolve { margin-top: 22px; text-align: left; padding: 0; border: 0; background: none; color: #52525b;
+  font-size: 13.5px; text-decoration: none; cursor: pointer; }
+#system-messages .sm-acts .system-resolve:hover, #system-messages .sm-acts .system-resolve:focus-visible { text-decoration: underline; }
+#system-messages .sm-row .sys-details { grid-column: 2 / 4; }
+@media (max-width: 1100px) {
+  #system-messages .sm-row { grid-template-columns: 24px minmax(0, 1fr); }
+  #system-messages .sm-acts { grid-column: 2; width: 100%; max-width: 420px; margin-top: 8px; }
+}
+
+/* Пустой раздел технического экрана — тихой строкой, а не карточкой (владелец 15.10.26, Планёрка f7321f0): заголовок раздела
+   и пометка второстепенным цветом; до следующего блока 12 px. */
+.mon-empty-line { font-size: 15.5px; margin: 4px 0 12px; }
+.mon-empty-line span { color: #52525b; font-size: 14px; }
+
+/* Карточка-вопрос «Конфликтов» (Планёрка bc998cf): «что прозвучало» курсивом, вопрос — прямым основным цветом */
+#conflicts-list .cf-main .cf-question { font-size: 15.5px !important; font-style: normal; color: var(--text); margin-top: 6px; }
+#conflicts-list .cf-main .cf-quote { margin-top: 4px; }
+
+/* Должность и роль на проекте — во всю ширину формы, 3 строки, растягиваются вниз (замечание владельца 15.10.26, как у
+   Планёрки 07fa99b) */
+.field.field-wide { grid-column: 1 / -1; }
+.field.field-wide textarea { width: 100%; min-height: 4.6em; resize: vertical; font: inherit; line-height: 1.45; }
+
+/* --- Меню 18.10 (решение владелицы 18.10.2026): блок «Вы работаете как» — сразу под блоком суперадминистратора, за чертой
+   (верхняя граница .whoami), а не прижат к низу колонки; сама левая колонка прилипает к окну, поэтому блок виден и на длинной
+   странице (реестр, протокол). Если меню выше окна, колонка прокручивается сама. Только широкий экран: на узком меню —
+   строкой сверху, как было. Правило одно в обеих системах (line.css Планёрки и theme-line.css ERP), порог — свой у каждой:
+   там, где у системы начинается колонка. */
+@media (min-width: 769px) {
+  .sidebar { position: sticky; top: 0; height: 100vh; overflow-y: auto; align-self: flex-start; box-sizing: border-box; }
+  .whoami { margin-top: 0; }
+}
+
+/* --- Наведение простых кнопок 19.10.2026 (Е13 списка отставания ERP) --------------------------------------------------------
+   «Свернуть ▾» в панелях встречи (button.link), «Свернуть» источников (.src-close) и любая кнопка без своего правила наведения
+   брали общее правило styles.css `button:hover` — фиолетовую подложку #e2e7fd и цвет акцента. В Планёрке то же правило
+   перекрыто нейтральным тоном (`line.css`: button:hover — белый фон, цвет текста, серая рамка; кнопки-ссылки — без подложки).
+   Здесь — то же, слово в слово по смыслу: системы выглядят одинаково. Кнопки со своим наведением (блок «Наведение и курсор»,
+   правила с #id) сильнее этого правила и не меняются. */
+button:hover, .btn:hover { background: #fff; color: var(--text); border-color: #a1a1aa; }
+button.link:hover, .btn-link:hover, .linkbtn:hover, .search-reset-link:hover { background: none; color: var(--text); }
+
+/* --- «Подтвердить» / «Снять» во вкладке «Под вопросом» (19.10.2026, как в Планёрке 18.10): под «Актуализировать», тем же видом */
+#reg-list .task-table td.task-note-cell .pod-acts { display: inline-flex; flex-wrap: wrap; gap: 6px; margin-top: 6px; }
+#reg-list .task-table .btn-sm.task-pod { background: #eef2ff; border: 1px solid rgba(104, 99, 191, .16);
+  border-radius: 10px; font-weight: 500; font-size: 13px; padding: 5px 10px; color: #18181b; }
+#reg-list .task-table .btn-sm.task-pod:is(:hover, :focus-visible) { background: var(--tint-hover); }
+
+/* --- Плашка поиска и вида над лентой задач (.live-views) — от «Экрана встречи» 19–20.10.2026; с 21.10.2026 экран убран
+   (решение владелицы), плашку держит реестр задач (registry.js, «.reg-top-poisk»). Стили ленты экрана (полоса заголовка, доска,
+   колонки и строки задач, показатели-фильтры) убраны вместе с ним. */
+.live-views { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 22px; }
+.live-views .tip { margin-left: auto; }
+.live-views .scr-search { flex: 1 1 240px; max-width: 360px; padding: 2px 6px; }
+.live-views .scr-search input { height: 30px; padding: 4px 8px; }
+@media (max-width: 768px) {
+  .live-views .scr-search { max-width: none; }
+}
+
+/* --- «Как пользоваться» (Е17, 20.10.2026; образец — Планёрка, решение владелицы 18.10.2026) -----------------------------
+   Пункт в самом низу блока «Вы работаете как» — тихой ссылкой цвета пунктов меню со значком «воспроизвести»; страница —
+   встроенный проигрыватель во всю ширину карточки, не выше окна. Вид — как в Планёрке (line.css), цвет активного — акцент ERP. */
+.whoami-help { display: flex; align-items: center; gap: 8px; margin-top: 14px; padding: 6px 0; color: #3f3f46;
+  font-size: 14.5px; text-decoration: none; }
+.whoami-help::before { content: ""; width: 16px; height: 16px; flex-shrink: 0; background: currentColor; opacity: .75;
+  -webkit-mask: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23000' stroke-width='1.6' stroke-linejoin='round'><circle cx='12' cy='12' r='9'/><path d='M10 8.5l5.5 3.5-5.5 3.5z'/></svg>") center/contain no-repeat;
+  mask: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23000' stroke-width='1.6' stroke-linejoin='round'><circle cx='12' cy='12' r='9'/><path d='M10 8.5l5.5 3.5-5.5 3.5z'/></svg>") center/contain no-repeat; }
+.whoami-help:is(:hover, :focus-visible), .whoami-help.active { color: var(--text); }
+.whoami-help.active { font-weight: 600; }
+.whoami-help.active::before { opacity: 1; background: var(--accent); }
+.help-card { padding: 16px; }
+.help-video { display: block; width: 100%; max-height: calc(100vh - 190px); background: #fafafa; border-radius: 8px; }
+.help-sub { margin: 10px 0 0; }
+
+/* ==== Таблица задач внутри протокола (решение владелицы 18.10.2026, п. 2–3) ====
+   Шапка — не тёмная полоса реестра, а как подзаголовок раздела протокола (`.doc-protocol > .doc-heading`): светлая заливка
+   #f3f2fb, текст #4b46a3, черта слева 3 px #6863bf, скругление справа. Только таблицы документа протокола (страница встречи
+   и «Подготовка»); реестр, «Команда» и прочие таблицы — прежнее единое правило графита. Размеры шрифта и межстрочный не
+   меняются. Значок «new» — задача этой встречи в едином списке: маленькая плашка в тон акцента, размер служебной строки. */
+#main .doc-protocol table.doc-table thead th, .doc-protocol table.doc-table thead th {
+  background: #f3f2fb !important; color: #4b46a3 !important; border-radius: 0 !important; }
+#main .doc-protocol table.doc-table thead th:first-child, .doc-protocol table.doc-table thead th:first-child {
+  border-left: 3px solid #6863bf !important; }
+#main .doc-protocol table.doc-table thead th:last-child, .doc-protocol table.doc-table thead th:last-child {
+  border-radius: 0 8px 8px 0 !important; }
+.doc-new { display: inline-block; margin: 0 6px 0 0; padding: 0 5px; border-radius: 6px; background: #f3f2fb; color: #4b46a3;
+  font-size: 13.5px; font-weight: 600; font-style: normal; line-height: 18px; vertical-align: 1px; cursor: help; }
+
+/* «Актуализировать задачи из реестра» (решение владелицы 20.10.2026, по образцу «Экрана встречи», одинаково с Планёркой): поиск —
+   главным на плашке (первым, крупнее, во всю свободную длину; те же 42 px и 16,5, что у поиска Экрана — `.live-views .scr-search`),
+   за ним «Сбросить» и «Искать везде», виды — выпадающим списком (`.live-view-select`), «i» и «Завершённые и снятые» — справа;
+   плашки отбора — строкой ниже (`.live-chips`). Цветов не добавлено. */
+.reg-top.reg-top-poisk { display: block; padding: 4px 0 6px; }
+.reg-top-poisk .live-views { gap: 4px 18px; }
+.reg-top-poisk .reg-archive { margin-left: auto; }
+.reg-top-poisk .search-reset-link { margin-left: 0; }
+#reg-chips { margin: 0 0 8px; }
+@media (max-width: 700px) { .reg-top-poisk .scr-search { flex-basis: 100%; } .reg-top-poisk .reg-archive { margin-left: 0; } }
+/* Пометка «под вопросом» у задачи в «Все в работе» (решение владелицы 20.10.2026, как в Планёрке): точка и слово приглушённым
+   цветом, без новых цветов */
+.uq-label { margin-left: 4px; font-size: .9em; color: var(--text-muted); white-space: nowrap; }
+
+/* Договорённости: отборы в одну строку (п. 4 замечаний владелицы 21.10.2026) — те же числа, что у Планёрки
+   (#agreements-filters, line.css). При 1280 поиск с основой 260 px уходил на вторую строку. */
+#agr-filter { flex-wrap: nowrap; align-items: center; }
+#agr-filter select { width: auto; max-width: 180px; flex: 0 1 auto; min-width: 0; }   /* фильтр проекта — общий компонент с Планёркой (25.10.2026) */
+/* Фильтр проекта — по ширине содержимого, без обрезки (дефекты экранов перед видео 25.10.2026, п. 5): предел 180 px резал
+   «Весь проект Завод «Ве…» около 20-го знака; ужимается поиск (min 160 px), на узком экране строка переносится. */
+#agr-filter select.project-filter { max-width: none; flex: 0 0 auto; }
+#agr-filter label { display: inline-flex; align-items: center; gap: 6px; white-space: nowrap; flex: 0 0 auto; }
+#agr-filter #agr-q { flex: 1 1 180px !important; min-width: 160px; }
+#agr-filter input[type="date"] { width: 140px !important; }
+#agr-filter .search-reset-link { flex: 0 0 auto; white-space: nowrap; }
+@media (max-width: 900px) { #agr-filter { flex-wrap: wrap; } }
+
+/* «Скачать .docx» и «Правка» — ссылками-кнопками в ряду у заголовка (п. 1 замечаний владелицы 21.10.2026) */
+a.mt-btn { text-decoration: none; }
+
+/* «Скорость распознавания» — первым блоком «Мониторинга», акцентом (п. 6 замечаний владелицы 21.10.2026); правила одни в
+   обеих системах, цвет — акцент своей системы */
+.speed-card { border-left: 3px solid var(--accent) !important; }
+.speed-card .speed-h { margin: 0 0 4px; font-size: 16px; }
+.speed-sub, .speed-none { color: var(--text-muted); font-size: 13px; margin: 0 0 10px; }
+.speed-table { width: 100%; border-collapse: collapse; font-size: 14px; }
+.speed-table th { text-align: left; padding: 6px 8px; }   /* шапка — как у таблиц своей системы */
+.speed-table td { padding: 7px 8px; border-bottom: 1px solid var(--border); vertical-align: top; font-variant-numeric: tabular-nums; }
+.speed-table td.speed-acc { color: var(--accent); font-weight: 600; }
+.speed-file { display: block; color: var(--text-muted); font-size: 12px; font-weight: 400; }
+@media (max-width: 900px) { .speed-table { display: block; overflow-x: auto; } }
+
+/* === Наведение и курсор — решение владелицы 17.10.2026 (по снимку протокола Планёрки 16.10) =========================
+   Всё, что нажимается, при наведении чуть выделяется, в приглушённой палитре: текстовые ссылки и кнопки-ссылки —
+   подчёркиванием цвета текста (бледное подчёркивание темнеет); вкладки и плашки шапки — серой чертой снизу; пункты меню
+   слева и кнопки в рамке — лёгким серым тоном фона; кнопки с подложкой цвета акцента — подложкой на тон темнее
+   (--tint-hover задан в начале файла: у каждой системы свой акцент). Те же признаки — на фокусе с клавиатуры
+   (:focus-visible). Размеры, отступы и шрифт не меняются — только цвет, черта и тон, поэтому ничего не «прыгает».
+   Активная вкладка остаётся как есть: у неё уже черта акцента.
+   Курсор — рука у всего нажимаемого. Правило через :where() — нулевой вес: заполняет пробелы (у <summary> своего курсора
+   нет, над текстом браузер ставил текстовый I-образный — «Точечная правка» в панели «Ещё» выглядела так, будто курсор
+   пропал), но не перебивает намеренные cursor: default / help / not-allowed. Блок одинаковый в обеих системах (ERP
+   theme-line.css, Планёрка line.css) — сторож test_navedenie_kursor_1710. */
+:root { --hover-tone: #f4f4f5; --hover-line: #a1a1aa; }
+
+:where(a[href], button, summary, select, [role="button"], [role="tab"], label:has(> input[type="checkbox"]),
+  label:has(> input[type="radio"])) { cursor: pointer; }
+:where(button:disabled, select:disabled, [aria-disabled="true"]) { cursor: not-allowed; }
+
+/* Текстовые ссылки и кнопки-ссылки: подчёркивание */
+:is(a[href]:not(.btn, .btn-sm, .nav-item, .pill, .doc-tab, .chip, .qa-btn, .seg-tab, .service-tab, .sys-tabs a, .ri),
+  .btn-link, .linkbtn, button.link, summary, .access-toggle, .reg-col, th button, .views-archive, .path-mini, .mt-path,
+  .search-reset-link, #proto-list .proto-date):is(:hover, :focus-visible) {
+  text-decoration-line: underline; text-decoration-color: currentColor; text-underline-offset: 3px; }
+
+/* Вкладки и плашки шапки: серая черта снизу */
+:is(.pill, .live-kpi, .mt-btn, .doc-tab):not(.pill-on, .on, .doc-tab-on, [aria-expanded="true"]):is(:hover, :focus-visible) {
+  box-shadow: inset 0 -1.5px 0 var(--hover-line); color: var(--text); }
+:is(.views button, .reg-views button, .sys-tabs a):not(.on, .views-archive):is(:hover, :focus-visible) {
+  border-bottom-color: var(--hover-line); color: var(--text); }
+
+/* Пункты меню слева: лёгкий тон фона */
+.sidebar .nav-item:is(:hover, :focus-visible) { background: var(--hover-tone); border-radius: 6px; }
+
+/* Кнопки в рамке и значки-кнопки: лёгкий тон фона (у главной кнопки — прежняя заливка цветом текста) */
+:is(.btn, .btn-sm, .btn-icon, .access-toggle):not(.btn-primary, .btn-warning, .btn-danger, .btn-link):is(:hover, :focus-visible) {
+  background: var(--hover-tone); }
+/* Кнопка поиска «⏎» с подложкой цвета акцента — подложка на тон темнее */
+.search-submit:is(:hover, :focus-visible) { background: var(--tint-hover) !important; }
+
+/* ERP к блоку наведения: кнопки с подложкой цвета акцента в реестре и «Команде» заданы правилами с #id, общий блок их не
+   перебивает — подложка на тон темнее здесь (в Планёрке то же было и раньше: .row-acts .ri:hover и .task-note-row:hover,
+   #dbe5df). Строка ленты встреч при наведении — тоном акцента, как .feed-row:hover Планёрки: прежний #fafafa на белом не
+   был виден. */
+#reg-list .task-table :is(.btn-icon, .btn-sm.task-note, .btn-sm.task-revert):is(:hover, :focus-visible),
+#main:has(#users-list) :is(.team-table .btn-icon, .more-row .btn-sm, .list-more .btn-sm):is(:hover, :focus-visible) {
+  background: var(--tint-hover); }
+#proto-list .proto-row:hover { background: #f5f5fc; }
+
+/* --- Экран входа (решения владелицы 18.10.2026) ----------------------------------------------------------
+   Карточка входа поверх заставки-каркаса: шапка, левое меню, пустые блоки без данных (до входа данные не
+   грузятся). Каркас слегка размыт, вуаль над ним непрозрачна на 60 % (--login-veil), карточка чёткая.
+   Только общие токены (--bg, --surface, --border, --text, --text-muted, --accent, --danger, --radius) — они
+   есть и в теме ERP: тот же блок без правок лежит в theme-line.css ERP (перенос 19.10.2026, близнец до байта). */
+:root { --login-veil: 60%; }   /* владелица 18.10.2026: было 80 % — каркас должен угадываться */
+.login-screen { position: fixed; inset: 0; z-index: 1000; display: flex; align-items: center; justify-content: center;
+  padding: 16px; background: var(--bg); overflow: auto; }
+.login-skeleton { position: absolute; inset: 0; display: grid; grid-template-columns: 260px 1fr; filter: blur(2px);
+  pointer-events: none; }
+.lsk-side { border-right: 1px solid var(--border); padding: 32px 16px; display: flex; flex-direction: column; gap: 14px; }
+.lsk-main { padding: 36px 56px; display: flex; flex-direction: column; gap: 14px; }
+.lsk-bar { display: block; height: 12px; border-radius: 6px; background: var(--border); }
+.lsk-brand { width: 70%; height: 18px; } .lsk-brand-sub { width: 85%; margin-bottom: 18px; }
+.lsk-nav { width: 80%; } .lsk-gap { margin-top: 18px; }
+.lsk-h1 { width: 38%; height: 22px; } .lsk-sub { width: 55%; margin-bottom: 10px; }
+.lsk-block { border: 1px solid var(--border); border-radius: var(--radius); padding: 20px; display: flex;
+  flex-direction: column; gap: 14px; }
+.lsk-row { width: 100%; } .lsk-row:nth-child(2n) { width: 82%; } .lsk-row:nth-child(3n) { width: 64%; }
+.lsk-block-low { opacity: .7; }
+.login-veil { position: absolute; inset: 0; background: color-mix(in srgb, var(--bg) var(--login-veil), transparent); }
+.login-card { position: relative; width: 420px; max-width: 100%; background: var(--surface); border: 1px solid var(--border);
+  border-radius: var(--radius); padding: 28px 28px 24px; box-shadow: 0 6px 24px color-mix(in srgb, var(--text) 12%, transparent); }
+.login-card h1 { margin: 0 0 14px; }
+.login-tabs { display: flex; gap: 18px; border-bottom: 1px solid var(--border); margin-bottom: 16px; }
+.login-tab { background: none; border: 0; padding: 6px 0; margin-bottom: -1px; cursor: pointer; color: var(--text-muted);
+  font: inherit; border-bottom: 2px solid transparent; border-radius: 0; }
+.login-tab:is(:hover, :focus-visible) { background: none; color: var(--text); }
+.login-tab.is-on { color: var(--text); border-bottom-color: var(--accent); }
+.login-pane .field { margin-bottom: 12px; }
+.login-pane input[type="text"], .login-pane input[type="password"] { width: 100%; box-sizing: border-box; }
+.login-remember { display: flex; align-items: center; gap: 8px; font-weight: normal; margin: 4px 0 10px; cursor: pointer; }
+.login-error:empty { display: none; }   /* ошибка — одна строка, пустая не видна */
+.login-note { color: var(--danger); margin-bottom: 12px; }
+.login-hint { color: var(--text-muted); font-size: var(--fs-small, 13px); margin: -4px 0 8px; }
+.login-submit { width: 100%; }
+.login-hint-under { margin: 6px 0 0; }
+.login-pane input.is-empty { border-color: var(--danger); }   /* пустое обязательное поле при отправке */
+.login-people { display: flex; flex-direction: column; max-height: 260px; overflow: auto; margin-bottom: 8px; }
+.login-person { text-align: left; background: none; border: 0; border-bottom: 1px solid var(--border); border-radius: 0; padding: 8px 4px; width: 100%; justify-content: flex-start;
+  cursor: pointer; font: inherit; color: var(--text); }
+.login-person:is(:hover, :focus-visible) { color: var(--accent); }
+.login-chosen { margin-bottom: 12px; }
+.login-link { background: none; border: 0; padding: 0; color: var(--accent); cursor: pointer; font: inherit;
+  text-decoration: underline; text-underline-offset: 3px; }
+.whoami-top { color: var(--text-muted); margin: 0 0 6px; }
+@media (max-width: 720px) { .login-skeleton { grid-template-columns: 1fr; } .lsk-side { display: none; }
+  .lsk-main { padding: 24px 16px; } }
+
+/* --- Значок «показать пароль» (решение владелицы 19.10.2026) — во всех полях пароля: экран входа, первый вход, смена
+   пароля, общий пароль, подтверждение паролем. Кнопка внутри поля справа, приглушённая, на наведении и фокусе — цветом
+   текста; нажатая (пароль виден) — перечёркнутый глаз. Только общие токены, без новых цветов: блок без правок ложится в ERP. */
+.pw-wrap { position: relative; display: block; width: 100%; }
+.pw-wrap > input { width: 100%; box-sizing: border-box; padding-right: 40px; }
+.pw-eye { position: absolute; right: 4px; top: 50%; transform: translateY(-50%); width: 32px; height: 32px;
+  padding: 0 !important; border: 0 !important; background: none !important; box-shadow: none !important; min-width: 0 !important;
+  color: var(--text-muted); cursor: pointer; display: inline-flex; align-items: center; justify-content: center; border-radius: var(--radius, 6px);
+  --eye: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23000' stroke-width='1.7' stroke-linecap='round' stroke-linejoin='round'><path d='M2.5 12s3.5-6.5 9.5-6.5S21.5 12 21.5 12s-3.5 6.5-9.5 6.5S2.5 12 2.5 12z'/><circle cx='12' cy='12' r='3'/></svg>"); }
+.pw-eye::before { content: ""; width: 18px; height: 18px; background: currentColor; -webkit-mask: var(--eye) center/contain no-repeat;
+  mask: var(--eye) center/contain no-repeat; }
+.pw-eye[aria-pressed="true"] {
+  --eye: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23000' stroke-width='1.7' stroke-linecap='round' stroke-linejoin='round'><path d='M2.5 12s3.5-6.5 9.5-6.5S21.5 12 21.5 12s-3.5 6.5-9.5 6.5S2.5 12 2.5 12z'/><circle cx='12' cy='12' r='3'/><path d='M4 4l16 16'/></svg>"); }
+.pw-eye:is(:hover, :focus-visible) { color: var(--text); background: none !important; }
+.pw-eye:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+/* Служебное слово договорённости в протоколе (решение владелицы 19.10.2026, по протоколу 19.10): «решили:» /
+   «открытый вопрос:» — со строчной (пишет renderDocHtml), курсивом, приглушённым цветом из токена, не полужирным: видно,
+   что это служебное слово, а не пункт протокола. --text-muted (с 24.10.2026 как в Планёрке, см. правило контраста выше) к белому — 10,4:1.
+   Тот же вид — в Word (md_to_docx: курсив, серый системных пометок) и у Планёрки (line.css). */
+.doc-content .doc-agree-label { font-style: italic; font-weight: 400; color: var(--text-muted); }
+/* «Предложение ассистента (не решение встречи) — …» в Сводке и Дорожной карте — тем же приёмом, что «решили:» (решение
+   владелицы 19.10.2026, исключение из правила 13.10.26 «без системных пометок»): курсив, --text-muted, кегль текста. */
+.doc-content .doc-assistant { font-style: italic; font-weight: 400; color: var(--text-muted); }
+
+/* Плашка над лентой (решение владелицы 20.10.2026, как «Экран планёрки»): поиск — главным на плашке (первым, крупнее, во
+   всю свободную длину), виды — выпадающим списком. С 21.10.2026 «Экрана встречи» нет — плашку держит реестр задач; меню
+   отбора колонок ленты экрана убрано вместе с ним. */
+.live-views .scr-search { flex: 1 1 420px; max-width: none; padding: 4px 8px; }
+.live-views .scr-search input { height: 42px; font-size: 16.5px; padding: 8px 10px; }
+.live-views .live-view-select { flex: 0 0 auto; width: auto; font: inherit; font-size: 14.5px; padding: 6px 8px; border: 1px solid var(--border); border-radius: 8px; background: #fff; color: var(--text); max-width: 100%; }
+.live-views .tip { margin-left: 0; }
+.live-chips { display: flex; flex-wrap: wrap; gap: 6px; margin: 6px 0 0; }
+.live-chips[hidden] { display: none; }
+.live-col-menu { position: relative; min-width: 0; }
+@media (max-width: 700px) { .live-views .scr-search { flex-basis: 100%; } }
+
+/* --- Новый путь встречи и плана (решения владелицы 21.10.2026, «Проект нового пути») ------------------------------------
+   «План встречи»: строка действий — первой на самом верху, вне панелей: главная кнопка, «+ Добавить материал», «собран … ·
+   платно», «Есть материалы новее плана». «Подготовка встречи»: карточка «Ближайшая встреча» с одной главной кнопкой, форма
+   «Другая дата…», пометки строк. Цвета — прежние токены «Линии», новых цветов нет. */
+.plan-top { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 14px; margin: 0 0 14px; }
+/* Короткая страница подготовки (пустой план) уезжала к середине окна: строки сетки с путём слева растягивались на высоту
+   окна, и «Сформировать план встречи» оказывалась на 325 px вместо верха (замер в браузере 21.10.2026). Строки — по
+   содержимому, сверху. */
+.main.with-path { align-content: start; }
+.plan-top .plan-add { margin: 0; }
+.plan-top-note { font-size: 13.5px; color: var(--text-muted); }
+.plan-top-acc, .plan-top .plan-newer { color: var(--accent); font-weight: 500; }
+.path.path-future { padding: 8px 0; }
+.prep-nearest { display: flex; flex-wrap: wrap; align-items: center; gap: 10px 16px; padding: 16px 20px; margin: 0 0 16px; }
+.prep-nearest .prep-nearest-text { flex: 1 1 320px; min-width: 0; }
+.prep-nearest .prep-nearest-title { font-size: 17px; font-weight: 600; color: var(--text); }
+.prep-nearest .prep-nearest-sub { font-size: 13.5px; color: var(--text-muted); margin-top: 2px; }
+.prep-new { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; padding: 12px 16px; margin: 0 0 16px; }
+.prep-new[hidden] { display: none; }
+.prep-new input[type="text"] { flex: 1 1 220px; width: auto; }
+.prep-new input[type="date"] { width: 170px; }
+.prep-date-warn { flex-basis: 100%; font-size: 14px; color: var(--accent); }
+.prep-date-warn[hidden] { display: none; }
+.prep-mark { display: inline-block; font-size: 12.5px; color: var(--text-muted); border: 1px solid var(--border); border-radius: 999px; padding: 0 8px; margin-left: 6px; white-space: nowrap; }
+.prep-mark-acc { color: var(--accent); border-color: rgba(104, 99, 191, .35); }
+.prep-muted { color: var(--text-muted); }
+.prep-table td, .prep-table th { vertical-align: top; }
+.prep-table tr.prep-cancelled td { color: var(--text-muted); }
+/* Дефекты проходов 21.10.2026: Д8 — ячейка даты переносится (название и пометки — под датой), кнопки «Свести в одну» и
+   «Вернуть» не уходят за правый край при ширине до 1440 px; Д14 — ближайшая встреча выделена; Д13 — название второй встречи
+   видно в ячейке даты; Д14 — таблицы плана в узкой панели «План следующей» не наезжают на текст. */
+.prep-table td:first-child { white-space: normal; min-width: 160px; }
+.prep-table td:last-child { white-space: nowrap; }
+.prep-table .prep-label { font-weight: 500; color: var(--text); }
+.prep-table tr.prep-nearest-row td { background: rgba(104, 99, 191, .06); }
+.mt-drawer .mt-plan-link { display: inline-block; margin: 0 0 8px; }
+.mt-drawer .mt-plan table { display: block; max-width: 100%; overflow-x: auto; table-layout: auto; border-collapse: collapse; }
+.mt-drawer .mt-plan :is(td, th) { width: auto !important; min-width: 64px; padding: 4px 8px 4px 0; vertical-align: top; overflow-wrap: anywhere; }
+.nearest-line { margin: 0 0 14px; font-size: 15px; }
+
+/* MeetFlow (27.10.2026): выбор проекта над «Вы работаете как» — тем же видом, что поле «Вы работаете как» */
+.whoami-project { margin-bottom: 12px; }

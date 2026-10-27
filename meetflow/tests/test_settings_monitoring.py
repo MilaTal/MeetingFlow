@@ -360,21 +360,18 @@ def test_runs_monitoring_after_real_run(client):
 
 
 def test_ui_is_laid_out_like_erp():
-    """Перевёрнут 11.10.26 (владелец: меню и мониторинг — как в ERP): было «Мониторинг» с вкладками и экран
-    «Настройки»; стало «Параметры системы» с вкладками ERP, «Мониторинг RealTime» с папкой, обходом и автозапуском,
-    «Модели», «База голосов». Прежние адреса #settings и #monitoring ведут на новые экраны."""
-    js = (Path(__file__).resolve().parents[1] / "meetflow/web/static/app.js").read_text(encoding="utf-8")
-    html = (Path(__file__).resolve().parents[1] / "meetflow/web/static/index.html").read_text(encoding="utf-8")
+    """Владелец 11.10.26: левое меню суперадминистратора и вкладки «Параметров системы» — как в ERP. С 27.10.2026 фронт
+    MeetFlow — фронт ERP целиком: те же пункты и те же вкладки."""
+    root = Path(__file__).resolve().parents[1] / "meetflow/web/static"
+    js, nav, html = ((root / f).read_text(encoding="utf-8") for f in ("app.js", "nav.js", "index.html"))
     for route, label in (("system", "Параметры системы"), ("live", "Мониторинг RealTime"), ("models", "Модели"),
-                         ("voices", "База голосов")):
-        assert f'data-route="{route}">{label}' in html
+                         ("voices", "База голосов"), ("voice-review", "Разбор голосов")):
+        assert f'data-route="{route}" href="#{route}" hidden>{label}' in html
     assert 'data-route="settings"' not in html and 'data-route="monitoring"' not in html
-    for tab in ("Прогоны", "Расход", "Реестр решений", "Состояние базы", "Диск и доступы", "Системные сообщения",
-                "Ожидает ввода от оператора", "Пороги"):
-        assert f'"{tab}"' in js
-    for el in ('id="wf-save"', 'id="wf-int-save"', 'id="ar-toggle"', "Автозапуск Протокола", "Обход папки, секунд:"):
-        assert el in js
-    assert 'async settings() { location.replace("#live"); }' in js
+    for tab in ("Системные сообщения", "Ожидает ввода от оператора", "Прогоны", "Расход", "Состояние базы",
+                "Диск и доступы", "Настройки", "Реестр решений"):
+        assert f'label: "{tab}"' in nav
+    assert "function changeWatchFolder" in js and "renderMonitoringLive" in js
 
 
 def test_same_text_with_crlf_is_duplicate(tmp_path):

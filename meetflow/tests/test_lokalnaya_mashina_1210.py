@@ -133,11 +133,10 @@ def test_подхват_при_выключенном_автозапуске_т�
 
 
 def test_поиска_нет_на_странице_реестра():
-    js = JS.read_text(encoding="utf-8")
-    start = js.index("  async tasks() {")
-    body = js[start:js.index("\n  async ", start + 10)]
-    assert "reg-search" not in body and "data-rhint" not in body and "/search?q=" not in body
-    assert "trs.slice(1, 8)" in body                                    # предел 7 строк остаётся (09.10.26)
+    """Перевёрнут 27.10.2026: решение 12.10.26 «поиска на странице реестра нет» заменено решением владелицы 20.10.2026
+    (ERP и Планёрка): поиск — главным на плашке реестра, только по задачам (`/tasks/search`), рядом «Искать везде»."""
+    reg = (JS.parent / "registry.js").read_text(encoding="utf-8")
+    assert 'id="reg-q"' in reg and "/tasks/search?q=" in reg and "кнопкаИскатьВездеHtml()" in reg
 
 
 def test_выгрузка_расшифровки_только_нашего_распознавания(tmp_path):
@@ -214,7 +213,9 @@ def test_смена_модели_на_живой_сборке_пересобир
 
 
 def test_подсказка_о_смене_в_панели():
-    assert "Когда применится смена" in JS.read_text(encoding="utf-8")
+    """С 27.10.2026 панель «Модели» — разметка ERP: смена основной точки и откат — кнопками панели."""
+    js = JS.read_text(encoding="utf-8")
+    assert "/use" in js and "/rollback" in js and "renderModelRoutes" in js
 
 
 def test_системных_сообщений_нет_в_очереди_оператора(tmp_path):

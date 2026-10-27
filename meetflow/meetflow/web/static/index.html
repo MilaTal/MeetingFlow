@@ -1,63 +1,120 @@
 <!doctype html>
-<html lang="ru">
+<html lang="ru" data-sistema="meetflow">
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
+  <link rel="icon" href="data:,">
   <title>MeetFlow</title>
-  <link rel="stylesheet" href="styles.css?v=20261015undo">
+  <link rel="stylesheet" href="styles.css?v=20261027mf1">
+  <link rel="stylesheet" href="theme-line.css?v=20261027mf1">
+  <link rel="stylesheet" href="polotno.css?v=20261027mf1">
+  <link rel="stylesheet" href="razbor.css?v=20261027mf1">
 </head>
 <body>
-<!-- вход по логину и паролю — как в Проекте ERP; показывается, только когда вход включён -->
-<div id="login-screen" class="login-screen" hidden>
-  <form class="card stack login-card" id="login-form">
-    <h1 style="margin:0">Вход</h1>
-    <label class="sub">Логин<input type="text" id="login-name" autocomplete="username" autocapitalize="none" spellcheck="false"></label>
-    <label class="sub">Пароль<input type="password" id="login-password" autocomplete="current-password"></label>
-    <div id="login-error" class="overdue" role="alert" hidden></div>
-    <button class="btn btn-primary" type="submit">Войти</button>
-  </form>
-</div>
-<div class="layout">
-  <aside class="sidebar">
-    <div class="brand"><span id="app-title">MeetFlow</span><small id="app-subtitle"></small></div>
-    <nav class="nav" id="nav-main">
-      <a class="main" href="#tasks" data-route="tasks">Реестр задач</a>
-      <a class="main" href="#meetings" data-route="meetings">Встречи</a>
-      <a class="main" href="#prep" data-route="prep">Подготовка встречи</a>
-      <a class="main" href="#agreements" data-route="agreements">Договорённости</a>
-      <a class="main" href="#roadmap" data-route="roadmap">Дорожная карта</a>
-      <a class="main" href="#search" data-route="search">Поиск по проекту</a>
-    </nav>
-    <div class="nav-sep"></div>
-    <nav class="nav" id="nav-service">
-      <a href="#projects" data-route="projects" data-admin>Проекты</a>
-      <a href="#team" data-route="team">Команда</a>
-      <a href="#help" data-route="help">Как пользоваться</a>
-      <a href="#cards" data-route="cards" data-admin>Конфликты</a>
-    </nav>
-    <!-- служебные разделы супер-администратора — как в Проекте ERP (владелец 11.10.26) -->
-    <div class="nav-sep" data-super></div>
-    <nav class="nav" data-super>
-      <a href="#system" data-route="system">Параметры системы<span id="awaiting-badge"></span></a>
-      <a href="#live" data-route="live">Мониторинг RealTime</a>
-      <a href="#models" data-route="models">Модели</a>
-      <a href="#voices" data-route="voices">База голосов</a>
-      <a href="#voice-review" data-route="voice-review">Разбор голосов</a>
-      <a href="#teamshared" data-route="teamshared">Общая команда</a>
-      <a href="#design" data-route="design">Оформление</a>
-    </nav>
-    <div class="whoami">
-      <label>Проект <select id="project"></select></label>
-      <div id="test-identity">
-        <label>Вы работаете как <select id="role"></select></label>
-        <input id="username" placeholder="ФИО (для своих задач)">
+  <!-- Экран входа рисует app.js (renderLoginScreen) поверх заставки-каркаса без данных (решение владелицы 18.10.2026,
+       перенос из Планёрки 19.10.2026): прежняя статичная форма входа снята. -->
+  <div class="app-shell" id="app-shell" hidden>
+    <nav class="sidebar">
+      <div>
+        <div class="brand">MeetFlow</div>
+        <div class="brand-sub">Прогресс проекта</div>
       </div>
-      <div id="auth-identity" class="sub" hidden></div>
-      <button class="btn btn-ghost" id="mode-switch" type="button" data-super hidden></button>
-    </div>
-  </aside>
-  <main class="main" id="main" tabindex="-1"></main>
-</div>
-<script src="app.js?v=20261027all3"></script>
+      <button class="nav-toggle" id="nav-toggle" type="button" aria-expanded="false" aria-controls="nav">Меню</button>
+      <div class="nav" id="nav">
+        <!-- Навигация — вариант Б прототипа 1 (владелец 13.10.26): главные пункты; ниже черты — администратору.
+             Порядок и подписи главных пунктов — решение владелицы 18.10.2026 («как и для Планёрки — та же последовательность
+             и логика»): у Планёрки «Экран планёрки» · «Список планёрок» · «Актуализировать задачи из реестра». С 19.10.2026
+             (решение владелицы: ERP стартует, первым — «Экран встречи») у ERP тоже есть экран живой встречи — первым пунктом:
+             «Экран встречи» (#screen — #live в ERP занят «Мониторингом RealTime» суперадминистратора) · «Встречи по проекту»
+             (#meetings) · «Актуализировать задачи из реестра» (#dashboard — тот же по смыслу экран, что #registry Планёрки) ·
+             «Статус проекта» (#status) — последним, после аналогов главных пунктов Планёрки: его видят все роли, а блок
+             администратора — только администраторам.
+             С 21.10.2026 (решение владелицы, «да, все делать»): «Экран встречи» убран — пункт и маршрут #screen (старые ссылки
+             ведут на «Встречи по проекту» и страницу встречи); «Подготовка встречи» — главным пунктом рядом со «Встречами по
+             проекту», видят администраторы, как прежде (`nav-prep`).
+             С 21.10.2026 (решение владелицы: «будут все пользователи делать») «Подготовка встречи» — первым пунктом и всем
+             ролям: завести встречу, приложить файлы, собрать план и протокол может каждый; отмена встречи и «Свести в одну» —
+             администраторам (сервер).
+             С 25.10.2026 (решение владелицы) «Подготовка встречи» — пунктом блока под чертой, первым, рядом с «Командой» и
+             «Конфликтами»; видят её по-прежнему все роли (права не сужены, сменилось только место; черта блока видна всем,
+             у кого в блоке есть пункт). Маршрут #prep и экран — как были. -->
+        <a class="nav-item nav-main" data-route="meetings" href="#meetings"><span class="nav-ico" aria-hidden="true"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M6 3h9l4 4v14H6z"/><path d="M9 11h7M9 15h7"/></svg></span>Встречи по проекту</a>
+        <a class="nav-item nav-main" data-route="dashboard" href="#dashboard"><span class="nav-ico" aria-hidden="true"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M4 7l2 2 3-3M4 15l2 2 3-3M12 8h8M12 16h8"/></svg></span>Актуализировать задачи из реестра</a>
+        <!-- «Договорённости» — в блоке пользователей, сразу за реестром задач, всем ролям (решение владелицы 20.10.2026, п. 3;
+             с 19.10.2026 стояли в блоке администратора). В режиме «в тени» не-администратор видит пустой реестр с пояснением. -->
+        <a class="nav-item nav-main" data-route="agreements" id="nav-agreements" href="#agreements"><span class="nav-ico" aria-hidden="true"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M5 5h14v10l-4 4H5z"/><path d="M15 19v-4h4"/></svg></span>Договорённости</a>
+        <!-- «Истории проектов» нет с 25.10.2026 (решение владелицы: убрать в обеих системах; архив по проекту системы ERP не нужен) -->
+        <a class="nav-item nav-main" data-route="status" href="#status"><span class="nav-ico" aria-hidden="true"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M4 19h16"/><path d="M5 15l4-5 4 3 6-7"/></svg></span>Статус проекта</a>
+        <!-- Три блока по ролям, как в старой версии (владелец 14.10.26, перенос из Планёрки 79120fc): для всех; администратору;
+             супер-администратору. Блок супер-администратора — «Параметры системы», «Мониторинг RealTime», «Модели», «База голосов»
+             слева, остальное служебное — горизонтальными вкладками «Параметров системы». Изменён только вид. Подписи блоков
+             («Администратор», «Супер-администратор») сняты владельцем 14.10.26 — блоки разделяет только черта. -->
+        <hr class="nav-hr" id="nav-admin-hr" hidden>
+        <a class="nav-item nav-service" data-route="prep" id="nav-prep" href="#prep">Подготовка встречи</a>
+        <a class="nav-item nav-service" data-route="team" href="#team">Команда</a>
+        <!-- «Разбор» — одна вкладка вместо «Конфликтов», «Под вопросом» и «Возможных поручений» (решение владелицы 25.10.2026):
+             одно число — всё открытое в «Разборе»; виды — полосой внутри страницы. Прежние адреса ведут сюда с нужным видом. -->
+        <a class="nav-item nav-service" id="nav-razbor" data-route="razbor" href="#razbor">Разбор<span id="razbor-badge"></span></a>
+        <hr class="nav-hr" id="nav-sa-hr" hidden>
+        <a class="nav-item nav-service" id="nav-system" data-route="system" href="#system" hidden>Параметры системы<span id="system-badge"></span></a>
+        <a class="nav-item nav-service" id="nav-live" data-route="live" href="#live" hidden>Мониторинг RealTime</a>
+        <a class="nav-item nav-service" id="nav-models" data-route="models" href="#models" hidden>Модели</a>
+        <a class="nav-item nav-service" id="nav-voices" data-route="voices" href="#voices" hidden>База голосов</a>
+        <a class="nav-item nav-service" id="nav-voice-review" data-route="voice-review" href="#voice-review" hidden>Разбор голосов<span id="voice-review-badge"></span></a>
+      </div>
+      <!-- Блок «Вы работаете как» — сразу под блоком суперадминистратора, за чертой (решение владелицы 18.10.2026, зеркально
+           Планёрке): прежде он прижимался к низу левой колонки и на длинной странице уезжал в её конец. Колонка теперь
+           прилипает к окну (theme-line.css, «Меню 18.10»), поэтому блок виден при любой прокрутке. Главные пункты ERP
+           («Встречи по проекту», «Актуализировать задачи из реестра», «Статус проекта») — см. пояснение над меню. -->
+      <div class="whoami" id="user-box">
+        <!-- Проект — многопроектность MeetFlow, одно из двух разрешённых отличий от ERP (27.10.2026): «Все проекты» и
+             проекты по имени; шапка вверху — «Проект — название» или «Все проекты компании» -->
+        <div class="whoami-project">
+          <label for="project-select">Проект</label>
+          <select id="project-select"><option value="0">Все проекты</option></select>
+        </div>
+        <div id="whoami-testing" hidden>
+          <label for="whoami-select">Вы работаете как</label>
+          <select id="whoami-select"></select>
+          <div class="mode-line"><b>Тестовый режим</b> — вход по ФИО, без пароля</div>
+          <button class="btn-sm mode-switch" id="mode-switch-testing" type="button" hidden>Включить рабочий режим (вход по логину)</button>
+        </div>
+        <div id="whoami-auth" hidden>
+          <div class="whoami-name" id="user-name"></div>
+          <div class="whoami-role" id="user-role"></div>
+          <div class="hstack">
+            <button class="btn-sm" id="change-password-btn" type="button">Сменить пароль</button>
+            <button class="btn-sm" id="logout-btn" type="button">Выйти</button>
+          </div>
+          <div class="mode-line"><b>Рабочий режим</b> — вход по логину и паролю</div>
+          <button class="btn-sm mode-switch" id="mode-switch-auth" type="button" hidden>Переключить на тестовый режим</button>
+        </div>
+        <!-- «Как пользоваться» — в самом низу блока пользователя, виден всем ролям в обоих режимах (Е17, 20.10.2026; образец —
+             Планёрка, решение владелицы 18.10.2026): открывает обучающее видео ERP для участника во встроенном проигрывателе
+             (#help, media/kak_polzovatsya.mp4) -->
+        <a class="whoami-help" id="help-link" href="#help">Как пользоваться</a>
+      </div>
+    </nav>
+    <main class="main">
+      <!-- «Вы — ФИО (роль)» после входа (решение владелицы 18.10.2026); в тестовом режиме скрыто -->
+      <div id="whoami-top" class="whoami-top" hidden></div>
+      <div id="staleness-banner"></div>
+      <div id="main"></div>
+    </main>
+  </div>
+  <script src="app.js?v=20261027mf1"></script>
+  <script src="polotno.js?v=20261027mf1"></script>
+  <script src="registry.js?v=20261027mf1"></script>
+  <script src="nav.js?v=20261027mf1"></script>
+  <script src="meeting.js?v=20261027mf1"></script>
+  <script src="prep.js?v=20261027mf1"></script>
+  <script src="conflicts.js?v=20261027mf1"></script>
+  <script src="razbor.js?v=20261027mf1"></script>
+  <!-- team.js (надстройка «Команды» прототипа 13.10.26) снят: «Команда» — 1 в 1 как в старой ERP (владелец 13.10.26) -->
+  <script src="system.js?v=20261027mf1"></script>
+  <!-- тема планёрки: карточка «Темы планёрок» и «Тема планёрки» на подготовке (24.10.2026), близнец -->
+  <script src="tema.js?v=20261027mf1"></script>
+  <!-- «оперативная» — пометка задачи в реестре одним нажатием и подсказка (26.10.2026), близнец -->
+  <script src="operativnaya.js?v=20261027mf1"></script>
 </body>
 </html>

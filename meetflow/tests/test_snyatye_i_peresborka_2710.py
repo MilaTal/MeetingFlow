@@ -72,9 +72,12 @@ def test_без_снятых_хранимое_не_меняется():
 
 
 def test_экран_без_вкладки_снятых():
-    js = (Path(__file__).resolve().parents[1] / "meetflow/web/static/app.js").read_text(encoding="utf-8")
-    assert 'dropped: "Снятые"' not in js and '["active", "done"]' in js
-    assert "data-row=" in js and "restoreScroll" in js, "прокрутка на месте по строке действия"
+    """Снятые не показываются нигде (26.10.2026) — с 27.10.2026 реестр ERP 1 в 1: «Завершённые» — только выполненные,
+    вида «Снятые» нет; прокрутка на месте — по строке действия (`запомнитьПрокрутку`)."""
+    root = Path(__file__).resolve().parents[1] / "meetflow/web/static"
+    reg, js = (root / "registry.js").read_text(encoding="utf-8"), (root / "app.js").read_text(encoding="utf-8")
+    assert 'dropped: "Снятые"' not in reg and 'return t.status === "done" ? "выполнена" : "";' in reg
+    assert "function запомнитьПрокрутку()" in js and "data-task-id" in js
 
 
 # --- пересборка ------------------------------------------------------------------------------------------------------
