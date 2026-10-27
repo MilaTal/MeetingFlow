@@ -397,14 +397,12 @@ def test_points_api_is_super_admin_only(setup, tmp_path, monkeypatch):
 
 
 def test_models_is_a_left_menu_item():
-    """Владелец 09.10.26: «Модели» — отдельный пункт левой панели; старая вкладка мониторинга ведёт туда."""
+    """Владелец 09.10.26: «Модели» — отдельным пунктом слева суперадминистратору. С 27.10.2026 — разметка ERP 1 в 1."""
     from pathlib import Path
     static = Path(lr.__file__).resolve().parents[1] / "web" / "static"
     js, html = (static / "app.js").read_text(encoding="utf-8"), (static / "index.html").read_text(encoding="utf-8")
-    assert '<a href="#models" data-route="models">Модели</a>' in html
-    # 11.10.26: общий рендер принимает заголовок; прежний «Мониторинг» ведёт на «Модели» или «Мониторинг RealTime»
-    assert 'async models() { return routes.monitoring("models", true, "Модели"); }' in js
-    assert 'location.replace(tab === "models" ? "#models" : "#live")' in js
+    assert 'id="nav-models" data-route="models" href="#models" hidden>Модели</a>' in html
+    assert "models: renderModelsPage," in js and '"nav-models"' in js
 
 
 def test_switch_seen_even_with_same_mtime_and_size(setup):

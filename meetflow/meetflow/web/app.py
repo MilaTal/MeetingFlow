@@ -1563,9 +1563,19 @@ def create_app(theme_name: str | None = None, db_path: str | None = None, journa
                 rows.append(_row(f"Папка-приёмник · {p['name']}", "нет", f"{st['folder']} — не найдена"))
             elif not st["worker"]:
                 rows.append(_row(f"Папка-приёмник · {p['name']}", "нет", f"{st['folder']} — фоновый забор не запущен"))
+            elif st.get("stalled") and st.get("scan_in_progress"):
+                rows.append(_row(f"Папка-приёмник · {p['name']}", "нет",
+                                 f"{st['folder']} — проход стоит: {st['scan_step']}"
+                                 + (f" «{st['current_file']}»" if st.get("current_file") else "")
+                                 + f", без движения {st['step_seconds'] // 60} мин"))
             elif st.get("stalled"):
                 rows.append(_row(f"Папка-приёмник · {p['name']}", "нет",
                                  f"{st['folder']} — поток завис: проходов нет дольше трёх интервалов"))
+            elif st.get("scan_in_progress"):
+                rows.append(_row(f"Папка-приёмник · {p['name']}", "живо",
+                                 f"{st['folder']} · идёт проход с {datetime.fromisoformat(st['scan_started_at']).strftime('%d.%m.%Y %H:%M')}: {st['scan_step']}"
+                                 + (f" «{st['current_file']}»" if st.get("current_file") else "")
+                                 + f" · шаг идёт {st['step_seconds'] // 60} мин"))
             else:
                 rows.append(_row(f"Папка-приёмник · {p['name']}", "живо",
                                  f"{st['folder']} · раз в {st['interval']} с · последний проход {last_at} · "
@@ -1766,6 +1776,11 @@ def create_app(theme_name: str | None = None, db_path: str | None = None, journa
                     pipe.cards.open(None, "technical", f"Порог изменён: {k}", {"было": old, "стало": v, "кто": by})
         return get_thresholds(u)
 
+    # Фронт — фронт Проекта ERP целиком (задание владелицы 27.10.2026 «все окна и каждое действие 1 в 1»); его адреса
+    # (`/meetings`, `/tasks`, `/users` …) отвечает слой web/erp поверх ядра и базы MeetFlow
+    from . import erp
+    erp.mount(app, store=store, pipe=pipe, theme=theme, accounts=accounts, queue=queue, intake=intake, backups=backups,
+              journal=journal, app_dir=app_dir)
     app.mount("/", StaticFiles(directory=STATIC, html=True), name="static")
     return app
 

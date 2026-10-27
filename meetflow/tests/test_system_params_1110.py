@@ -113,6 +113,55 @@ def test_stalled_folder_is_reported(client, tmp_path, monkeypatch):
     assert rows["Папка-приёмник · Пилот"]["state"] == "нет" and "завис" in rows["Папка-приёмник · Пилот"]["detail"]
 
 
+
+def test_long_pass_in_progress_is_not_stalled_2710(client, tmp_path, monkeypatch):
+    """27.10.2026: две записи в папке — проход идёт долго (распознавание, сборка); время прохода пишется в конце,
+    и экран писал «поток завис». Идущий проход с пульсом — «живо, идёт проход», зависший шаг — «проход стоит»."""
+    import time as _t
+    from meetflow.core import intake as intake_mod
+    svc = client.app.state.intake
+    d = tmp_path / "in"
+    d.mkdir()
+    svc.s.set_setting("watch_folder", str(d), client.pid)
+    old = (datetime.now() - timedelta(hours=2)).strftime("%Y-%m-%dT%H:%M:%S")
+    svc.s.set_setting("watch_last_scan", {"at": old, "status": "ok"}, client.pid)
+    monkeypatch.setattr(type(svc), "running", property(lambda self: True))
+    svc._scanning[client.pid] = {"started": old, "step": "распознавание записи", "file": "Встреча 15.10.2026.m4a",
+                                 "pulse": _t.monotonic() - 600}
+    st = svc.state(client.pid)
+    assert st["scan_in_progress"] and not st["stalled"]
+    rows = {r["name"]: r for r in client.get("/api/monitoring/live", headers=SUPER).json()["services"]}
+    row = rows["Папка-приёмник · Пилот"]
+    assert row["state"] == "живо" and "идёт проход" in row["detail"] and "распознавание записи" in row["detail"]
+    assert "завис" not in row["detail"]
+    svc._scanning[client.pid]["pulse"] = _t.monotonic() - max(3 * svc.interval(client.pid), intake_mod.STALL_STEP_SEC) - 5
+    rows = {r["name"]: r for r in client.get("/api/monitoring/live", headers=SUPER).json()["services"]}
+    row = rows["Папка-приёмник · Пилот"]
+    assert row["state"] == "нет" and "проход стоит: распознавание записи" in row["detail"]
+
+
+def test_pass_marks_step_and_clears_after_2710(client, tmp_path):
+    svc = client.app.state.intake
+    d = tmp_path / "in"
+    d.mkdir()
+    (d / "Встреча 15.10.2026.txt").write_text(TRANSCRIPT, encoding="utf-8")
+    svc.s.set_setting("watch_folder", str(d), client.pid)
+    seen = []
+    real = svc.pipe.ingest
+
+    def spy(*a, **k):
+        seen.append(dict(svc._scanning.get(client.pid) or {}))
+        return real(*a, **k)
+
+    svc.pipe.ingest = spy
+    try:
+        svc.scan_project(client.pid)       # первый проход — файл «оседает»
+        svc.scan_project(client.pid)
+    finally:
+        svc.pipe.ingest = real
+    assert seen and seen[0]["step"] == "приём файла" and seen[0]["file"] == "Встреча 15.10.2026.txt"
+    assert client.pid not in svc._scanning and not svc.state(client.pid)["scan_in_progress"]
+
 # ---------------------------------------------------------------- Параметры системы
 def test_system_messages_close_one_and_all_and_expire(client):
     cards = client.app.state.pipe.cards

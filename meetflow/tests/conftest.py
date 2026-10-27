@@ -73,3 +73,12 @@ def make_pipe(theme, store):
     def _make(gen=None, ver=None, th=None):
         return MeetingPipeline(th or theme, store, default_registry(), gen or MockLLM(), ver or MockLLM())
     return _make
+
+
+@pytest.fixture(autouse=True)
+def _no_real_shared_bases(monkeypatch):
+    """Тесты не видят настоящую общую «Команду» и базу голосов машины (27.10.2026): при заданных VOICE_BASE_PATH или
+    TEAM_SHARED_PATH люди общей «Команды» попадали в «Команду» проекта, и проверки ввода человека видели чужие записи.
+    Тест, которому база нужна, задаёт её сам (`monkeypatch.setenv`)."""
+    monkeypatch.delenv("VOICE_BASE_PATH", raising=False)
+    monkeypatch.delenv("TEAM_SHARED_PATH", raising=False)

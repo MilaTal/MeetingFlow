@@ -33,20 +33,24 @@ def token(body: str, name: str) -> str:
 
 @pytest.mark.parametrize("name", sorted(PALETTES))
 def test_palette_in_css_and_ui(name):
-    block(name)
-    assert f"{name}:" in JS, f"палитры {name} нет на экране «Оформление»"
+    """Перевёрнут 27.10.2026 (экраны ERP 1 в 1): фронт MeetFlow — фронт ERP, светлая тема ERP одна; экрана «Оформление»
+    и CSS-блоков палитр больше нет, палитры остаются только в теме."""
+    assert f'[data-palette="{name}"]' not in CSS
+    assert "data-palette" not in JS and "#design" not in JS
 
 
 @pytest.mark.parametrize("name", sorted(PALETTES))
 def test_white_on_accent_aa(name):
-    b = block(name)
-    assert contrast("#ffffff", token(b, "accent-fill")) >= 4.5
-    assert contrast(token(b, "accent"), "#fafafa") >= 4.5   # ссылки на фоне страницы
+    """Перевёрнут 27.10.2026: контраст считается по акценту светлой темы ERP — белое на акценте и акцент на фоне ≥ 4,5."""
+    root = re.search(r":root\s*\{([^}]*)\}", CSS).group(1)
+    assert contrast("#ffffff", token(root, "accent")) >= 4.5
+    assert contrast(token(root, "accent"), token(root, "bg")) >= 4.5
 
 
 @pytest.mark.parametrize("name", sorted(NEW))
 def test_new_palettes_dark_accent_aa(name):
-    assert contrast(token(block(name), "accent-dark"), "#1b1b1f") >= 4.5
+    """Перевёрнут 27.10.2026: тёмной темы нет (ERP светлая) — ни правил тёмной схемы, ни тёмного акцента в CSS."""
+    assert "prefers-color-scheme: dark" not in CSS and "--accent-dark" not in CSS
 
 
 def test_new_palettes_not_green_or_indigo():
@@ -59,5 +63,6 @@ def test_new_palettes_not_green_or_indigo():
 
 
 def test_dark_soft_tones_follow_accent():
-    """Подложки тёмной темы берутся от акцента, а не жёстко зелёные."""
-    assert "#1f2a25" not in CSS and CSS.count("color-mix(in srgb, var(--accent) 22%") == 2
+    """Перевёрнут 27.10.2026: подложки — светлой темы ERP, от её акцента (--accent-soft), тёмных подложек нет."""
+    root = re.search(r":root\s*\{([^}]*)\}", CSS).group(1)
+    assert "--accent-soft:" in root and "#1f2a25" not in CSS

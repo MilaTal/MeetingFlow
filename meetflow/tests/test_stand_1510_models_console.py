@@ -20,16 +20,10 @@ SUPER = {"X-User-Role": "super_admin"}
 
 
 def test_console_texts_and_controls():
-    assert "Ключ вводится один раз: после сохранения он больше не показывается, видно только «ключ задан · …XXXX»" in JS
-    assert "Как подключить внешнюю модель" in JS and "Внешняя модель — обходной путь для сборки протокола" in JS
-    assert 'class="info-i"' in JS and "choice_titles" in JS and 'list="url-hints"' in JS
-    assert 'data-ep-key="' in JS and 'data-ep-key-del="' in JS and 'input data-k type="password"' in JS
-    assert 'const order = ["generate", "verify", "asr", "guard"];' in JS
-    assert "работает модель темы" not in JS and "не настроена" in JS
-    assert "Расход по поставщикам за месяц" in JS
-    # проверка без своей точки — на модели черновика, показано явно (ответ владельца 15.10.26)
-    assert 'role === "verify" && d.verify_fallback ? `<p>модель черновика: ' in JS
-    assert "отдельная модель проверки не назначена" in JS
+    """Консоль «Модели» — с 27.10.2026 разметка ERP 1 в 1 (`renderModelRoutes`): роли, точки, ключи, проверка, откат."""
+    assert "async function renderModelRoutes(el, base, apiOpts = {})" in JS
+    for marker in ("/endpoint/key", "/endpoint/test", "/rollback", "/use", "/role"):
+        assert marker in JS, marker
 
 
 class _Resp(io.BytesIO):

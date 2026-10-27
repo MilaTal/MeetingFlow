@@ -16,6 +16,7 @@
 """
 from __future__ import annotations
 
+import json
 import os
 import threading
 import time
@@ -36,6 +37,14 @@ HINT_TEXT = ("# Папка-приёмник встреч\n\nСюда кладу�
 DEFAULT_INTERVAL = 900
 MIN_INTERVAL = 30
 BIG_FIRST_PASS = int(os.environ.get("MEETFLOW_WATCH_BIG_FIRST_PASS", "25"))
+# Проход, который идёт, — не «завис» (27.10.2026, как сторож обхода ERP): у прохода пульс на каждом шаге и признак
+# «идёт, шаг, файл». Зависшим считается проход без пульса дольше трёх интервалов И дольше этого порога. Отличие от
+# ERP (там 600 с): в MeetFlow распознавание записи и автосборка протокола идут внутри прохода, шаг длится десятки минут.
+STALL_STEP_SEC = int(os.environ.get("MEETFLOW_WATCH_STALL_STEP_SEC", "1800"))
+# Автосборка из папки не держит обход (27.10.2026): проход ждёт сборку не дольше этого, дальше она идёт в очереди
+# сама, а итог (остановлена по пределу → файл в «остановлено») подбирает следующий проход. Раньше проход ждал до 4 ч:
+# сборка, вставшая в очереди (повтор через 10 мин / 1 ч или зависшая), останавливала забор новых файлов.
+AUTORUN_WAIT_SEC = float(os.environ.get("MEETFLOW_WATCH_AUTORUN_WAIT_SEC", "60"))
 
 
 class IntakeError(ValueError):
@@ -102,6 +111,15 @@ class IntakeService:
         self._lock = threading.Lock()
         self._stop = threading.Event()
         self._thread: threading.Thread | None = None
+        # идущий проход по проекту: {"started": now(), "step": ..., "file": ..., "pulse": monotonic}
+        self._scanning: dict[int, dict[str, Any]] = {}
+        # сборки, поставленные проходом и не дождавшиеся: id строки очереди → (проект, встреча, файл, где файл сейчас)
+        self._pending: dict[int, tuple[int, int, str, Path | None]] = {}
+
+    def _beat(self, project_id: int, step: str, file: str | None = None) -> None:
+        cur = self._scanning.get(project_id)
+        if cur is not None:
+            cur.update(step=step, file=file, pulse=time.monotonic())
 
     # ------------------------------------------------------------ настройки
     def folder(self, project_id: int) -> str | None:
@@ -136,6 +154,35 @@ class IntakeService:
         path = self.folder(project_id)
         if not path:
             return {"status": "off"}
+        self._scanning[project_id] = {"started": now(), "step": "обход папки", "file": None,
+                                      "pulse": time.monotonic()}
+        try:
+            return self._scan(project_id, path, today)
+        finally:
+            self._scanning.pop(project_id, None)
+
+    def _after_build(self, project_id: int, mid: int, name: str, moved: Path | None, rep: dict) -> None:
+        if rep.get("status") == "stopped_by_limit" and moved and moved.exists():
+            # не «обработано»: прогон неполный, повтор — решение человека (01/11)
+            to = self._intakes[project_id].stopped(moved) if project_id in self._intakes else moved
+            self.pipe.cards.open(project_id, "stopped_by_limit",
+                                 f"Файл «{name}» обработан не полностью — лежит в «остановлено»",
+                                 {"file": str(to), "detail": rep.get("detail")}, mid)
+
+    def _check_pending(self, project_id: int) -> None:
+        """Итог сборок, которые проход поставил и не дождался: остановленная по пределу — файл в «остановлено»."""
+        for rid, (pid, mid, name, moved) in list(self._pending.items()):
+            if pid != project_id:
+                continue
+            row = self.s.get("build_queue", rid)
+            if row is None:
+                self._pending.pop(rid, None)
+            elif row["status"] in ("done", "failed"):
+                self._pending.pop(rid, None)
+                self._after_build(pid, mid, name, moved, json.loads(row["result"] or "{}"))
+
+    def _scan(self, project_id: int, path: str, today=None) -> dict[str, Any]:
+        self._check_pending(project_id)
         with self._lock:
             fi = self._intakes.get(project_id)
             if fi is None or str(fi.folder) != path:
@@ -160,6 +207,7 @@ class IntakeService:
             mid = self._meeting_for(project_id, item.meeting_date.isoformat())
             is_media = self.pipe.plugins.resolve_source(item.path.name) is not None and \
                 self.pipe.plugins.resolve_source(item.path.name).kind == "asr"
+            self._beat(project_id, "распознавание записи" if is_media else "приём файла", item.path.name)
             data = None if is_media else item.path.read_bytes()
             res = self.pipe.ingest(project_id, mid, item.path.name, data, path=item.path if is_media else None)
             st = res.get("status")
@@ -171,16 +219,18 @@ class IntakeService:
                 result["ingested" if st == "ok" else "duplicates"].append(item.path.name)
                 if st == "ok" and res.get("kind") == "transcript" and \
                         self.s.get_setting("autorun", project_id, False):
+                    self._beat(project_id, "сборка протокола", item.path.name)
                     q = getattr(self.pipe, "queue", None)       # через очередь сборок (стенд 41)
-                    rep = q.wait(q.enqueue(project_id, mid, "автозапуск из папки-приёмника")) if q else \
-                        self.pipe.run(project_id, mid).__dict__
+                    if q:
+                        rid = q.enqueue(project_id, mid, "автозапуск из папки-приёмника")
+                        rep = q.wait(rid, timeout=AUTORUN_WAIT_SEC)
+                        if rep.get("status") == "queued":       # не дождались — сборка идёт сама, итог подберём потом
+                            self._pending[rid] = (project_id, mid, item.path.name, moved)
+                    else:
+                        rep = self.pipe.run(project_id, mid).__dict__
                     result.setdefault("autorun", []).append({"meeting_id": mid, "status": rep.get("status")})
-                    if rep.get("status") == "stopped_by_limit" and moved and moved.exists():
-                        # не «обработано»: прогон неполный, повтор — решение человека (01/11)
-                        to = fi.stopped(moved)
-                        self.pipe.cards.open(project_id, "stopped_by_limit",
-                                             f"Файл «{item.path.name}» обработан не полностью — лежит в «остановлено»",
-                                             {"file": str(to), "detail": rep.get("detail")}, mid)
+                    if rep.get("status") != "queued":
+                        self._after_build(project_id, mid, item.path.name, moved, rep)
             elif st == "held":
                 result["held"].append(item.path.name)          # ждёт на месте
             else:
@@ -207,14 +257,23 @@ class IntakeService:
         info = {"folder": path, "interval": iv, "interval_source": iv_src, "worker": self.running,
                 "last_scan": last, "last_useful_scan": self.s.get_setting("watch_last_useful_scan", project_id),
                 "autorun": bool(self.s.get_setting("autorun", project_id, False))}
-        # поток жив, а проходов нет дольше трёх интервалов — «завис» (как в ERP)
+        # «завис» (как в ERP): идущий проход без пульса дольше трёх интервалов и порога шага; между проходами —
+        # последний проход старше трёх интервалов. Идущий длинный проход (распознавание, сборка) — не «завис».
         info["stalled"] = False
-        if path and self.running and last and last.get("at"):
-            try:
-                age = (datetime.now() - datetime.fromisoformat(last["at"])).total_seconds()
-                info["stalled"] = age > 3 * iv
-            except ValueError:
-                pass
+        cur = self._scanning.get(project_id)
+        info["scan_in_progress"] = cur is not None
+        if cur is not None:
+            info.update(scan_started_at=cur["started"], scan_step=cur["step"], current_file=cur["file"],
+                        step_seconds=int(time.monotonic() - cur["pulse"]))
+        if path and self.running:
+            if cur is not None:
+                info["stalled"] = info["step_seconds"] > max(3 * iv, STALL_STEP_SEC)
+            elif last and last.get("at"):
+                try:
+                    age = (datetime.now() - datetime.fromisoformat(last["at"])).total_seconds()
+                    info["stalled"] = age > 3 * iv
+                except ValueError:
+                    pass
         if path:
             p = Path(path)
             info["exists"] = p.is_dir()
