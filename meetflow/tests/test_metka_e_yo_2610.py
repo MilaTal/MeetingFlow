@@ -2,7 +2,7 @@
 import pytest
 
 from meetflow.connectors.base import ConnectorError
-from meetflow.connectors.watch_folder import check_folder_path, is_marker
+from meetflow.connectors.watch_folder import MARKER, FolderIntake, check_folder_path, is_marker
 
 
 @pytest.mark.parametrize("name", ["ЭТО ПАПКА-ПРИЕМНИК.txt", "ЭТО ПАПКА-ПРИЁМНИК.txt",
@@ -23,3 +23,20 @@ def test_чужой_файл_без_метки_отказ(tmp_path):
     (tmp_path / "отчёт.docx").write_text("x")
     with pytest.raises(ConnectorError):
         check_folder_path(tmp_path, home=tmp_path.parent / "home")
+
+
+def test_общая_папка_не_берёт_файлы_из_подпапки(tmp_path):
+    """Общая папка — только верхний уровень; подпапка проекта обходится своим проектом (27.10.2026)."""
+    (tmp_path / MARKER).write_text("")
+    sub = tmp_path / "Второй проект"
+    sub.mkdir()
+    (sub / MARKER).write_text("")
+    (sub / "Встреча 01.10.2026.txt").write_text("x")
+
+    общая = FolderIntake(tmp_path, today=None, top_level_only=True)
+    общая.scan()
+    assert общая.scan().ready == []
+
+    своя = FolderIntake(tmp_path, today=None)
+    своя.scan()
+    assert [i.path.name for i in своя.scan().ready] == ["Встреча 01.10.2026.txt"]
