@@ -171,6 +171,7 @@ class TaskGate:
 
         # 3. исполнитель назван и есть в Команде
         person, pending = None, None
+        по_голосу = False
         named = draft.assignee
         if not named and quote:
             # D5 (прогон 09.10.26): модель исполнителя не дала, а реплика обращена к отделу или человеку из
@@ -185,9 +186,15 @@ class TaskGate:
             # подпись второй строки терялась)
             named = из_подписи("\n".join(строки_цитаты) if строки_цитаты else quote, desc,
                                [p.full_name for p in self.team.people], строки_записи=source.lines)
+            по_голосу = bool(named)
         if not named:
             if self.cfg.require_assignee:
                 reasons.append("no_assignee")
+        elif по_голосу:
+            # исполнитель «я» по подписи голоса (ERP `responsible_from_voice`): говорящий своего имени не называет,
+            # поэтому проверка «имя прозвучало в цитате» к нему не применяется — имя взято из подписи строки, а её
+            # ставит только опознание голоса человеку «Команды» (28.10.2026, отчёт ЛМ a4e8836: имена 4, в протоколе 0)
+            person = self.team.find(named).person
         else:
             # D1 (прогон 09.10.26): сверяется прозвучавшее в цитате, а не имя из ответа модели
             said = self.team.said(named, quote or draft.quote or "")

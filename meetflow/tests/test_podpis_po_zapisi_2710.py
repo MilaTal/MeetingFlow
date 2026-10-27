@@ -28,3 +28,19 @@ def test_вторая_строка_окна_не_теряет_подпись():
 def test_безличная_метка_и_чужой_не_дают_исполнителя():
     assert из_подписи("[00:06:00] Хорошо, я сделаю спецификацию по шкафу.", ФОРМУЛИРОВКА, КОМАНДА,
                       строки_записи=ЗАПИСЬ) is None
+
+
+def test_ворота_не_требуют_имени_в_цитате_у_исполнителя_по_голосу(monkeypatch):
+    """28.10.2026, отчёт ЛМ a4e8836: подпись из записи нашлась (16 из 17), функция дала 4 имени, а в протоколе 0 —
+    проверка «имя прозвучало в цитате» отбрасывала исполнителя «я». Говорящий своё имя не называет (ERP
+    `responsible_from_voice`)."""
+    from meetflow.core import gates as g
+    from meetflow.core.people import Team
+    from meetflow.core.types import Person, SourceDoc, SourceKind, TaskDraft
+    src = SourceDoc("t", SourceKind.TRANSCRIPT, "\n".join(ЗАПИСЬ))
+    team = Team([Person(n) for n in КОМАНДА + ["Петрова Анна"]])
+    # цитата ворот без подписи — как у 15.10
+    monkeypatch.setattr(g.TaskGate, "find_quote",
+                        lambda self, want, source: "[00:05:12] Я подготовлю спецификацию по шкафу до пятницы.")
+    r = g.TaskGate(team).check(TaskDraft("Подготовить спецификацию по шкафу", None), src)
+    assert r.accepted and r.assignee is not None and r.assignee.full_name == "Иванов Иван", r
