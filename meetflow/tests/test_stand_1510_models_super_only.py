@@ -17,9 +17,17 @@ def test_every_models_route_is_super_admin_only(app_client):
     app, c = app_client
     routes = [(m, r.path) for r in app.routes if "models" in getattr(r, "path", "") for m in getattr(r, "methods", ())]
     assert len(routes) >= 8, routes
+    # 27.10.2026, экраны ERP 1 в 1: у адресов фронта ERP (`/project-status/models*`) личность — X-User-Id учётной записи,
+    # у прежних `/api/*` — X-User-Role; правило то же — всем, кроме супер-администратора, 403
+    st = app.state.store
+    ids = {role: st.insert("accounts", full_name=f"Проверка {role}", role=role, active=1, confirmed=1)
+           for role in ("project_admin", "member")}
     for role in ("project_admin", "member", "director"):
         for method, path in routes:
-            r = c.request(method, path, headers={"X-User-Role": role, "X-Requested-With": "MeetFlow"}, json={})
+            h = {"X-User-Role": role, "X-Requested-With": "MeetFlow"}
+            if not path.startswith("/api/"):
+                h = {"X-User-Id": str(ids.get(role, ids["member"])), "X-Requested-With": "erp-webapp"}
+            r = c.request(method, path, headers=h, json={})
             assert r.status_code == 403, (role, method, path, r.status_code)
 
 

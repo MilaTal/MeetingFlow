@@ -1644,6 +1644,10 @@ def create_app(theme_name: str | None = None, db_path: str | None = None, journa
         # здесь это дублирование, они уже есть на отдельной странице мониторинга»). Очередь — только работа людей.
         return out
 
+    # те же службы, ожидание оператора и база голосов — для «Мониторинга» и «Параметров системы» фронта ERP (web/erp/sistema.py)
+    app.state.mf_services, app.state.mf_awaiting, app.state.mf_tech_cleanup = _services, _awaiting, _tech_cleanup
+    app.state.mf_voice_base, app.state.mf_komanda, app.state.mf_v_komande = _voice_base, _komanda, v_komande
+
     @app.get("/api/monitoring/live")
     def mon_live(pid: int | None = None, u: dict = Depends(super_admin)):
         aw = _awaiting()

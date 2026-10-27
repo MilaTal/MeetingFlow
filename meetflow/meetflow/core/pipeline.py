@@ -882,16 +882,16 @@ class MeetingPipeline:
 
                     # 3. протокол — разделы пишет модель, таблицы и шапку — код
                     participants, leader = self._participants(meeting_id, meeting)
-                    sysm, user = self.pb.protocol(self.theme["protocol_skeleton"], safe_source.text, notes_text,
+                    sysm, user = self.pb.protocol(self._skeleton(meeting), safe_source.text, notes_text,
                                                   participants=participants, leader=leader)
                     try:
                         out = self._call(self.gen, budget, "protocol", sysm, user, meeting_id)
                         sections = {k: str(v)[:20000] for k, v in _dict(out, "sections").items()
-                                    if k in self.theme["protocol_skeleton"]}
+                                    if k in self._skeleton(meeting)}
                     except AnswerTruncated:
                         # разделы не поместились в потолок ответа — протокол и задачи сохраняются без них
                         cap = int(self.theme.get("llm.max_answer_tokens", 4096))
-                        sections = {s: None for s in self.theme["protocol_skeleton"]}   # None — раздел не собран
+                        sections = {s: None for s in self._skeleton(meeting)}   # None — раздел не собран
                         self.cards.open(project_id, "technical", "Разделы протокола не собраны",
                                         {"detail": f"ответ модели длиннее потолка {cap} токенов"}, meeting_id)
                         limited = True
@@ -925,7 +925,7 @@ class MeetingPipeline:
             return rep
         if stopped is not None:
             rep.status, rep.detail = "stopped_by_limit", str(stopped)
-            sections = {s: None for s in self.theme["protocol_skeleton"]}   # причина — в карточке ниже
+            sections = {s: None for s in self._skeleton(meeting)}   # причина — в карточке ниже
             self.cards.open(project_id, "stopped_by_limit", "Прогон остановлен по пределу — протокол неполный",
                             {"detail": str(stopped), "stopped_by": budget.stopped_by}, meeting_id)
 
@@ -1339,6 +1339,20 @@ class MeetingPipeline:
             self.step_failed(project_id, None, "Пометка «оперативная» по протоколу секретаря", exc)
             return {}
 
+    def _topic(self, meeting: dict) -> dict | None:
+        """Тема планёрки встречи (как ERP 24.10.2026, перенос 27.10.2026): выключенная тема не действует."""
+        from .topics import тема_встречи
+        return тема_встречи(self.s, meeting)
+
+    def _skeleton(self, meeting: dict) -> list[str]:
+        """Разделы протокола: у темы со своей структурой — её разделы по порядку, иначе — разделы темы проекта."""
+        tp = self._topic(meeting)
+        try:
+            secs = [s for s in json.loads((tp or {}).get("sections") or "[]") if str(s).strip()]
+        except (TypeError, ValueError):
+            secs = []
+        return [str(s).strip() for s in secs] or list(self.theme["protocol_skeleton"])
+
     def _render_protocol(self, meeting: dict, sections: dict[str, str | None], added, closings, srcs,
                          removals=(), *, record: str | None = None, people=(), rep: RunReport | None = None,
                          base_kind: str = "transcript") -> str:
@@ -1357,7 +1371,10 @@ class MeetingPipeline:
         except ValueError:
             date_h = date_s
         out = [f"# {th.word('protocol')} {date_h}", ""]
-        for sec in th["protocol_skeleton"]:
+        tp = self._topic(meeting)
+        if tp:                                   # тема — в шапку протокола (как ERP)
+            out += [f"Тема: {tp['name']}", ""]
+        for sec in self._skeleton(meeting):
             body = sections.get(sec, "")
             if body is None:              # не собран (предел, потолок ответа) — пусто, причина в карточке
                 out += [f"## {sec}", ""]

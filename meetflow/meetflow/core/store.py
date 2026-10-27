@@ -34,7 +34,17 @@ SCHEMA: dict[str, dict[str, str]] = {
                  "created_at": "TEXT", "leader_user_id": "INTEGER", "leader_source": "TEXT", "leader_note": "TEXT",
                  "leader_speaker": "TEXT", "merged": "TEXT DEFAULT '[]'", "protocol_hand_edited": "INTEGER DEFAULT 0",
                  "plan_hand_edited": "INTEGER DEFAULT 0", "build_note": "TEXT DEFAULT ''",
-                 "plan_sources": "TEXT DEFAULT '[]'"},
+                 "plan_sources": "TEXT DEFAULT '[]'",
+                 # тема планёрки встречи (как ERP 24.10.2026): номер темы, откуда (день недели / вручную), когда и кто
+                 "topic_id": "INTEGER", "topic_source": "TEXT DEFAULT ''", "topic_set_at": "TEXT",
+                 "topic_set_by": "TEXT DEFAULT ''"},
+    # «Темы планёрок» (основа из ERP, перенос 27.10.2026): самостоятельная сущность — дни недели (по умолчанию всем
+    # встречам этих дней), свои разделы протокола, названия в шапке секретаря, объекты, подсказка сборки, переходящие
+    # задачи с прошлой встречи той же темы; удаления нет — выключается
+    "meeting_topics": {"id": "INTEGER PRIMARY KEY", "name": "TEXT", "weekdays": "TEXT DEFAULT '[]'",
+                       "sections": "TEXT DEFAULT '[]'", "head_names": "TEXT DEFAULT '[]'", "objects": "TEXT DEFAULT '[]'",
+                       "hint": "TEXT DEFAULT ''", "carry_same_topic": "INTEGER DEFAULT 0", "is_active": "INTEGER DEFAULT 1",
+                       "created_at": "TEXT", "updated_by": "TEXT DEFAULT ''"},
     "sources": {"id": "INTEGER PRIMARY KEY", "meeting_id": "INTEGER", "name": "TEXT", "kind": "TEXT",
                 "text": "TEXT", "digest": "TEXT", "removed_at": "TEXT", "removed_reason": "TEXT",
                 "created_at": "TEXT", "local_asr": "INTEGER DEFAULT 0",
