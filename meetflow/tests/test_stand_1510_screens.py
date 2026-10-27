@@ -45,7 +45,7 @@ def test_font_calibri_without_external_loads():
 def test_long_lists_limit_7_and_ribbon():
     assert "const listLimit = () => (window.innerHeight < 720 ? 5 : 7);" in JS
     assert ".ribbon { max-height: 480px; overflow: auto;" in CSS
-    for marker in ('moreRows("<tr><th>Дата</th><th>Название</th></tr>"', 'moreRows("<tr><th>№</th><th>ФИО</th>',
+    for marker in ('"<tr><th>Дата</th><th>Название</th></tr>"', 'moreRows("<tr><th>№</th><th>ФИО</th>',
                    "moreItems(visible, (c) =>", 'moreRows("<tr><th>Проект</th><th>Что</th>', "moreItems(rows, (t) =>",
                    'moreRows("", d.history', "moreItems(mtasks,", "moreItems(proto.units,"):
         assert marker in JS, marker

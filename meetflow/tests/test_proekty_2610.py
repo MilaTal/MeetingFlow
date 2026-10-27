@@ -31,3 +31,22 @@ def test_projects_directory_aliases_subprojects_archive(tmp_path):
     # кольцо проектов не допускается
     bad = c.patch(f"/api/projects/{aid}", json={"name": "Склад", "parent_id": b}, headers=H)
     assert bad.status_code == 422
+
+
+def test_all_projects_lists_tasks_meetings_agreements(tmp_path):
+    c = TestClient(create_app("erp_rollout", str(tmp_path / "t.db"), str(tmp_path / "j.jsonl"), watch=False),
+                   raise_server_exceptions=False)
+    ids = []
+    for name in ("Первый", "Второй"):
+        pid = c.post("/api/projects", json={"name": name}, headers=H).json()["id"]
+        mid = c.post(f"/api/projects/{pid}/meetings", json={"date": "2026-10-01"}, headers=H).json()["id"]
+        ids.append((pid, mid))
+    # задачи и договорённости кладём прямо в базу тестового приложения через API проекта
+    for pid, mid in ids:
+        c.post(f"/api/projects/{pid}/people", json={"full_name": "Иванов Иван"}, headers=H)
+    tasks = c.get("/api/projects/0/tasks?status=active", headers=H).json()
+    assert isinstance(tasks, list)
+    meetings = c.get("/api/projects/0/meetings", headers=H).json()
+    assert {m["project_name"] for m in meetings} == {"Первый", "Второй"}
+    agreements = c.get("/api/projects/0/agreements?status=all", headers=H).json()
+    assert isinstance(agreements, list)

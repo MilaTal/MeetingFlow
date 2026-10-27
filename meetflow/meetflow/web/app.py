@@ -523,8 +523,13 @@ def create_app(theme_name: str | None = None, db_path: str | None = None, journa
 
     @app.get("/api/projects/{pid}/meetings")
     def meetings(pid: int):
-        rows = store.q("SELECT id, date, label, protocol_built_at FROM meetings WHERE project_id=? ORDER BY date DESC",
-                       (pid,))
+        if pid:
+            project_or_404(pid)
+            rows = store.q("SELECT id, date, label, protocol_built_at, project_id FROM meetings "
+                           "WHERE project_id=? ORDER BY date DESC", (pid,))
+        else:
+            rows = store.q("SELECT m.id, m.date, m.label, m.protocol_built_at, m.project_id, p.name AS project_name "
+                           "FROM meetings m LEFT JOIN projects p ON p.id=m.project_id ORDER BY m.date DESC, p.name")
         for r in rows:
             r["has_protocol"] = bool(r.pop("protocol_built_at"))
         return rows
@@ -599,14 +604,15 @@ def create_app(theme_name: str | None = None, db_path: str | None = None, journa
     @app.get("/api/projects/{pid}/agreements")
     def agreements(pid: int, kind: str = "", status: str = "open", since: str = "", till: str = ""):
         """«Договорённости»: решения, договорённости, открытые вопросы, вехи — как отдельный экран ERP."""
-        project_or_404(pid)
-        where, args = ["u.project_id=?"], [pid]
+        if pid:
+            project_or_404(pid)
+        where, args = (["u.project_id=?"], [pid]) if pid else (["1=1"], [])
         if kind:
             where.append("u.kind=?")
             args.append(kind)
         if status == "open":
             where.append("u.status IN ('open','active')")
-        elif status:
+        elif status and status != "all":
             where.append("u.status=?")
             args.append(status)
         if since:
@@ -616,7 +622,9 @@ def create_app(theme_name: str | None = None, db_path: str | None = None, journa
             where.append("COALESCE(m.date,'') <= ?")
             args.append(till)
         rows = store.q("SELECT u.id, u.kind, u.text, u.quote, u.status, u.planned_date, u.ts, u.meeting_id, "
-                       "m.date AS meeting_date FROM units u LEFT JOIN meetings m ON m.id=u.meeting_id "
+                       "u.project_id, p.name AS project_name, m.date AS meeting_date "
+                       "FROM units u LEFT JOIN meetings m ON m.id=u.meeting_id "
+                       "LEFT JOIN projects p ON p.id=u.project_id "
                        "WHERE " + " AND ".join(where) + " ORDER BY COALESCE(m.date,'') DESC, u.line_from, u.id",
                        tuple(args))
         for r in rows:
@@ -840,22 +848,40 @@ def create_app(theme_name: str | None = None, db_path: str | None = None, journa
 
     @app.get("/api/projects/{pid}/tasks")
     def tasks(pid: int, status: Literal["active", "done", "dropped", "all"] = "active", u: dict = Depends(user)):
-        project_or_404(pid)
+        if pid:
+            project_or_404(pid)
         # снятые не показываются нигде (решение владелицы 26.10.2026, как ERP): ни по «all», ни по просьбе «dropped»
         st = None if status == "all" else TaskStatus(status)
-        rows = [] if st == TaskStatus.DROPPED else [r for r in pipe.reg.list(pid, st) if r["status"] != "dropped"]
-        for i, r in enumerate(rows, 1):
-            r["no"] = i
+        if st == TaskStatus.DROPPED:
+            rows = []
+        elif pid:
+            rows = [r for r in pipe.reg.list(pid, st) if r["status"] != "dropped"]
+        else:
+            sql = ("SELECT t.*, p.name AS project_name FROM tasks t LEFT JOIN projects p ON p.id=t.project_id "
+                   "WHERE t.status!='dropped'" + (" AND t.status=?" if st else "") + " ORDER BY p.name, t.id")
+            rows = store.q(sql, ((st.value,) if st else ()))
+        counters: dict[int, int] = {}
+        for r in rows:                         # номер — свой в каждом проекте
+            key = int(r.get("project_id") or 0)
+            counters[key] = counters.get(key, 0) + 1
+            r["no"] = counters[key]
         # задача связана со встречей (стенд 5): дата встречи — для ссылки «встреча дд.мм.гггг — протокол»
-        mdates = {m["id"]: m["date"] for m in store.q("SELECT id, date FROM meetings WHERE project_id=?", (pid,))}
+        mdates = ({m["id"]: m["date"] for m in store.q("SELECT id, date FROM meetings WHERE project_id=?", (pid,))}
+                  if pid else {m["id"]: m["date"] for m in store.q("SELECT id, date FROM meetings")})
         n = int(store.get_setting("overdue_highlight_working_days", None, 7) or 7)
         today = date_cls.today()
         from ..core import tablica_zadach
-        dates = tablica_zadach.даты_прошедших_встреч(store, pid)
+        dates_by_project: dict[int, list] = {}
+
+        def dates_for(project_id: int):
+            if project_id not in dates_by_project:
+                dates_by_project[project_id] = tablica_zadach.даты_прошедших_встреч(store, project_id)
+            return dates_by_project[project_id]
 
         def hint(r: dict) -> bool:   # «похоже на оперативную — отметить?»: только подсказка, пометку не ставит
             return tablica_zadach.похоже_на_оперативную(
-                r, tablica_zadach.встреч_после(dates, lenient_date(r.get("date_set"))))
+                r, tablica_zadach.встреч_после(dates_for(int(r.get("project_id") or 0)),
+                                               lenient_date(r.get("date_set"))))
 
         def overdue(r: dict) -> bool:   # как в Планёрке: N рабочих дней после срока, только у задач в работе
             d = lenient_date(r.get("due_date")) if r.get("status") == "active" else None
@@ -867,6 +893,7 @@ def create_app(theme_name: str | None = None, db_path: str | None = None, journa
                 days += cur.weekday() < 5
             return days >= n
         return [task_out({**{k: v for k, v in r.items() if k != "project_id"}, "overdue": overdue(r),
+                          "project_name": r.get("project_name") or "",
                           "meeting_date": mdates.get(r.get("source_meeting_id")),
                           "operational": int(r.get("operational") or 0), "operational_hint": hint(r),
                           "due_text": due_text(r.get("due_date"), r.get("date_set"), r.get("due_kind"))}, u) for r in rows]

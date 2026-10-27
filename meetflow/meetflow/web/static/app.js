@@ -101,13 +101,13 @@ const routes = {
         const mine = S.name && S.name === t.assignee;
         const can = isAdmin() || S.role === "director" || mine;
         return `<tr data-row="t${esc(t.id)}"><td class="no" title="Внутренний номер: ${esc(t.id)}">${esc(t.no)}<small>${fmtDate(t.date_set)}</small></td>
-          <td>${esc(t.description)}${t.operational ? ' <span class="badge">оперативная</span>' : ""}${t.doubt_reason ? `<span class="doubt-dot" title="под вопросом: ${esc(t.doubt_label || t.doubt_reason)} — карточка в «Конфликтах»" aria-label="под вопросом"></span>` : ""}${t.source_quote ? `<span class="sub">«${esc(t.source_quote.slice(0, 160))}»</span>` : ""}${t.source_meeting_id ? `<a class="sub task-meeting" href="#meeting/${esc(t.source_meeting_id)}">встреча ${fmtDate(t.meeting_date)} — протокол</a>` : ""}${isAdmin() && view === "active" ? `<button class="btn-link sub" data-op="${t.id}" data-op-on="${t.operational ? 0 : 1}" title="Пометка «оперативная» — задача идёт в раздел «Оперативные задачи» протокола">${t.operational ? "оперативная ✓ — снять" : t.operational_hint ? "похоже на оперативную — отметить?" : "в оперативные"}</button>` : ""}</td>
+          <td>${S.project === 0 && t.project_name ? `<span class="badge">${esc(t.project_name)}</span> ` : ""}${esc(t.description)}${t.operational ? ' <span class="badge">оперативная</span>' : ""}${t.doubt_reason ? `<span class="doubt-dot" title="под вопросом: ${esc(t.doubt_label || t.doubt_reason)} — карточка в «Конфликтах»" aria-label="под вопросом"></span>` : ""}${t.source_quote ? `<span class="sub">«${esc(t.source_quote.slice(0, 160))}»</span>` : ""}${t.source_meeting_id ? `<a class="sub task-meeting" href="#meeting/${esc(t.source_meeting_id)}">встреча ${fmtDate(t.meeting_date)} — протокол</a>` : ""}${isAdmin() && view === "active" ? `<button class="btn-link sub" data-op="${t.id}" data-op-on="${t.operational ? 0 : 1}" title="Пометка «оперативная» — задача идёт в раздел «Оперативные задачи» протокола">${t.operational ? "оперативная ✓ — снять" : t.operational_hint ? "похоже на оперативную — отметить?" : "в оперативные"}</button>` : ""}</td>
           <td>${esc(t.assignee || "Не назначен")}</td><td${t.overdue ? ' class="overdue" title="Просрочено: порог в «Параметры системы → Пороги»"' : ""}>${esc(t.due_text || t.due_date || "—")}</td><td>${esc(t.last_comment || "")}</td>
           <td>${can && view === "active" ? `<button class="btn" data-done="${t.id}">Выполнено</button>` : ""}
               ${can && view !== "active" ? `<button class="btn btn-ghost" data-back="${t.id}">Вернуть</button>` : ""}</td></tr>`;
       }).join("")}</table></div>` : `<p class="empty">Задач нет.</p>`;
     // поиска на странице реестра нет — решение владельца 12.10.26 (убран из ERP и Планёрки); страница «Поиск» работает
-    $("#main").innerHTML = `<h1>${esc(S.theme.vocabulary.nav_tasks || S.theme.vocabulary.registry)}</h1><div class="row" style="margin-bottom:16px">${tabs}</div><div class="card-output">${body}</div>`;
+    $("#main").innerHTML = `<h1>${esc(S.project === 0 ? "Реестр задач по всем проектам" : (S.theme.vocabulary.nav_tasks || S.theme.vocabulary.registry))}</h1><div class="row" style="margin-bottom:16px">${tabs}</div><div class="card-output">${body}</div>`;
     // в таблице — до 7 строк (решение 09.10.26): высота рамки считается от низа окна
     const fitRows = () => { const fr = $("#tasks-frame"); if (!fr) return;
       const trs = [...fr.querySelectorAll("tr")]; if (trs.length < 2) return;
@@ -173,12 +173,13 @@ const routes = {
 
   async meetings() {
     const rows = await api(`/api/projects/${S.project}/meetings`);
-    const form = isAdmin() ? `<div class="card stack"><h2 style="margin:0">Новая ${esc(S.theme.vocabulary.meeting)}</h2>
+    const form = isAdmin() && S.project ? `<div class="card stack"><h2 style="margin:0">Новая ${esc(S.theme.vocabulary.meeting)}</h2>
       <div class="row"><input id="m-date" type="date" required><input id="m-label" placeholder="Название (необязательно)">
       <button class="btn btn-primary" id="m-add">Создать</button></div></div>` : "";
-    $("#main").innerHTML = `<h1>${esc(S.theme.vocabulary.meetings)}</h1>${form}<div class="card-output">${rows.length ?
-      moreRows("<tr><th>Дата</th><th>Название</th></tr>", rows, (m) => `<tr><td><a href="#meeting/${m.id}">${fmtDate(m.date)}</a>${m.has_protocol ? ` <a class="sub" href="#meeting/${m.id}">протокол →</a>` : ' <span class="sub">протокола нет</span>'}</td>
-      <td>${esc(m.label)}</td></tr>`) : `<p class="empty">Встреч пока нет.</p>`}</div>`;
+    const head = S.project === 0 ? "<tr><th>Дата</th><th>Название</th><th>Проект</th></tr>" : "<tr><th>Дата</th><th>Название</th></tr>";
+    $("#main").innerHTML = `<h1>${esc(S.project === 0 ? "Встречи по всем проектам" : S.theme.vocabulary.meetings)}</h1>${form}<div class="card-output">${rows.length ?
+      moreRows(head, rows, (m) => `<tr><td><a href="#meeting/${m.id}">${fmtDate(m.date)}</a>${m.has_protocol ? ` <a class="sub" href="#meeting/${m.id}">протокол →</a>` : ' <span class="sub">протокола нет</span>'}</td>
+      <td>${esc(m.label)}</td>${S.project === 0 ? `<td class="sub">${esc(m.project_name || "—")}</td>` : ""}</tr>`) : `<p class="empty">Встреч пока нет.</p>`}</div>`;
     const add = $("#m-add");
     if (add) add.onclick = async () => { try { await api(`/api/projects/${S.project}/meetings`, { method: "POST", json: { date: $("#m-date").value, label: $("#m-label").value } }); render(); } catch (e) { toast(e.message); } };
   },
@@ -195,7 +196,7 @@ const routes = {
     const rows = await api(`/api/projects/${S.project}/agreements?${q}`);
     const opts = [["", "Все виды"], ...Object.entries(K)].map(([v, t]) => `<option value="${v}"${st.kind === v ? " selected" : ""}>${t}</option>`).join("");
     const list = rows.length ? rows.map((r) => `<div class="card-output"><div class="row" style="justify-content:space-between;align-items:baseline">
-        <span><span class="badge">${esc(r.kind_ru)}</span> ${r.meeting_date ? `<a class="sub" href="#meeting/${r.meeting_id}">${fmtDate(r.meeting_date)} — протокол</a>` : ""}</span>
+        <span><span class="badge">${esc(r.kind_ru)}</span> ${S.project === 0 && r.project_name ? `<span class="badge">${esc(r.project_name)}</span> ` : ""}${r.meeting_date ? `<a class="sub" href="#meeting/${r.meeting_id}">${fmtDate(r.meeting_date)} — протокол</a>` : ""}</span>
         <span class="sub">${esc({ open: "открыто", active: "действует", closed: "закрыто", replaced: "заменено", removed: "убрано" }[r.status] || r.status)}${r.planned_date ? ` · срок ${fmtDate(r.planned_date)}` : ""}</span></div>
       <div>${esc(r.text)}</div>${r.quote ? `<q class="sub">${esc(r.quote)}</q>` : ""}</div>`).join("")
       : `<p class="empty">По этим условиям договорённостей нет.</p>`;
@@ -973,7 +974,12 @@ async function render() {
   document.querySelectorAll("[data-admin]").forEach((el) => (el.hidden = !isAdmin()));
   document.querySelectorAll("[data-super]").forEach((el) => (el.hidden = S.role !== "super_admin"));
   // мониторинг — общесистемный экран: модели и службы нужны и до первого проекта (09.10.26)
-  if (!S.project && !["design", "monitoring", "models", "live", "system", "voices", "teamshared"].includes(route)) { $("#main").innerHTML = `<h1>Нет проекта</h1><p class="page-sub">Создайте проект: python -m meetflow new-project "Имя" --theme it_product --db &lt;та же база, что у сервера&gt;.</p>`; return; }
+  if ((S.project === null || S.project === undefined) && !["design", "monitoring", "models", "live", "system", "voices", "teamshared"].includes(route)) { $("#main").innerHTML = `<h1>Нет проекта</h1><p class="page-sub">Создайте проект: python -m meetflow new-project "Имя" --theme it_product --db &lt;та же база, что у сервера&gt;.</p>`; return; }
+  if (S.project === 0 && !["tasks", "meetings", "agreements", "projects", "help", "voices", "voice-review",
+    "monitoring", "models", "live", "system", "teamshared", "design"].includes(route)) {
+    $("#main").innerHTML = `<h1>Выберите проект</h1><p class="page-sub">Этот раздел работает по одному проекту — выберите его внизу левой панели. «Все проекты» есть в реестре задач, встречах и договорённостях.</p>`;
+    return;
+  }
   try { await (routes[route] || routes.tasks)(arg); } catch (e) {
     if (e instanceof Stale || seq !== renderSeq) return;
     $("#main").innerHTML = `<h1>Не получилось открыть раздел</h1><p class="page-sub">${esc(e.message)}</p>`; }
@@ -1035,7 +1041,7 @@ async function boot() {
   // проекта-примера в тему не зашивается (правка 03.10.26)
   const showBrand = () => {
     const p = projects.find((x) => x.id === S.project);
-    const name = p ? p.name : S.theme.vocabulary.app_title;
+    const name = S.project === 0 ? "Все проекты" : (p ? p.name : S.theme.vocabulary.app_title);
     $("#app-title").textContent = name; $("#app-subtitle").textContent = ""; // только имя проекта
     document.title = name;
   };
@@ -1057,10 +1063,11 @@ async function boot() {
   roleSel.value = S.role; roleSel.onchange = () => { S.role = roleSel.value; store.set("role", S.role); bindModeSwitch(); updateAwaitingBadge(); render(); };
   const nm = $("#username"); nm.value = S.name; nm.onchange = () => { S.name = nm.value.trim(); store.set("name", S.name); render(); };
   const visibleProjects = projects.filter((p) => !p.archived);
-  const ps = $("#project"); ps.innerHTML = visibleProjects.map((p) => `<option value="${p.id}">${esc(p.name)}</option>`).join("");
-  S.project = Number(store.get("project", visibleProjects[0]?.id || 0)) || visibleProjects[0]?.id || null;
-  if (!visibleProjects.some((p) => p.id === S.project)) S.project = visibleProjects[0]?.id || null;
-  if (S.project) ps.value = S.project;
+  const ps = $("#project"); ps.innerHTML = `<option value="0">Все проекты</option>` + visibleProjects.map((p) => `<option value="${p.id}">${esc(p.name)}</option>`).join("");
+  const storedProject = store.get("project", null);
+  S.project = storedProject === null ? (visibleProjects[0]?.id || 0) : Number(storedProject);
+  if (S.project && !visibleProjects.some((p) => p.id === S.project)) S.project = visibleProjects[0]?.id || 0;
+  ps.value = String(S.project || 0);
   showBrand();
   ps.onchange = () => { S.project = Number(ps.value); store.set("project", ps.value); showBrand(); render(); };
   bindModeSwitch(); updateAwaitingBadge();
