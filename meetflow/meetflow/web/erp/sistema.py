@@ -856,7 +856,8 @@ def mount(r: APIRouter, ctx: Ctx) -> None:
         for k, (env, _title) in REC.items():
             out[k] = {"enabled": iz.включено(store, k, env), "setting": iz.настройка(store, k),
                       "env": (os.environ.get(env) or "").strip().lower() in iz._ДА, "env_name": env}
-        словарь = slovar_whisper.собрать(store, project_id)
+        # бюджет — весь предел Whisper, как ERP: распознавание MeetFlow прежней подсказки не имеет, словарь занимает все 223
+        словарь = slovar_whisper.собрать(store, project_id, slovar_whisper.ЛИМИТ_ТОКЕНОВ)
         out["asr_vocab"].update(preview=словарь, tokens=slovar_whisper.токенов(словарь), limit=slovar_whisper.ЛИМИТ_ТОКЕНОВ)
         out["project_only_heard"]["window"] = iz.ОКНО_СТРОК
         return out

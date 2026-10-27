@@ -662,7 +662,10 @@ def test_словарь_распознавания(env):
     # экран показывает то же, что уходит в распознавание и действует в сборке (core/slovar_whisper, iskazheniya_nazvaniy)
     from meetflow.core import iskazheniya_nazvaniy as iz
     from meetflow.core import slovar_whisper
-    assert d["asr_vocab"]["preview"] == slovar_whisper.собрать(c.st, c.pid)
+    assert d["asr_vocab"]["preview"] == slovar_whisper.собрать(c.st, c.pid, slovar_whisper.ЛИМИТ_ТОКЕНОВ)
+    # распознавание без прежней подсказки кладёт тот же словарь (подсказка_сборка, как ERP recording_queue)
+    c.st.set_setting("rec:asr_vocab", True)
+    assert slovar_whisper.подсказка_сборка(c.st, c.pid).текст == d["asr_vocab"]["preview"]
     assert d["asr_vocab"]["limit"] == slovar_whisper.ЛИМИТ_ТОКЕНОВ == 223
     assert d["asr_vocab"]["tokens"] == slovar_whisper.токенов(d["asr_vocab"]["preview"])
     assert d["project_only_heard"]["window"] == iz.ОКНО_СТРОК == 20
