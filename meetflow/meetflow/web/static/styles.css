@@ -1665,3 +1665,30 @@ mark.zapis-mark { background: var(--accent-soft); color: inherit; box-shadow: in
   --accent-text: color-mix(in srgb, var(--accent) 55%, #ffffff); color-scheme: dark;
 }
 
+
+/* «Оформление» — как было в MeetFlow до переноса фронта ERP (архив 928f4f7): круглые образцы палитр и метки. */
+:root {
+  --actor-operator: #1d4ed8; --actor-operator-soft: #dbeafe;
+  --actor-model: #6d28d9; --actor-model-soft: #ede9fe;
+  --actor-local: #15803d; --actor-local-soft: #dcfce7;
+  --actor-store: #b45309; --actor-store-soft: #fef3c7;
+  --actor-admin: #c2410c; --actor-admin-soft: #ffedd5;
+}
+:root[data-theme="dark"] {
+  --actor-operator: #93b4ff; --actor-operator-soft: #1e2a4a;
+  --actor-model: #c4b5fd; --actor-model-soft: #2a2145;
+  --actor-local: #86efac; --actor-local-soft: #15301f;
+  --actor-store: #fcd34d; --actor-store-soft: #3a2a12;
+  --actor-admin: #fdba74; --actor-admin-soft: #3a2314;
+}
+.swatches { display: flex; gap: 8px; flex-wrap: wrap; }
+.swatch { width: 28px; height: 28px; border-radius: 999px; border: 2px solid var(--surface);
+  box-shadow: 0 0 0 1px var(--border); cursor: pointer; padding: 0; }
+.swatch[aria-pressed="true"] { box-shadow: 0 0 0 2px var(--text); }
+.design-buttons { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+.actor { display: inline-block; font-size: 12.5px; padding: 1px 8px; border-radius: 999px; font-weight: 500; }
+.actor-operator { color: var(--actor-operator); background: var(--actor-operator-soft); }
+.actor-model { color: var(--actor-model); background: var(--actor-model-soft); }
+.actor-local { color: var(--actor-local); background: var(--actor-local-soft); }
+.actor-store { color: var(--actor-store); background: var(--actor-store-soft); }
+.actor-admin { color: var(--actor-admin); background: var(--actor-admin-soft); }
