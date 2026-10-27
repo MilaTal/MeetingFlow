@@ -79,7 +79,7 @@ th { background: var(--surface); color: var(--text-muted); font-weight: 500; }
 .doc-render h2 { padding-bottom: 12px; border-bottom: 1px solid var(--reg-line); margin-bottom: 18px; }
 
 /* Метка состояния — тонкая рамка без заливки; «ждёт решения» — рамка и текст цвета акцента */
-.mt-state, .reg-tag { background: none; border: 1px solid var(--border); color: #52525b; }
+.mt-state, .reg-tag { background: none; border: 1px solid var(--border); color: var(--text-muted); }
 .mt-state-acc { border-color: var(--accent); color: var(--accent-hover); }
 
 /* Окна: белое окно 460 px, тонкая рамка, тень, затемнение фона 18 % */
@@ -256,7 +256,7 @@ th { background: var(--surface); color: var(--text-muted); font-weight: 500; }
    которые тема «Линия» перекрывала. Только этот экран. Шрифт — Calibri (решение владельца 13.10.26 для обеих систем). */
 #main:has(#users-list) .doc-head { gap: 8px 14px; margin-bottom: 12px; align-items: center; }
 #main:has(#users-list) .doc-head h1 { font-weight: 700; letter-spacing: normal; }
-#main:has(#users-list) .doc-tabs { background: #f4f4f8; }
+#main:has(#users-list) .doc-tabs { background: var(--field-bg); }
 #main:has(#users-list) .doc-tab-on { background: var(--surface) !important; color: var(--accent-text); border-bottom: 0 !important;
   box-shadow: 0 1px 3px rgba(24, 24, 27, .1), inset 0 0 0 1px #eef2ff; }
 #main:has(#users-list) #users-list.card { border-radius: 16px; border-color: #e4e4e7; box-shadow: 0 6px 20px rgba(104, 99, 191, .2); }
@@ -334,7 +334,7 @@ th { background: var(--surface); color: var(--text-muted); font-weight: 500; }
 .reg-actualize:hover { border-color: var(--accent-text); }
 /* действия строки — линейные значки в цвете #6863bf, без заливных квадратов */
 .reg-table .ri { color: var(--accent-text); }
-.reg-table .ri:hover, .reg-table .ri:focus-visible { color: #57529c; background: #f3f2fb !important; }
+.reg-table .ri:hover, .reg-table .ri:focus-visible { color: var(--accent-text); background: var(--accent-soft) !important; }
 /* ширины колонок по содержанию (раскладка fixed): «Описание» — остаток; на узком экране — прежняя раскладка */
 @media (min-width: 769px) {
   .reg-table { table-layout: fixed; width: 100%; }
@@ -519,9 +519,9 @@ input::placeholder, textarea::placeholder { color: var(--text-muted); font-size:
 
 /* ==== Зона поиска — вариант А «как в старой» (решение владельца 14.10.26 в чате Планёрки; одинаковый вид — в цвете ERP,
    образец Планёрки 4e7623a). Заменяет вариант Б (белая зона в акцентной рамке 1,5 px с ореолом). Реестр и «Статус проекта →
-   Поиск». Подложка #f0effa без рамки, скругление 14; поле белое, рамка #dcd9f2, скругление 10; «⏎» — на светлом тоне старой
+   Поиск». Подложка var(--field-bg) без рамки, скругление 14; поле белое, рамка #dcd9f2, скругление 10; «⏎» — на светлом тоне старой
    ERP #eef2ff; нажатая быстрая кнопка — белым по #57529c. Подсказка — как была: 13 px, #a1a1aa, курсив. ==== */
-.reg-search, .search-box { background: #f0effa !important; border: 0 !important; border-radius: 14px !important; box-shadow: none !important;
+.reg-search, .search-box { background: var(--field-bg) !important; border: 0 !important; border-radius: 14px !important; box-shadow: none !important;
   padding: 10px 12px; }
 .reg-search:focus-within, .search-box:focus-within { box-shadow: none !important; }
 .reg-search input, .search-box textarea, .search-box input { background: var(--surface) !important; border: 1px solid #dcd9f2 !important;
@@ -529,7 +529,7 @@ input::placeholder, textarea::placeholder { color: var(--text-muted); font-size:
 .reg-search input:focus, .search-box textarea:focus, .search-box input:focus { border-color: var(--accent-text) !important; outline: none; }
 .search-box .search-submit { background: var(--accent-soft) !important; color: var(--text) !important; border: 1px solid rgba(104, 99, 191, .16) !important;
   border-radius: 10px !important; }
-.chip:active, .chip.on, .chip[aria-pressed="true"] { background: #57529c !important; color: #fff !important; border-color: #57529c !important; }
+.chip:active, .chip.on, .chip[aria-pressed="true"] { background: #57529c !important; color: #fff !important; border-color: var(--accent-text) !important; }
 /* Высота шапки — как у Планёрки fcabcac (38,75 px, текст на 11 px от верха): межстрочный в пикселях — коэффициент 1,5
    в таблице документа давал строку 19,5 и шапку 39,5; кнопка-подпись в шапке (фильтр колонки) — inline-block по верху,
    высотой в строку, иначе растягивала шапку до 39,4 (перенос из Планёрки, «Мониторинг» 14.10.26) */
@@ -715,7 +715,7 @@ details.feed-archive > summary.feed-section { cursor: pointer; }
 
 /* «Конфликты» — итоговая раскладка Планёрки (37b0329 … 3039ea8, владелец 15.10.26: «передай всё в ERP для аналогичной
    страницы»), цвета ERP. Сетка: значок 24 | описание ≤ 68ch (≈ 76 знаков) | столбец действий 300, просвет 32; текст описания
-   15,5. Кнопки столбца — без рамок, самая светлая лаванда #f6f6fd (наведение #eceefb), 14 px, слева, 5 × 10, скругление 6,
+   15,5. Кнопки столбца — без рамок, самая светлая лаванда var(--accent-soft) (наведение #eceefb), 14 px, слева, 5 × 10, скругление 6,
    шаг 3; тихое закрытие — без подложки, 13,5, отступ 22. Ниже 1100 px столбец под описанием.
    Ловушки Планёрки: grid !important перебивал hidden (свёртка не прятала строки) — [hidden] отдельно; правила шрифта
    кнопок — мимо значков .ri (у них подпись спрятана, общий размер проявлял текст «Удалить»). */
@@ -728,13 +728,13 @@ details.feed-archive > summary.feed-section { cursor: pointer; }
 #conflicts-list .cf-main .page-sub { font-style: italic; color: var(--text-muted); line-height: 1.45; margin-top: 4px; }
 #conflicts-list .cf-act { display: flex; flex-direction: column; align-items: stretch; gap: 3px; width: 300px; }
 #conflicts-list .cf-act > :not(.cf-act-icons):not(.cf-dismiss) { display: block; width: 100%; box-sizing: border-box; text-align: left;
-  margin: 0; padding: 5px 10px !important; border-radius: 6px; border: 0 !important; background: #f6f6fd !important;
+  margin: 0; padding: 5px 10px !important; border-radius: 6px; border: 0 !important; background: var(--accent-soft) !important;
   color: var(--text) !important; font-size: 14px !important; font-weight: 400 !important; line-height: 1.35; text-decoration: none !important;
   cursor: pointer; white-space: normal; height: auto; min-height: 0; }
 #conflicts-list .cf-act > :not(.cf-act-icons):not(.cf-dismiss):hover,
-#conflicts-list .cf-act > :not(.cf-act-icons):not(.cf-dismiss):focus-visible { background: #eceefb !important; outline: none; }
+#conflicts-list .cf-act > :not(.cf-act-icons):not(.cf-dismiss):focus-visible { background: var(--field-bg-hover) !important; outline: none; }
 #conflicts-list .cf-act > .cf-dismiss { margin-top: 22px; padding: 0 !important; border: 0 !important; background: none !important;
-  color: #52525b !important; font-size: 13.5px !important; font-weight: 400; text-align: left; text-decoration: none; cursor: pointer; }
+  color: var(--text-muted) !important; font-size: 13.5px !important; font-weight: 400; text-align: left; text-decoration: none; cursor: pointer; }
 #conflicts-list .cf-act > .cf-dismiss:hover, #conflicts-list .cf-act > .cf-dismiss:focus-visible { text-decoration: underline; text-underline-offset: 3px; }
 #conflicts-list .cf-act .cf-act-icons { display: flex; gap: 8px; justify-content: flex-end; margin-top: 6px; }
 .cf-close-all-row { display: flex; justify-content: flex-end; padding: 4px 16px 8px; }
@@ -757,11 +757,11 @@ details.feed-archive > summary.feed-section { cursor: pointer; }
 #decisions-list .cf-ico { color: var(--text-muted); padding-top: 2px; }
 #decisions-list .cf-main b { font-size: 15.5px; font-weight: 500; }
 #decisions-list .cf-main .page-sub { font-size: 15.5px !important; font-style: italic; color: var(--text-muted); margin-top: 4px; max-width: none; }
-#decisions-list .dec-meta { font-size: 13.5px; color: #52525b; margin-top: 4px; }
+#decisions-list .dec-meta { font-size: 13.5px; color: var(--text-muted); margin-top: 4px; }
 #decisions-list .cf-act { display: flex; flex-direction: column; gap: 3px; width: 300px; }
 #decisions-list .cf-act > .btn-sm { display: block; width: 100%; text-align: left; padding: 5px 10px !important; border-radius: 6px; border: 0 !important;
-  background: #f6f6fd !important; color: var(--text) !important; font-size: 14px !important; font-weight: 400; line-height: 1.35; }
-#decisions-list .cf-act > .btn-sm:hover, #decisions-list .cf-act > .btn-sm:focus-visible { background: #eceefb !important; }
+  background: var(--accent-soft) !important; color: var(--text) !important; font-size: 14px !important; font-weight: 400; line-height: 1.35; }
+#decisions-list .cf-act > .btn-sm:hover, #decisions-list .cf-act > .btn-sm:focus-visible { background: var(--field-bg-hover) !important; }
 .dec-head { display: flex; align-items: center; gap: 6px; margin: 4px 0 10px; font-size: 15.5px; }
 @media (max-width: 1100px) {
   #decisions-list .cf-row.conflict-card { grid-template-columns: 24px minmax(0, 1fr); }
@@ -781,9 +781,9 @@ details.feed-archive > summary.feed-section { cursor: pointer; }
 #system-messages .sm-text { font-size: 15.5px; }
 #system-messages .sm-acts { display: flex; flex-direction: column; align-items: stretch; gap: 3px; width: 300px; white-space: normal; }
 #system-messages .sm-acts .sm-more-btn { display: block; width: 100%; text-align: left; padding: 5px 10px; border-radius: 6px; border: 0;
-  background: #f6f6fd; color: var(--text); font-size: 14px; text-decoration: none; cursor: pointer; }
-#system-messages .sm-acts .sm-more-btn:hover, #system-messages .sm-acts .sm-more-btn:focus-visible { background: #eceefb; }
-#system-messages .sm-acts .system-resolve { margin-top: 22px; text-align: left; padding: 0; border: 0; background: none; color: #52525b;
+  background: var(--accent-soft); color: var(--text); font-size: 14px; text-decoration: none; cursor: pointer; }
+#system-messages .sm-acts .sm-more-btn:hover, #system-messages .sm-acts .sm-more-btn:focus-visible { background: var(--field-bg-hover); }
+#system-messages .sm-acts .system-resolve { margin-top: 22px; text-align: left; padding: 0; border: 0; background: none; color: var(--text-muted);
   font-size: 13.5px; text-decoration: none; cursor: pointer; }
 #system-messages .sm-acts .system-resolve:hover, #system-messages .sm-acts .system-resolve:focus-visible { text-decoration: underline; }
 #system-messages .sm-row .sys-details { grid-column: 2 / 4; }
@@ -795,7 +795,7 @@ details.feed-archive > summary.feed-section { cursor: pointer; }
 /* Пустой раздел технического экрана — тихой строкой, а не карточкой (владелец 15.10.26, Планёрка f7321f0): заголовок раздела
    и пометка второстепенным цветом; до следующего блока 12 px. */
 .mon-empty-line { font-size: 15.5px; margin: 4px 0 12px; }
-.mon-empty-line span { color: #52525b; font-size: 14px; }
+.mon-empty-line span { color: var(--text-muted); font-size: 14px; }
 
 /* Карточка-вопрос «Конфликтов» (Планёрка bc998cf): «что прозвучало» курсивом, вопрос — прямым основным цветом */
 #conflicts-list .cf-main .cf-question { font-size: 15.5px !important; font-style: normal; color: var(--text); margin-top: 6px; }
@@ -859,16 +859,16 @@ button.link:hover, .btn-link:hover, .linkbtn:hover, .search-reset-link:hover { b
 
 /* ==== Таблица задач внутри протокола (решение владелицы 18.10.2026, п. 2–3) ====
    Шапка — не тёмная полоса реестра, а как подзаголовок раздела протокола (`.doc-protocol > .doc-heading`): светлая заливка
-   #f3f2fb, текст #4b46a3, черта слева 3 px #6863bf, скругление справа. Только таблицы документа протокола (страница встречи
+   var(--accent-soft), текст #4b46a3, черта слева 3 px #6863bf, скругление справа. Только таблицы документа протокола (страница встречи
    и «Подготовка»); реестр, «Команда» и прочие таблицы — прежнее единое правило графита. Размеры шрифта и межстрочный не
    меняются. Значок «new» — задача этой встречи в едином списке: маленькая плашка в тон акцента, размер служебной строки. */
 #main .doc-protocol table.doc-table thead th, .doc-protocol table.doc-table thead th {
-  background: #f3f2fb !important; color: #4b46a3 !important; border-radius: 0 !important; }
+  background: var(--accent-soft) !important; color: var(--accent-text) !important; border-radius: 0 !important; }
 #main .doc-protocol table.doc-table thead th:first-child, .doc-protocol table.doc-table thead th:first-child {
   border-left: 3px solid #6863bf !important; }
 #main .doc-protocol table.doc-table thead th:last-child, .doc-protocol table.doc-table thead th:last-child {
   border-radius: 0 8px 8px 0 !important; }
-.doc-new { display: inline-block; margin: 0 6px 0 0; padding: 0 5px; border-radius: 6px; background: #f3f2fb; color: #4b46a3;
+.doc-new { display: inline-block; margin: 0 6px 0 0; padding: 0 5px; border-radius: 6px; background: var(--accent-soft); color: var(--accent-text);
   font-size: 13.5px; font-weight: 600; font-style: normal; line-height: 18px; vertical-align: 1px; cursor: help; }
 
 /* «Актуализировать задачи из реестра» (решение владелицы 20.10.2026, по образцу «Экрана встречи», одинаково с Планёркой): поиск —
@@ -958,7 +958,7 @@ a.mt-btn { text-decoration: none; }
 #reg-list .task-table :is(.btn-icon, .btn-sm.task-note, .btn-sm.task-revert):is(:hover, :focus-visible),
 #main:has(#users-list) :is(.team-table .btn-icon, .more-row .btn-sm, .list-more .btn-sm):is(:hover, :focus-visible) {
   background: var(--tint-hover); }
-#proto-list .proto-row:hover { background: #f5f5fc; }
+#proto-list .proto-row:hover { background: var(--accent-soft); }
 
 /* --- Экран входа (решения владелицы 18.10.2026) ----------------------------------------------------------
    Карточка входа поверх заставки-каркаса: шапка, левое меню, пустые блоки без данных (до входа данные не
