@@ -296,3 +296,101 @@ def test_задача_под_вопросом_подтвердить_или_сн
     assert c.get(f"/tasks/{tid}", headers=h("member")).json()["source_anchor"] is None
     assert c.post(f"/tasks/{tid}/under-question", json={"action": "confirm"}, headers=h()).json()["under_question_label"] is None
     assert c.post(f"/tasks/{tid}/under-question", json={"action": "drop"}, headers=h()).status_code == 400
+
+
+# --- группа в: протокол на полотне, замечания, единицы -----------------------------------------------------------------
+
+PROTO = """Протокол встречи 20.10.2026
+
+**Стеллажи:** договорились закончить монтаж второго ряда.
+
+| № | Задача | Ответственный | Срок | Откуда |
+|---|---|---|---|---|
+| 1 | Закончить монтаж второго ряда | Сидорова Вера | 30.10.2026 | запись |
+"""
+
+
+def _meeting_with_protocol(env):
+    st = env.st
+    mid = st.insert("meetings", project_id=env.pid, date=iso(-2), protocol_md=PROTO, protocol_built_at="2026-10-25T10:00:00",
+                    review_notes='[{"issue": "Срок назван неточно, проверьте дату", "quote": "до конца месяца", "severity": "minor"}]')
+    st.insert("protocol_versions", meeting_id=mid, version=1, protocol_md=PROTO, model="заглушка", built_at="2026-10-25T10:00:00")
+    tid = _task(env, description="Закончить монтаж второго ряда", source_meeting_id=mid, due_date="2026-10-30")
+    st.insert("sources", meeting_id=mid, name="Расшифровка.txt", kind="transcript", text=TRANSCRIPT, digest="x1", meta="{}")
+    return mid, tid
+
+
+def test_полотно_черновик_готово_и_запрет_пересборки(env):
+    c, h, st = env, env.h, env.st
+    mid, tid = _meeting_with_protocol(env)
+    ctx_ = c.get(f"/meetings/{mid}/minutes/edit-context", headers=h()).json()
+    assert ctx_["own_tasks"] and ctx_["draft"] is None and ctx_["log"] == []
+    row = next(r for r in ctx_["rows"] if r["kind"] == "task")
+    assert row["task"]["id"] == tid and row["task"]["due"] == "30.10.2026"
+    assert c.get(f"/meetings/{mid}/minutes/edit-context", headers=h("member")).status_code == 403
+    old = "**Стеллажи:** договорились закончить монтаж второго ряда."
+    r = c.post(f"/meetings/{mid}/minutes/edits", json={"version_id": ctx_["version_id"], "ops": [
+        {"kind": "block", "old": old, "new": "**Стеллажи:** договорились закончить монтаж второго ряда до 30.10."}]}, headers=h())
+    assert r.status_code == 200
+    assert "до 30.10" not in c.get(f"/meetings/{mid}/minutes", headers=h()).json()["content_md"]   # до «Готово» — прежняя
+    assert c.get(f"/meetings/{mid}/minutes/edit-context", headers=h()).json()["draft"]["edits"] == 1
+    assert c.post(f"/meetings/{mid}/minutes/edits/finish", json={"version_id": ctx_["version_id"]}, headers=h()).json()["saved"]
+    mins = c.get(f"/meetings/{mid}/minutes", headers=h()).json()
+    assert "до 30.10" in mins["content_md"] and mins["hand_edited"] is True
+    assert len(st.q("SELECT id FROM protocol_versions WHERE meeting_id=?", (mid,))) == 2
+    assert c.post(f"/meetings/{mid}/prepare-minutes?confirm=1&rebuild=true", headers=h()).status_code == 409
+    log = c.get(f"/meetings/{mid}/minutes/edit-context", headers=h()).json()["log"]
+    assert log and log[0]["place"] == "абзац"
+
+
+def test_полотно_поля_задачи_сразу_в_реестр_под_версией(env):
+    c, h = env, env.h
+    mid, tid = _meeting_with_protocol(env)
+    ctx_ = c.get(f"/meetings/{mid}/minutes/edit-context", headers=h()).json()
+    row = next(r for r in ctx_["rows"] if r["kind"] == "task")
+    ok = c.post(f"/meetings/{mid}/minutes/edits", json={"ops": [{"kind": "task", "task_id": tid, "version": row["task"]["version"],
+                                                                  "responsible": "Петров Илья", "due": "05.11.2026"}]}, headers=h())
+    assert ok.status_code == 200
+    t = c.get(f"/tasks/{tid}", headers=h()).json()
+    assert t["responsible_text"] == "Петров Илья" and t["due_date"] == "2026-11-05"
+    assert "Петров Илья | 05.11.2026" in c.get(f"/meetings/{mid}/minutes", headers=h()).json()["content_md"]
+    stale = c.post(f"/meetings/{mid}/minutes/edits", json={"ops": [{"kind": "task", "task_id": tid,
+                                                                     "version": row["task"]["version"], "due": ""}]}, headers=h())
+    assert stale.status_code == 409
+    bad = c.post(f"/meetings/{mid}/minutes/edits", json={"ops": [{"kind": "task", "task_id": tid, "status": "dropped"}]},
+                 headers=h())
+    assert bad.status_code == 400                                         # снятие — только с причиной
+    c.post(f"/meetings/{mid}/minutes/edits", json={"ops": [{"kind": "block", "old": "**Стеллажи:** договорились закончить "
+                                                            "монтаж второго ряда.", "new": "**Стеллажи:** иначе."}]}, headers=h())
+    assert c.post(f"/meetings/{mid}/minutes/edits/discard", headers=h()).json()["ok"]
+    assert c.get(f"/meetings/{mid}/minutes/edit-context", headers=h()).json()["draft"] is None
+
+
+def test_замечания_проверки_решения_и_возврат(env):
+    c, h = env, env.h
+    mid, _ = _meeting_with_protocol(env)
+    notes = c.get(f"/meetings/{mid}/minutes", headers=h()).json()["minor_findings"]
+    assert notes and notes[0]["run_id"] == mid and notes[0]["dismissed"] is False
+    r = c.post(f"/review-notes/{mid}/0", json={"action": "keep"}, headers=h())
+    assert r.status_code == 200 and "оставлено как есть" in r.json()["message"]
+    assert c.get(f"/meetings/{mid}/minutes", headers=h()).json()["minor_findings"][0]["dismissed"] is True
+    assert c.get("/review-notes/decisions", headers=h()).json()[0]["outcome"] == "keep"
+    c.post(f"/review-notes/{mid}/0", json={"action": "undo"}, headers=h())
+    assert c.get(f"/meetings/{mid}/minutes", headers=h()).json()["minor_findings"][0]["dismissed"] is False
+    assert c.post(f"/review-notes/{mid}/0", json={"action": "keep"}, headers=h("member")).status_code == 403
+
+
+def test_точечная_правка_и_единицы(env):
+    c, h, st = env, env.h, env.st
+    mid, _ = _meeting_with_protocol(env)
+    r = c.post(f"/meetings/{mid}/minutes/point-edit", json={"find": "второго ряда.", "replace": "второго ряда полностью."},
+               headers=h())
+    assert r.status_code == 200 and "полностью" in c.get(f"/meetings/{mid}/minutes", headers=h()).json()["content_md"]
+    assert c.post(f"/meetings/{mid}/minutes/point-edit", json={"find": "нет такого", "replace": "x"}, headers=h()).status_code == 400
+    uid = st.insert("units", meeting_id=mid, project_id=env.pid, kind="decision", text="Монтаж — до конца месяца",
+                    quote="договорились закончить монтаж", status="active")
+    units = c.get(f"/meetings/{mid}/units", headers=h()).json()
+    assert units[0]["kind"] == "Решение" and units[0]["status"] == "действует"
+    assert c.patch(f"/units/{uid}", json={"action": "reject"}, headers=h()).json()["status"] == "убрано"
+    assert c.patch(f"/units/{uid}", json={"action": "reopen"}, headers=h()).json()["status"] in ("действует", "открыт")
+    assert c.get("/units/meetings", headers=h()).json()[0]["id"] == mid
