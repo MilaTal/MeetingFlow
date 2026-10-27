@@ -184,10 +184,8 @@ def search(store, project_id: int, query: str, limit: int = 50, raw_speech: bool
     def add(kind, ref, mdate, text, s, title):
         res.append({"type": kind, "id": ref, "meeting_date": mdate, "title": title, "snippet": snippet(text, q),
                     "_s": s})
-    from .tablica_zadach import без_снятых
-    _t = store.q("SELECT description, status FROM tasks WHERE project_id=?", (project_id,))
-    _dropped = {r["description"] for r in _t if r["status"] == "dropped"}
-    _alive = {r["description"] for r in _t if r["status"] != "dropped"}
+    from .tablica_zadach import без_снятых, задачи_для_скрытия
+    _dropped, _alive = задачи_для_скрытия(store, project_id)        # проект с подпроектами (27.10.2026)
 
     def shown_md(md):
         return без_снятых(md, _dropped, _alive)
