@@ -370,6 +370,10 @@ class MeetingPipeline:
         if meta.get("asr_loops"):
             record["loops"] = meta["asr_loops"].get("петель", 0)
             record["loops_line"] = meta.get("asr_loops_line", "")
+            # подряд одинаковые строки, свёрнутые в первую (как ERP, 27.10.2026)
+            if meta["asr_loops"].get("свёрнуто_строк"):
+                record["collapsed_lines"] = meta["asr_loops"]["свёрнуто_строк"]
+                record["line_series"] = meta["asr_loops"].get("серий_строк", 0)
         if meta.get("recognized_share") is not None:
             record["recognized_share"] = meta["recognized_share"]
         try:
@@ -437,7 +441,7 @@ class MeetingPipeline:
         сводку и журнал распознавания; доля распознанного записи — туда же; карточка «Система» — по доле петель."""
         doc.text, итог = petlya.очистить(doc.text)
         meta = petlya.очистить_сводку(doc.meta, итог)
-        if итог.get("петель"):
+        if petlya.есть_находки(итог):        # петли и подряд одинаковые строки (как ERP, 27.10.2026)
             meta["asr_loops_line"] = petlya.строка_итога(итог)
         мера = polnota.по_записи(doc.text, meta.get("media_seconds"))
         if мера is not None:
@@ -560,7 +564,8 @@ class MeetingPipeline:
             self.journal.write(purpose=purpose, meeting_id=meeting_id, model=res.model, attempt=attempt,
                                prompt_tokens=res.prompt_tokens, completion_tokens=res.completion_tokens,
                                cost_usd=res.cost_usd, seconds=round(res.seconds, 2), chars=len(system) + len(user),
-                               **{k: raw[k] for k in ("route", "provider", "cost_source", "cached_tokens")
+                               **{k: raw[k] for k in ("route", "provider", "cost_source", "cached_tokens",
+                                                      "reasoning_effort")   # рассуждение вызова (27.10.2026)
                                   if raw.get(k) is not None})
             try:
                 return parse_json(res.text, self.prof.strip_think)

@@ -77,7 +77,7 @@ def _ds_point(журнал) -> lr.PointLLM:
 
 
 def test_общий_модуль_копия_erp():
-    """Копия общего клиента совпадает с ERP main 2ea59c1 (scripts/model_routes.py) до байта."""
+    """Копия общего клиента совпадает с ERP 595036d6 (scripts/model_routes.py) до байта."""
     assert hasattr(mr, "wire_request") and hasattr(mr, "stop_line") and mr.BAD_ANSWERS_PER_CALL == 2
     assert mr.CLAUDE_EFFORT_DEFAULT == "low"
 
