@@ -451,3 +451,252 @@ def test_поиск_два_этапа(env):
     assert d2["results"][0]["source_type"] == "transcript_hit" and d2["results"][0]["speaker"] == "Петров Илья"
     assert c.get("/search/deep?q=несуществующее слово", headers=h()).json()["message"] == "По запросу информации нет"
     assert c.get("/search/markers", headers=h()).json()["examples"]
+
+
+# --- группа е: «Разбор», карточки, «Возможные поручения», правила оператора --------------------------------------------
+
+def _card(env, kind, payload, meeting_id=None, title="Карточка"):
+    import json as _j
+    return env.st.insert("cards", project_id=env.pid, meeting_id=meeting_id, kind=kind, title=title,
+                         payload=_j.dumps(payload, ensure_ascii=False), status="open", created_at="2026-10-27T09:00:00")
+
+
+def test_разбор_одна_очередь_и_карточки_в_виде_erp(env):
+    c, h = env, env.h
+    tid = _task(env, doubt_reason="без опоры в записи")
+    _card(env, "task_doubt", {"task_id": tid, "description": "Подготовить акт приёмки"})
+    t2 = _task(env, description="Согласовать график", assignee=None)
+    cid = _card(env, "assign_person", {"task_id": t2, "named": "Вера", "candidates": [{"id": 1, "name": "Сидорова Вера"}]})
+    _card(env, "technical", {"error": "x"})
+    d = c.get("/razbor", headers=h()).json()
+    assert d["total"] == 2 and {x["source"] for x in d["items"]} == {"task", "card"} and d["norm"] == 15
+    assert c.get("/razbor", headers=h("member")).status_code == 403
+    lst = c.get("/task-conflicts?status=open", headers=h()).json()
+    assert [x["id"] for x in lst] == [cid] and lst[0]["source"] == "unconfirmed_person" and lst[0]["candidates"]
+    assert c.get("/badges", headers=h()).json()["razbor"] == 2
+    r = c.post("/razbor/batch", json={"source": "task", "ids": [tid], "action": "to_task"}, headers=h()).json()
+    assert r["done"] == 1 and c.get(f"/tasks/{tid}", headers=h()).json()["under_question_label"] is None
+
+
+def test_карточка_отметки_исполнителя_и_замечания(env):
+    c, h, st = env, env.h, env.st
+    tid = _task(env)
+    note = _card(env, "member_note", {"task_id": tid, "note": "Сделано — проверьте", "proposed": "done", "by": "Сидорова Вера"})
+    assert c.patch(f"/task-conflicts/{note}", json={"action": "accept"}, headers=h()).json()["status"] == "accepted"
+    assert c.get(f"/tasks/{tid}", headers=h()).json()["status"] == "done"
+    assert c.patch(f"/task-conflicts/{note}", json={"action": "accept"}, headers=h()).status_code == 409
+    rf = _card(env, "review_finding", {"issue": "Срок не прозвучал", "quote": "до пятницы"})
+    c.patch(f"/task-conflicts/{rf}", json={"action": "reject"}, headers=h())
+    assert st.get("cards", rf) is None                                      # «Замечание неверно» — карточки нет
+    held = _card(env, "held_task", {"description": "Закупить стеллажи", "quote": "закупить стеллажи"})
+    c.patch(f"/task-conflicts/{held}", json={"action": "custom", "custom_value": "Закупить стеллажи для второго ряда"},
+            headers=h())
+    assert any(t["description"] == "Закупить стеллажи для второго ряда" for t in c.get("/tasks", headers=h()).json())
+
+
+def test_возможные_поручения_порог_и_решения(env):
+    c, h, st = env, env.h, env.st
+    from meetflow.core import vozmozhnye
+    mid = st.insert("meetings", project_id=env.pid, date=iso(-1))
+    pa = st.insert("possible_assignments", project_id=env.pid, meeting_id=mid, meeting_date=iso(-1), text="Надо бы убрать склад",
+                   reason=vozmozhnye.НЕТ_АДРЕСАТА, state="новое", created_at=vozmozhnye.now())
+    lst = c.get("/possible-assignments", headers=h()).json()
+    assert lst["unresolved"] == 1 and lst["items"][0]["description"] == "Надо бы убрать склад"
+    assert c.get("/badges", headers=h()).json()["possible"] == 1
+    r = c.post(f"/possible-assignments/{pa}/to-task", json={"responsible": "Петров Илья"}, headers=h()).json()
+    assert r["state"] == "в задачу" and c.get(f"/tasks/{r['task_id']}", headers=h()).json()["responsible_text"] == "Петров Илья"
+    assert c.post(f"/possible-assignments/{pa}/not-task", headers=h()).status_code == 409
+    assert c.get("/possible-assignments/threshold", headers=h()).json()["enabled"] is False
+    assert c.put("/possible-assignments/threshold", json={"enabled": True}, headers=h()).json()["enabled"] is True
+    assert c.put("/possible-assignments/settings", json={"days": 400}, headers=h()).status_code == 400
+
+
+def test_порог_сборки_задача_без_адресата_в_возможные(make_pipe, store, project):
+    from meetflow.core import vozmozhnye
+    from conftest import TRANSCRIPT as TR
+    vozmozhnye.задать(store, True)
+    p = make_pipe()
+    mid = store.insert("meetings", project_id=project, date="2026-10-01", label="в")
+    p.ingest(project, mid, "t 01.10.2026.txt", TR.encode())
+    start = vozmozhnye.now()
+    tid = p.reg.add(project, "Обновить спецификации склада", None, mid, "обновить спецификации")
+    assert vozmozhnye.разделить_после_сборки(store, p.reg, project, mid, start) == 1
+    assert store.get("tasks", tid)["status"] == "dropped"
+    assert store.q("SELECT text FROM possible_assignments")[0]["text"] == "Обновить спецификации склада"
+
+
+def test_правила_оператора_отмена_и_возврат(env):
+    c, h, st = env, env.h, env.st
+    rid = st.insert("operator_rules", project_id=env.pid, kind="not_a_task", key="уборк склад", active=1,
+                    created_at="2026-10-27T09:00:00")
+    assert c.get("/operator-rules", headers=h()).json()[0]["state"] == "действует"
+    c.post(f"/operator-rules/{rid}/revoke", headers=h())
+    assert c.get("/operator-rules", headers=h()).json()[0]["state"] == "отменено"
+    c.post(f"/operator-rules/{rid}/restore", headers=h())
+    assert c.get("/operator-rules", headers=h()).json()[0]["state"] != "отменено"
+
+
+# --- группа ж: «Параметры системы», «Мониторинг RealTime», «Модели», «База голосов», «Разбор голосов», темы ----------
+
+def test_мониторинг_вид_erp_и_только_суперадмину(env):
+    c, h = env, env.h
+    assert c.get("/project-status/monitoring", headers=h("project_admin")).status_code == 403
+    d = c.get("/project-status/monitoring", headers=h()).json()
+    for k in ("services_live", "watch_folder", "recognition", "queues", "autorun", "awaiting_total", "llm_cost",
+              "runs_14_days", "llm_usage_7_days", "data_state", "paths", "disk", "auto_backup", "server", "roles",
+              "conflict_drop_unresolved_days", "service_log_keep_days", "auth_required"):
+        assert k in d, k
+    assert all({"name", "ok", "detail"} <= set(s) for s in d["services_live"])
+    assert d["queues"]["conflicts_norm"]["norm"] == 15
+    # «Все проекты» — папка не показывается: у каждого проекта своя
+    d0 = c.get("/project-status/monitoring", headers=h(project=0)).json()
+    assert d0["watch_folder"]["folder"] == "" and "выберите проект" in d0["watch_folder"]["poll_every_note"]
+
+
+def test_идущий_проход_папки_не_завис(env, tmp_path):
+    """Пульс прохода (dbc24a5) сохранён: идущий проход папки — «идёт проход…», а не «завис»."""
+    import time
+    c = env
+    intake = c.app.state.intake
+    intake._scanning[c.pid] = {"started": "2026-10-27T10:00:00", "step": "распознавание", "file": "a.mp3",
+                               "pulse": time.monotonic()}
+    st = intake.state(c.pid)
+    assert st["scan_in_progress"] and not st["stalled"]
+
+
+def test_папка_приёмник_по_проекту_в_два_шага_с_паролем(env, tmp_path):
+    c, h = env, env.h
+    from meetflow.web.erp.bezopasnost import hash_password
+    c.st.update("accounts", c.ids["super_admin"], password_hash=hash_password("Пароль-для-проверки-1"))
+    folder = tmp_path / "vhod"
+    folder.mkdir()
+    r = c.post("/project-status/watch-folder", json={"path": str(folder)}, headers=h(project=0))
+    assert r.status_code == 400 and "выберите проект" in r.json()["detail"]
+    q = c.post("/project-status/watch-folder", json={"path": str(folder)}, headers=h()).json()
+    assert "Склад" in q["question"] and q["preview"]["files_total"] == 0
+    bad = c.post("/project-status/watch-folder", json={"path": str(folder), "repeat_path": str(folder), "confirm": True,
+                                                       "current_password": "не тот"}, headers=h())
+    assert bad.status_code == 403
+    ok = c.post("/project-status/watch-folder", json={"path": str(folder), "repeat_path": str(folder), "confirm": True,
+                                                      "current_password": "Пароль-для-проверки-1"}, headers=h())
+    assert ok.status_code == 200, ok.text
+    assert Path(c.app.state.intake.folder(c.pid)) == folder.resolve()
+    other = c.post("/project-status/watch-folder", json={"path": str(folder)}, headers=h(project=c.pid2))
+    assert other.status_code == 400 and "другого проекта" in other.json()["detail"]
+    assert c.post("/project-status/watch-folder/interval", json={"seconds": 120}, headers=h()).json() == {"seconds": 120}
+    assert c.get("/project-status/monitoring", headers=h()).json()["watch_folder"]["poll_every_sec"] == 120
+
+
+def test_выключатели_и_сроки(env):
+    c, h = env, env.h
+    assert c.post("/project-status/autorun", json={"enabled": True}, headers=h()).json() == {"enabled": True}
+    assert c.get("/project-status/autorun", headers=h(project=c.pid2)).json() == {"enabled": False}
+    assert c.post("/project-status/conflict-drop-days", json={"days": 0}, headers=h()).status_code == 400
+    assert c.post("/project-status/conflict-drop-days", json={"days": 5}, headers=h()).json() == {"days": 5}
+    assert c.post("/project-status/service-log-keep", json={"days": 14}, headers=h()).json() == {"days": 14}
+    assert c.get("/project-status/monitoring", headers=h()).json()["service_log_keep_days"] == 14
+    sub = c.post("/project-status/system-subprojects", json={"items": [{"name": "Склад А"}, {"name": "Склад А"}]},
+                 headers=h()).json()
+    assert sub["items"] == [{"name": "Склад А"}] and sub["all"] == "Весь проект Склад"
+    sp = c.post("/project-status/system-project", json={"name": "Склад Северный", "aliases": "Северный; СС"}, headers=h())
+    assert sp.json() == {"name": "Склад Северный", "aliases": "Северный; СС"}
+
+
+def test_общий_пароль_закрывает_сессии_по_нему(env):
+    c, h = env, env.h
+    assert c.get("/project-status/shared-password", headers=h()).json()["is_set"] is False
+    cols = {r["name"] for r in c.st.q("PRAGMA table_info(sessions)")}
+    vals = {"account_id": c.ids["member"], "token": "t-1", "via_shared": 1, "created_at": "2026-10-27T10:00:00",
+            "expires_at": "2099-01-01T00:00:00"}
+    sid = c.st.insert("sessions", **{k: v for k, v in vals.items() if k in cols})
+    assert c.post("/project-status/shared-password", json={"new_password": "123"}, headers=h()).status_code == 400
+    r = c.post("/project-status/shared-password",
+               json={"new_password": "Север-Склад-27x", "repeat_password": "Север-Склад-27x"}, headers=h()).json()
+    assert r["is_set"] and r["sessions_closed"] == 1 and c.st.get("sessions", sid) is None
+
+
+def test_системные_сообщения_закрыть_и_удалить(env):
+    from meetflow.core.store import now
+    c, h = env, env.h
+    for i in range(3):
+        c.st.insert("cards", kind="technical", title=f"Сбой {i}", payload='{"message": "проверка"}', status="open",
+                    created_at=now())
+    d = c.get("/project-status/errors?with_total=true", headers=h()).json()
+    assert d["total"] == 3 and {"id", "created_at", "source", "context", "message", "resolved"} <= set(d["items"][0])
+    assert c.post(f"/project-status/errors/{d['items'][0]['id']}/resolve", headers=h()).status_code == 204
+    assert c.get("/project-status/errors/count", headers=h()).json()["count"] == 2
+    assert c.post("/project-status/errors/delete-all", json={}, headers=h()).status_code == 400
+    assert c.post("/project-status/errors/delete-all", json={"confirm": True}, headers=h()).json()["count"] == 3
+
+
+def test_ожидает_ввода_вид_erp(env):
+    c, h = env, env.h
+    d = c.get("/project-status/awaiting-input", headers=h()).json()
+    assert {"total", "groups", "note", "under_question"} <= set(d)
+    for g in d["groups"]:
+        assert {"title", "count", "what", "consequence", "where", "where_text"} <= set(g)
+
+
+def test_темы_планёрок_день_недели_и_выбор_вручную(env):
+    c, h = env, env.h
+    mon = date.today() - timedelta(days=date.today().weekday()) + timedelta(days=7)
+    mid = c.st.insert("meetings", project_id=c.pid, date=mon.isoformat(), status="planned")
+    assert c.post("/meeting-topics", json={"name": "Стройка"}, headers=h("project_admin")).status_code == 403
+    t = c.post("/meeting-topics", json={"name": "Стройка", "weekdays": [1], "sections": ["Объекты", "Сроки"]},
+               headers=h()).json()
+    assert t["weekdays"] == [1] and t["sections"] == ["Объекты", "Сроки"]
+    assert c.post("/meeting-topics", json={"name": "стройка"}, headers=h()).status_code == 409
+    got = c.get(f"/meeting-topics/meeting/{mid}", headers=h()).json()
+    assert got["name"] == "Стройка" and got["source"] == "день недели"
+    assert c.app.state.pipe._skeleton(c.st.get("meetings", mid)) == ["Объекты", "Сроки"]
+    off = c.put(f"/meeting-topics/meeting/{mid}", json={"topic_id": None}, headers=h("project_admin")).json()
+    assert off["name"] is None and off["source"] == "вручную"
+    c.patch(f"/meeting-topics/{t['id']}", json={"is_active": False}, headers=h())
+    assert c.put(f"/meeting-topics/meeting/{mid}", json={"topic_id": t["id"]}, headers=h()).status_code == 400
+
+
+def test_словарь_распознавания(env):
+    c, h = env, env.h
+    d = c.get("/recognition-settings", headers=h()).json()
+    assert {"asr_vocab", "project_only_heard"} <= set(d) and "Склад" in d["asr_vocab"]["preview"]
+    d2 = c.put("/recognition-settings", json={"key": "asr_vocab", "enabled": True}, headers=h()).json()
+    assert d2["asr_vocab"]["enabled"] is True and d2["asr_vocab"]["setting"] is True
+    assert c.put("/recognition-settings", json={"key": "лишнее", "enabled": True}, headers=h()).status_code == 400
+
+
+def test_база_и_разбор_голосов_без_базы(env):
+    c, h = env, env.h
+    assert c.get("/project-status/voice-base", headers=h()).json()["configured"] is False
+    q = c.get("/voice/review", headers=h()).json()
+    assert q["configured"] is False and q["gruppy"] == []
+    assert c.post("/voice/review/decision", json={"ids": [1], "reshenie": "yes", "imya": "Иван"}, headers=h()).status_code == 400
+    assert c.post("/voice/review/ne-po-pravilu", json={"ids": [1]}, headers=h()).status_code == 409
+
+
+def test_модели_только_суперадмину(env):
+    c, h = env, env.h
+    assert c.get("/project-status/models", headers=h("project_admin")).status_code == 403
+    assert c.post("/project-status/models/role", json={"role": "generate", "point": "x", "action": "move"},
+                  headers=h()).status_code == 400
+
+
+def test_проекты_завести_переименовать_архив(env):
+    """Многопроектность — разрешённое отличие от ERP: «Параметры системы» → «Проекты»."""
+    c, h = env, env.h
+    assert c.get("/projects-list/all", headers=h("project_admin")).status_code == 403
+    n = c.post("/projects-list", json={"name": "Цех сборки", "aliases": "ЦС; сборка"}, headers=h())
+    assert n.status_code == 201 and n.json()["aliases"] == ["ЦС", "сборка"]
+    assert c.post("/projects-list", json={"name": "цех  сборки"}, headers=h()).status_code == 409
+    pid = n.json()["id"]
+    assert c.patch(f"/projects-list/{pid}", json={"name": "Цех сборки 2", "aliases": ""}, headers=h()).json()["name"] == "Цех сборки 2"
+    assert c.patch(f"/projects-list/{pid}", json={"archived": True}, headers=h()).json()["archived"] is True
+    assert pid not in [p["id"] for p in c.get("/projects-list", headers=h()).json()]
+    assert c.patch(f"/projects-list/{pid}", json={"archived": False}, headers=h()).json()["archived"] is False
+    nav = (STATIC / "nav.js").read_text(encoding="utf-8")
+    assert '{ k: "projects", label: "Проекты", href: "#system/projects" }' in nav and "async function renderProjectsAdmin()" in nav
+
+
+def test_фронт_erp_v73_рассуждение_и_голоса():
+    """Фронт ERP взят с b0d8ab7 (статика v73): «Модели» — рассуждение точки, «Ждут опознания голоса» открыта."""
+    js = (STATIC / "app.js").read_text(encoding="utf-8")
+    assert "рассуждениеТочки" in js

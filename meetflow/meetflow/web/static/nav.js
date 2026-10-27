@@ -392,6 +392,8 @@ const СИСТЕМА_ВКЛАДКИ = [
   // вкладки в ряду не было, прежняя кнопка спрятана с 13.10.2026); на ней карточка «Проект системы»
   { k: "settings", label: "Настройки", href: "#system/settings" },
   { k: "decisions", label: "Реестр решений", href: "#system/decisions" },
+  // MeetFlow: проектов несколько — завести, переименовать, убрать в архив (разрешённое отличие от ERP, 27.10.2026)
+  { k: "projects", label: "Проекты", href: "#system/projects" },
   { k: "units", label: "Единицы встреч (тест)", href: "#units", толькоЕдиницы: true },
 ];
 // «Мониторинг RealTime», «Модели», «База голосов» — с 14.10.26 своими пунктами слева в блоке супер-администратора (владелец:
@@ -438,6 +440,7 @@ const _параметрыСистемы = routes.system;
 routes.system = async (rest) => {
   let вкладка = (rest && rest[0]) || "messages";
   if (вкладка === "params") вкладка = "static";          // прежний адрес «Параметров»
+  if (вкладка === "projects") { await renderProjectsAdmin(); return; }
   const адрес = location.hash;
   // Шапка «Системы» — сразу по шапке прежнего экрана, которую он рисует до загрузки; после загрузки — ещё раз
   // (раньше 0,7 с стоял заголовок «Параметры системы» с прежними кнопками, потом экран прыгал — замер 13.10.26).
@@ -516,3 +519,54 @@ routes.models = async (rest) => {
 // Перерисовки мимо render() держат прокрутку на месте (18.10.26, `сПрокруткойНаМесте`): список встреч, «Подготовка».
 renderProtocols = сПрокруткойНаМесте(renderProtocols);
 renderPrep = сПрокруткойНаМесте(renderPrep);
+
+
+// «Параметры системы» → «Проекты» (MeetFlow, 27.10.2026). В ERP проект один и задаётся на «Настройках»; в MeetFlow их
+// несколько — это одно из двух разрешённых отличий. Папка-приёмник у каждого проекта своя: задаётся на «Мониторинге
+// RealTime», когда проект выбран внизу левой панели.
+async function renderProjectsAdmin() {
+  $main.innerHTML = системаВкладкиHtml("projects") + `<div class="page-sub">Проекты компании. Новый проект сразу появляется
+    в выборе внизу левой панели; проект в архиве из выбора убирается, его встречи и задачи сохраняются.</div>
+    <div class="card"><form id="prj-new" class="hstack" style="flex-wrap:wrap; gap:8px">
+      <input id="prj-new-name" placeholder="Название проекта" maxlength="200" style="min-width:240px">
+      <input id="prj-new-aliases" placeholder="Варианты написания через «;»" maxlength="2000" style="min-width:280px">
+      <button class="btn-sm btn-primary" type="submit">Завести проект</button></form></div>
+    <div id="prj-list" class="card empty-state">Загрузка…</div>`;
+  const список = document.getElementById("prj-list");
+  const нарисовать = async () => {
+    let rows;
+    try { rows = await api("/projects-list/all"); } catch (err) { список.textContent = "Не удалось загрузить: " + err.message; return; }
+    список.classList.remove("empty-state");
+    список.innerHTML = `<table class="tbl"><thead><tr><th>Проект</th><th>Варианты написания</th><th>Встреч</th>
+      <th>Активных задач</th><th>Папка-приёмник</th><th></th></tr></thead><tbody>${rows.map(p => `<tr data-id="${p.id}">
+      <td><input class="prj-name" value="${esc(p.name)}" maxlength="200"${p.archived ? " disabled" : ""}>${p.archived ? ' <span class="page-sub">в архиве</span>' : ""}</td>
+      <td><input class="prj-aliases" value="${esc((p.aliases || []).join("; "))}" maxlength="2000"${p.archived ? " disabled" : ""}></td>
+      <td>${p.meetings}</td><td>${p.active_tasks}</td><td>${p.watch_folder ? esc(p.watch_folder) : "не задана"}</td>
+      <td class="hstack">${p.archived ? `<button class="btn-sm prj-restore">Вернуть из архива</button>`
+        : `<button class="btn-sm prj-save">Сохранить</button><button class="btn-sm prj-archive">В архив</button>`}</td></tr>`).join("")}</tbody></table>`;
+    список.querySelectorAll("tr[data-id]").forEach(tr => {
+      const id = tr.dataset.id;
+      const изменить = async (тело, текст) => {
+        try { await api(`/projects-list/${id}`, { method: "PATCH", json: тело }); toast(текст); await загрузитьПроекты(); await нарисовать(); }
+        catch (err) { toast(err.message, true); }
+      };
+      tr.querySelector(".prj-save")?.addEventListener("click", () => изменить(
+        { name: tr.querySelector(".prj-name").value, aliases: tr.querySelector(".prj-aliases").value }, "Проект сохранён"));
+      tr.querySelector(".prj-archive")?.addEventListener("click", () => {
+        if (confirm("Убрать проект в архив? Встречи и задачи сохранятся, папка-приёмник проекта выключится.")) изменить({ archived: true }, "Проект в архиве");
+      });
+      tr.querySelector(".prj-restore")?.addEventListener("click", () => изменить({ archived: false }, "Проект возвращён"));
+    });
+  };
+  document.getElementById("prj-new").addEventListener("submit", async (e) => {
+    e.preventDefault();
+    try {
+      await api("/projects-list", { method: "POST", json: { name: document.getElementById("prj-new-name").value,
+        aliases: document.getElementById("prj-new-aliases").value } });
+      toast("Проект заведён");
+      document.getElementById("prj-new-name").value = ""; document.getElementById("prj-new-aliases").value = "";
+      await загрузитьПроекты(); await нарисовать();
+    } catch (err) { toast(err.message, true); }
+  });
+  await нарисовать();
+}

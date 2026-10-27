@@ -23,6 +23,12 @@ class Toggle(BaseModel):
     enabled: bool
 
 
+class ProjectIn(BaseModel):
+    name: str | None = None
+    aliases: str | None = ""
+    archived: bool | None = None
+
+
 def open_conflicts(ctx: Ctx, request: Request) -> int:
     extra, args = ctx.scope_sql(request)
     return len(ctx.store.q("SELECT id FROM cards WHERE status='open' AND kind NOT IN (?,?,?)" + extra,
@@ -97,4 +103,54 @@ def mount(r: APIRouter, ctx: Ctx) -> None:
         rows = store.q("SELECT id, name, archived FROM projects ORDER BY name")
         return [{"id": p["id"], "name": p["name"]} for p in rows if not p.get("archived")]
 
-    _ = HTTPException
+    # «Параметры системы» → «Проекты»: завести, переименовать, убрать в архив и вернуть (многопроектность MeetFlow —
+    # разрешённое отличие от ERP, где проект один). Папка-приёмник проекта — на «Мониторинге RealTime» при выбранном проекте.
+    def project_out(p: dict) -> dict:
+        from .obshchee import loads
+        n = store.q("SELECT (SELECT COUNT(*) FROM meetings WHERE project_id=?) AS m, "
+                    "(SELECT COUNT(*) FROM tasks WHERE project_id=? AND status='active') AS t", (p["id"], p["id"]))[0]
+        return {"id": p["id"], "name": p["name"], "aliases": loads(p.get("aliases"), []), "archived": bool(p.get("archived")),
+                "meetings": n["m"], "active_tasks": n["t"], "watch_folder": ctx.intake.folder(p["id"]) or ""}
+
+    @r.get("/projects-list/all")
+    def projects_all(request: Request):
+        ctx.need_super(request)
+        return [project_out(p) for p in store.q("SELECT * FROM projects ORDER BY COALESCE(archived,0), name")]
+
+    def clean(body: "ProjectIn") -> tuple[str, str]:
+        import json
+        name = " ".join((body.name or "").split())
+        if not name:
+            raise HTTPException(400, "Название проекта не задано")
+        aliases = [a.strip() for a in (body.aliases or "").replace(chr(10), ";").split(";") if a.strip()]
+        return name, json.dumps(aliases, ensure_ascii=False)
+
+    @r.post("/projects-list", status_code=201)
+    def project_create(body: ProjectIn, request: Request):
+        from ...core.store import now
+        u = ctx.need_super(request)
+        name, aliases = clean(body)
+        if any(" ".join(p["name"].lower().replace("ё", "е").split()) == name.lower().replace("ё", "е")
+               for p in store.q("SELECT name FROM projects")):
+            raise HTTPException(409, f"Проект «{name}» уже есть")
+        pid = store.insert("projects", name=name, theme=ctx.theme.id, aliases=aliases, active=1, archived=0, created_at=now())
+        ctx.sys_msg(f"Заведён проект «{name}»", f"Завёл: {ctx.name(u)}.", "settings")
+        return project_out(store.get("projects", pid))
+
+    @r.patch("/projects-list/{pid}")
+    def project_edit(pid: int, body: ProjectIn, request: Request):
+        u = ctx.need_super(request)
+        p = store.get("projects", pid)
+        if not p:
+            raise HTTPException(404, "Проекта нет")
+        vals = {}
+        if body.name is not None:
+            vals["name"], vals["aliases"] = clean(body)
+        if body.archived is not None:
+            if body.archived and not p.get("archived") and                     len(store.q("SELECT id FROM projects WHERE COALESCE(archived,0)=0")) <= 1:
+                raise HTTPException(400, "Последний действующий проект в архив не убирается")
+            vals["archived"] = int(body.archived)
+        store.update("projects", pid, **vals)
+        if body.archived:
+            ctx.intake.set_folder(pid, None, ctx.name(u))     # у архивного проекта приёмник выключен
+        return project_out(store.get("projects", pid))

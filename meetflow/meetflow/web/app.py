@@ -1079,6 +1079,9 @@ def create_app(theme_name: str | None = None, db_path: str | None = None, journa
             out = dict(out, rule=rule["status_text"])
         return out
 
+    app.state.resolve_card = resolve       # тот же разбор карточки — для «Разбора» фронта ERP (web/erp/razbor.py)
+    app.state.ResolveIn = ResolveIn
+
     @app.get("/api/projects/{pid}/decisions")
     def decisions(pid: int, u: dict = Depends(admin)):
         return store.q("SELECT what, decision, why, at FROM decisions WHERE project_id=? ORDER BY id DESC", (pid,))
@@ -1640,6 +1643,10 @@ def create_app(theme_name: str | None = None, db_path: str | None = None, journa
         # Системных сообщений в очереди оператора нет (владелец 12.10.26, локальная машина abb5789: «убери блок —
         # здесь это дублирование, они уже есть на отдельной странице мониторинга»). Очередь — только работа людей.
         return out
+
+    # те же службы, ожидание оператора и база голосов — для «Мониторинга» и «Параметров системы» фронта ERP (web/erp/sistema.py)
+    app.state.mf_services, app.state.mf_awaiting, app.state.mf_tech_cleanup = _services, _awaiting, _tech_cleanup
+    app.state.mf_voice_base, app.state.mf_komanda, app.state.mf_v_komande = _voice_base, _komanda, v_komande
 
     @app.get("/api/monitoring/live")
     def mon_live(pid: int | None = None, u: dict = Depends(super_admin)):

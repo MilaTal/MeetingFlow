@@ -20,6 +20,7 @@ OPEN_PATHS = {"/auth/mode", "/auth/login", "/auth/logout", "/auth/first-login", 
 
 def mount(app: FastAPI, **parts) -> Ctx:
     ctx = Ctx(**parts)
+    ctx.app = app
     app.state.erp = ctx
     r = APIRouter()
     from . import karkas, komanda

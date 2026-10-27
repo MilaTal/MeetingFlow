@@ -310,7 +310,7 @@ class PointLLM(LLMConnector):
             return
         rec = {"ts": time.strftime("%Y-%m-%dT%H:%M:%S"), "purpose": purpose, "route": self.point, "stop": line,
                "discarded": reason, "finish_reason": finish, "chars_out": len(text or ""),
-               "reasoning_chars": len(reasoning or ""), **extra}
+               "reasoning_chars": len(reasoning or ""), **mr.journal_reasoning(self.route, self.model), **extra}
         try:
             p = Path(self.journal_path)
             p.parent.mkdir(parents=True, exist_ok=True)
@@ -416,7 +416,9 @@ class PointLLM(LLMConnector):
                              int(usage.get("completion_tokens") or 0), float(cost.get("cost_usd") or 0.0),
                              time.monotonic() - t0,
                              {"usage": usage, "finish_reason": finish, "route": self.point, "provider": self.provider,
-                              "cost_source": cost.get("cost_source"), "cached_tokens": cost.get("cached_tokens")})
+                              "cost_source": cost.get("cost_source"), "cached_tokens": cost.get("cached_tokens"),
+                              # с каким рассуждением ушёл вызов — в строку журнала (как ERP, 27.10.2026)
+                              **mr.journal_reasoning(self.route, self.model)})
         raise ConnectorUnavailable(f"{self.label} не ответил после {self.attempts} попыток ({last}).")
 
 

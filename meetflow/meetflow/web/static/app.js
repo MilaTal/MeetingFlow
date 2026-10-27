@@ -1987,7 +1987,7 @@ document.getElementById("change-password-btn")?.addEventListener("click", () => 
 // 2–3 минуты нарезок со своими экранами ERP и подписями, без голоса, на вымышленных людях и проектах. Пункт — в самом низу
 // блока «Вы работаете как», виден всем ролям. Файл лежит рядом с фронтом и отдаётся статикой; версия в адресе — та же
 // ступень, что у app.js, чтобы новый ролик не застрял в кэше.
-const ВИДЕО_КАК_ПОЛЬЗОВАТЬСЯ = "media/kak_polzovatsya.mp4?v=20261018v72";
+const ВИДЕО_КАК_ПОЛЬЗОВАТЬСЯ = "media/kak_polzovatsya.mp4?v=20261018v73";
 async function renderHelp() {
   $main.innerHTML = `
     <div class="doc-head"><h1>Как пользоваться</h1></div>
@@ -5405,11 +5405,11 @@ async function renderStatus(rest) {
       ${строкаХода}
       <span class="doc-head-spacer"></span>
       ${кнопкаПересчёта}
-      ${doc.available ? `<a class="btn btn-sm" href="${base}/export" target="_blank">Скачать .docx</a>` : ""}
+      ${doc.available ? `<a class="btn btn-sm" href="${base}/export?project_id=${выбранныйПроект()}" target="_blank">Скачать .docx</a>` : ""}
       ${doc.available && isAdmin() ? полотноПереключатель(base, полотноРежим(base)) : ""}
     </div>
     <div id="status-refresh-note" class="page-sub"></div>
-    ${docBlock(doc, `${base}/export`, null, base, blockId, { compact: true, noBar: true })}`;
+    ${docBlock(doc, `${base}/export?project_id=${выбранныйПроект()}`, null, base, blockId, { compact: true, noBar: true })}`;
   if (doc.available) await подключитьПолотноДокумента(blockId, base, doc.content_md, () => renderStatus(rest), null);
   wireRecalcButton();
 }
@@ -7579,6 +7579,26 @@ function стоимостьМоделиHtml(c, полная, встреча) {
   return html + `<div class="page-sub" style="margin-top:8px">${esc(c.note)} Данные на ${esc(c.as_of)}, дни — по Москве.</div>`;
 }
 
+// Рассуждение точки так, как оно уйдёт в вызов (решение владелицы 27.10.2026; близнец model_routes.reasoning_sent).
+// DeepSeek на точке openai/openrouter при «как у модели» — выключено (решение 16.10.2026 «вернуть в статус 0»); Claude
+// по адресу api.anthropic.com — «как у модели» = понемногу (low), high — полностью, выключить нельзя.
+function адресClaude(url) {
+  return /^https?:\/\/api\.anthropic\.com(?=[:/?#]|$)/i.test(String(url || "").trim());
+}
+function рассуждениеТочки(kind, model, url, reasoning) {
+  const режим = reasoning || "auto";
+  if (kind !== "openai" && kind !== "openrouter") return "";
+  if (kind === "openai" && адресClaude(url)) return режим === "high" ? "полностью (high)" : "понемногу (low)";
+  if (режим === "none" || (режим === "auto" && String(model || "").toLowerCase().includes("deepseek"))) return "выключено";
+  if (режим === "low") return "понемногу (low)";
+  if (режим === "high") return "полностью (high)";
+  return "";
+}
+function рассуждениеСтрокой(kind, model, url, reasoning) {
+  const р = рассуждениеТочки(kind, model, url, reasoning);
+  return р === "выключено" ? "рассуждение выключено" : р ? `рассуждение: ${р}` : "";
+}
+
 async function renderModelRoutes(el, base, apiOpts = {}) {
   if (!el) return;
   const keep = { bookOpen: !!el.querySelector("details.model-book[open]") };
@@ -7649,7 +7669,7 @@ async function renderModelRoutes(el, base, apiOpts = {}) {
         ? `<span class="route-radio on" style="display:inline-block" aria-label="основная" title="Основная"></span>`
         : `<button class="route-radio" data-route-use="${esc(role)}|${esc(p.name)}" aria-label="Сделать основной: ${esc(p.name)}" title="Сделать основной. ${esc(ПОДСКАЗКА_СМЕНЫ)}"></button>`}</td>
       <td class="mon-key">${esc(p.name)}${p.external ? внешняяМетка : ""}</td>
-      <td class="mon-val"><span title="${esc(p.model || "")}">${esc(чейМодель(p))}</span>${p.url ? `<div class="page-sub">${esc(p.url)}</div>` : ""}${p.reasoning === "none" ? `<div class="page-sub">рассуждение выключено</div>` : p.reasoning === "low" || p.reasoning === "high" ? `<div class="page-sub">рассуждение: ${p.reasoning === "low" ? "понемногу (low)" : "полностью (high)"}</div>` : ""}</td>
+      <td class="mon-val"><span title="${esc(p.model || "")}">${esc(чейМодель(p))}</span>${p.url ? `<div class="page-sub">${esc(p.url)}</div>` : ""}${рассуждениеСтрокой(p.kind, p.model, p.url, p.reasoning) ? `<div class="page-sub">${esc(рассуждениеСтрокой(p.kind, p.model, p.url, p.reasoning))}</div>` : ""}</td>
       <td>${p.state.startsWith("выведена") ? `<span class="badge badge-danger">${esc(p.state)}</span>`
         : `<span class="${i === 0 ? "route-state-on" : "page-sub"}" style="margin:0">${esc(p.state)}</span>`}${p.last_error ? `<div class="page-sub">${esc(p.last_error)}</div>` : ""}</td>
       <td style="text-align:right; width:90px">${inFile && (pts.length > 1 || role === "agreements" || role === "guard") ? `<button class="btn-link" data-route-remove="${esc(role)}|${esc(p.name)}">Убрать</button>` : ""}</td>
@@ -7662,7 +7682,7 @@ async function renderModelRoutes(el, base, apiOpts = {}) {
       : изПеременных ? `<div class="page-sub">Роль не описана в models.json — распознавание по WEBAPP_WHISPER_MODEL на этой машине. «Сделать основной» добавит роль в файл.</div>` : ""}`;
   }).join("");
   const eps = d.endpoints || [];
-  const fieldText = e => { const f = e.fields || {}; return [shortModel(f.model), f.callable, f.url, f.path ? "папка " + f.path : "", f.device ? "device " + f.device : "", f.reasoning === "none" ? "рассуждение выключено" : f.reasoning === "low" ? "рассуждение понемногу (low)" : f.reasoning === "high" ? "рассуждение полностью (high)" : "", f.max_tokens ? `потолок ответа ${f.max_tokens} токенов` : ""].filter(Boolean).join(" · "); };
+  const fieldText = e => { const f = e.fields || {}; return [shortModel(f.model), f.callable, f.url, f.path ? "папка " + f.path : "", f.device ? "device " + f.device : "", рассуждениеСтрокой(e.kind, f.model, f.url, f.reasoning), f.max_tokens ? `потолок ответа ${f.max_tokens} токенов` : ""].filter(Boolean).join(" · "); };
   const nDraft = eps.filter(e => e.missing).length;
   const book = `<h3 style="margin:22px 0 4px">Список подключений</h3>
     <div class="page-sub">Реестр точек вызова (endpoints в models.json). Текст: openai — OpenAI-совместимый сервер, ollama,
@@ -7813,8 +7833,10 @@ async function renderModelRoutes(el, base, apiOpts = {}) {
               placeholder="${задан ? esc(задан) + " — оставьте пустым, чтобы не менять" : "вставьте ключ, полученный у поставщика"}">` : ""}
             <div class="page-sub" data-key-info-text hidden>${esc(ПОДСКАЗКА_КЛЮЧА)}</div></div>`;
         }
-        return `<div class="field"><label>${esc(f.label)}${f.required ? "" : " — необязательно"}</label>${f.choices
-          ? `<select data-f="${esc(f.key)}">${f.choices.map(c => `<option value="${esc(c)}"${(val(f.key) || f.default || f.choices[0]) === c ? " selected" : ""}>${esc((f.choice_titles || {})[c] || c)}</option>`).join("")}</select>${f.help ? `<div class="page-sub">${esc(f.help)}</div>` : ""}`
+        // У Claude (api.anthropic.com) рассуждение не выключается — в выборе только auto / low / high (27.10.2026)
+        const выбор = f.key === "reasoning" && kind === "openai" && адресClaude(val("url")) ? (f.choices || []).filter(c => c !== "none") : f.choices;
+        return `<div class="field"><label>${esc(f.label)}${f.required ? "" : " — необязательно"}</label>${выбор
+          ? `<select data-f="${esc(f.key)}">${выбор.map(c => `<option value="${esc(c)}"${(val(f.key) || f.default || выбор[0]) === c ? " selected" : ""}>${esc((f.choice_titles || {})[c] || c)}</option>`).join("")}</select>${f.help ? `<div class="page-sub">${esc(f.help)}</div>` : ""}`
           : `<input type="text" data-f="${esc(f.key)}" value="${esc(val(f.key) || (ep || (cur && f.key in cur) ? "" : f.default || ""))}" placeholder="${esc(f.hint || "")}"${f.key === "url" && hints.length ? ` list="ep-url-hints"` : ""}>`}${f.key === "url" && hints.length
           ? `<datalist id="ep-url-hints">${hints.map(h => `<option value="${esc(h.url)}">${esc(h.title)}</option>`).join("")}</datalist>
             <div class="page-sub">Внешний поставщик: ${hints.map(h => `${esc(h.title)} — ${esc(h.url)}`).join("; ")}.</div>` : ""}</div>`;
@@ -7917,9 +7939,9 @@ async function renderModelRoutes(el, base, apiOpts = {}) {
       <p><b>Два способа подключения, оба рабочие</b></p>
       <ul>
         <li>Через OpenRouter: тип подключения OpenRouter, адрес https://openrouter.ai/api, ключ OpenRouter, модель — любая из каталога OpenRouter, имя так, как оно записано в каталоге.</li>
-        <li>Напрямую через API поставщика, например DeepSeek: тип подключения «Свой сервер моделей, OpenAI-совместимый (LM Studio, vLLM, Ollama /v1) или внешний поставщик», адрес https://api.deepseek.com, модель deepseek-flash, ключ DeepSeek.</li>
+        <li>Напрямую через API поставщика, например DeepSeek: тип подключения «Свой сервер моделей, OpenAI-совместимый (LM Studio, vLLM, Ollama /v1) или внешний поставщик», адрес https://api.deepseek.com, модель deepseek-flash, ключ DeepSeek. Рассуждение у DeepSeek «как у модели» — выключено (решение 16.10.2026): весь потолок ответа уходит на ответ; «понемногу» или «полностью» включают его явно.</li>
       </ul>
-      <p>Claude (Anthropic) — тем же вторым способом: тип подключения «Свой сервер моделей, OpenAI-совместимый (LM Studio, vLLM, Ollama /v1) или внешний поставщик», адрес https://api.anthropic.com, модель claude-sonnet-5-5, claude-opus-5-5 или claude-haiku-5-5, ключ — значением из консоли Anthropic, потолок ответа 32000, рассуждение — «как у модели» (другое значение у этого адреса не сохранится: рассуждение задаёт сама модель). Температуру система этой модели не передаёт — так требует Anthropic. Цена вызова считается по открытому прейскуранту Anthropic.</p>
+      <p>Claude (Anthropic) — тем же вторым способом: тип подключения «Свой сервер моделей, OpenAI-совместимый (LM Studio, vLLM, Ollama /v1) или внешний поставщик», адрес https://api.anthropic.com, модель claude-sonnet-5-5, claude-opus-5-5 или claude-haiku-5-5, ключ — значением из консоли Anthropic, потолок ответа 32000, рассуждение — «как у модели» (это понемногу, low; для трудных шагов — «полностью», high). Выключить рассуждение у Claude нельзя: у Sonnet 5.5 и Opus 5.5 поставщик такой вызов не принимает, и значение «выключено» у этого адреса не сохранится. Температуру система этой модели не передаёт — так требует Anthropic. Цена вызова считается по открытому прейскуранту Anthropic.</p>
       <p>Можно завести оба подключения: одно поставить в роль основным, второе — запасным. Если основное не ответит, вызов уйдёт на запасное.</p>
       <p><b>Как заменить или убрать ключ</b></p>
       <p>В строке подключения — «Заменить ключ» или «Удалить ключ». Прежний ключ после замены не восстанавливается. «Откатить последнее изменение» ключ не трогает.</p>
