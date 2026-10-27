@@ -722,14 +722,16 @@ def create_app(theme_name: str | None = None, db_path: str | None = None, journa
         rows = store.q("SELECT * FROM tasks WHERE source_meeting_id=? AND status<>'dropped' ORDER BY id", (mid,))
         return [task_out({k: v for k, v in r.items() if k != "project_id"}, u) for r in rows]
 
-    def shown(md: str | None, project_id: int | None) -> str:
-        """Дверь показа документа: строки снятых задач не показываются (хранимый текст не меняется, 26.10.2026)."""
-        from ..core.tablica_zadach import без_снятых
+    def shown(md: str | None, project_id: int | None, meeting: dict | None = None) -> str:
+        """Дверь показа документа: строки снятых задач не показываются (хранимый текст не меняется, 26.10.2026). С
+        `meeting` (протокол на экране и в Word) — открытые задачи из реестра одной строкой (ERP 3550fc6, 27.10.2026)."""
+        from ..core.tablica_zadach import без_снятых, укрупнить_показ
         if not md or project_id is None:
             return md or ""
         rows = store.q("SELECT description, status FROM tasks WHERE project_id=?", (project_id,))
-        return без_снятых(md, {r["description"] for r in rows if r["status"] == "dropped"},
-                          {r["description"] for r in rows if r["status"] != "dropped"})
+        md = без_снятых(md, {r["description"] for r in rows if r["status"] == "dropped"},
+                        {r["description"] for r in rows if r["status"] != "dropped"})
+        return укрупнить_показ(store, meeting, md) if meeting else md
 
     @app.get("/api/meetings/{mid}/protocol")
     def protocol(mid: int, u: dict = Depends(user)):
@@ -739,7 +741,7 @@ def create_app(theme_name: str | None = None, db_path: str | None = None, journa
         # служебные поля (замечания проверки, когда собран) — только администраторам; участнику — документ
         # (находка циклов ролей ERP и Планёрки 15.10.26: Планёрка GET /meetings/{id}/minutes отдавала их всем)
         staff = u["role"] in admin_roles
-        return {"markdown": shown(m["protocol_md"], m["project_id"]),
+        return {"markdown": shown(m["protocol_md"], m["project_id"], m),
                 "built_at": m["protocol_built_at"] if staff else None,
                 "topic": m.get("topic") or "", "leader": m.get("leader") or "",
                 "review_notes": json.loads(m["review_notes"] or "[]") if staff else [], "units": meeting_units(mid)}
@@ -841,7 +843,7 @@ def create_app(theme_name: str | None = None, db_path: str | None = None, journa
         out = DocxOutput(theme.get("design.document_font", "Times New Roman"),
                          int(theme.get("design.document_size_pt", 12)))
         # проверка кодом до передачи: старые протоколы хранят шапку с пометками; сам документ не переписывается
-        return Response(out.render(clean_document(shown(m["protocol_md"], m["project_id"]))[0], "protocol"),
+        return Response(out.render(clean_document(shown(m["protocol_md"], m["project_id"], m))[0], "protocol"),
                         media_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
                         headers={"Content-Disposition": "attachment; filename*=UTF-8''"
                                  + quote(f"protocol_{m['date']}.docx")})

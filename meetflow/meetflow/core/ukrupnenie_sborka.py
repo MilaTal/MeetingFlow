@@ -72,11 +72,16 @@ def применить(store, project_id: int, meeting_id: int, planned: list, �
         if not включено(store, "ukrupnenie_zadach"):
             итог["строка"] = "укрупнение задач выключено"
         return итог
+    # семейства проектов (подпроект — `projects.parent_id`) и отделы «Команды»: основание «подпроекты» и правило
+    # «исполнитель и его отдел» (ERP 3550fc6, 27.10.2026); проект задачи — проект встречи
+    from .tablica_zadach import справочники_укрупнения
+    проекты_у, отделы_у = справочники_укрупнения(store, project_id)
+    проект_встречи = (store.get("projects", project_id) or {}).get("name") or ""
     задачи = []
     for n, (d, g) in enumerate(planned):
         кто = g.assignee.label if g.assignee else ((g.pending or {}).get("name") if (g.pending or {}).get("reason") == "department" else "")
         t = {"description": g.description or d.description, "quote": g.quote or d.quote or "", "responsible": кто or "",
-             "due_date": d.due_date or "", "_n": n}
+             "due_date": d.due_date or "", "_n": n, "project": проект_встречи}
         if (g.pending and (g.pending or {}).get("reason") != "department") or id(d) in с_карточкой:
             t["нужна_карточка"] = True
         задачи.append(t)
@@ -84,7 +89,7 @@ def применить(store, project_id: int, meeting_id: int, planned: list, �
     if включено(store, "ukrupnenie_reestr"):
         # открытые на дату встречи: задача, поставленная позже, поручение этой встречи не поглощает (стенд 42)
         открытые = [{"id": r["id"], "description": r["description"] or "", "responsible": r["assignee"] or "",
-                     "project": ""}
+                     "project": проект_встречи}
                     for r in store.q("SELECT id, description, assignee, date_set FROM tasks WHERE project_id=? AND "
                                      "status='active' AND (source_meeting_id IS NULL OR source_meeting_id<>?)",
                                      (project_id, meeting_id))
@@ -99,7 +104,7 @@ def применить(store, project_id: int, meeting_id: int, planned: list, �
     if len(задачи) * (len(задачи) - 1) // 2 > ПРЕДЕЛ_ПАР:
         итог["строка"] = f"укрупнение задач пропущено: задач {len(задачи)}, пар сравнения больше {ПРЕДЕЛ_ПАР}"
         return итог
-    задачи, счёт_у = uz.укрупнить(задачи, запись, контрагенты=контрагенты)
+    задачи, счёт_у = uz.укрупнить(задачи, запись, контрагенты=контрагенты, проекты=проекты_у, отделы=отделы_у)
     счёт.update(счёт_у)
     новые = []
     for t in задачи:

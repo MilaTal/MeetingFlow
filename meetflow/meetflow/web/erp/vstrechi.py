@@ -1010,13 +1010,16 @@ def mount(r: APIRouter, ctx: Ctx) -> None:
         return {"show": bool(tasks or findings), "tasks": tasks, "tasks_count": len(tasks), "findings": findings,
                 "findings_count": len(findings)}
 
-    def shown(md: str | None, project_id: int | None) -> str:
-        from ...core.tablica_zadach import без_снятых
+    def shown(md: str | None, project_id: int | None, meeting: dict | None = None) -> str:
+        """Дверь показа: снятые задачи не показываются; с `meeting` (протокол на экране и в Word, не полотно правки) —
+        открытые задачи из реестра одной строкой (ERP 3550fc6, `tablica_zadach.укрупнить_показ`, 27.10.2026)."""
+        from ...core.tablica_zadach import без_снятых, укрупнить_показ
         if not md or project_id is None:
             return md or ""
         rows = store.q("SELECT description, status FROM tasks WHERE project_id=?", (project_id,))
-        return без_снятых(md, {r["description"] for r in rows if r["status"] == "dropped"},
-                          {r["description"] for r in rows if r["status"] != "dropped"})
+        md = без_снятых(md, {r["description"] for r in rows if r["status"] == "dropped"},
+                        {r["description"] for r in rows if r["status"] != "dropped"})
+        return укрупнить_показ(store, meeting, md) if meeting else md
     ctx.shown = shown
 
     def notes_of(m: dict) -> list[dict]:
@@ -1039,7 +1042,7 @@ def mount(r: APIRouter, ctx: Ctx) -> None:
         if not m.get("protocol_md"):
             return {"available": False, "message": "Протокола этой встречи пока нет"}
         srcs = [{"kind": s.get("kind") or "other", "original_filename": s.get("name") or ""} for s in text_sources(mid)]
-        return {"available": True, "content_md": shown(m["protocol_md"], m["project_id"]),
+        return {"available": True, "content_md": shown(m["protocol_md"], m["project_id"], m),
                 "generated_at": iso_dt(m.get("protocol_built_at")), "sources": srcs, "build_note": m.get("build_note") or "",
                 "hand_edited": bool(m.get("protocol_hand_edited")), "minor_findings": notes_of(m)}
 
@@ -1060,7 +1063,7 @@ def mount(r: APIRouter, ctx: Ctx) -> None:
         m = ctx.meeting_or_404(mid)
         if not m.get("protocol_md"):
             raise HTTPException(404, "Протокола этой встречи пока нет")
-        return docx_response(shown(m["protocol_md"], m["project_id"]), f"Протокол встречи {ru_date(m['date'])}")
+        return docx_response(shown(m["protocol_md"], m["project_id"], m), f"Протокол встречи {ru_date(m['date'])}")
 
     @r.get("/meetings/{mid}/plan/export")
     def export_plan(mid: int):
