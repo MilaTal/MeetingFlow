@@ -73,11 +73,16 @@ def _д(value) -> date | None:
 
 
 def предыдущая_встреча(store, meeting: dict) -> dict | None:
-    """Последняя встреча проекта по дате раньше этой."""
+    """Последняя встреча проекта по дате раньше этой; у темы «с прошлой встречи той же темы» — той же темы (как ERP,
+    тема планёрки 24.10.2026)."""
     if not meeting or not meeting.get("date"):
         return None
-    rows = store.q("SELECT * FROM meetings WHERE project_id=? AND id<>? AND date<? ORDER BY date DESC, id DESC LIMIT 1",
+    from .topics import встречи_той_же_темы
+    rows = store.q("SELECT * FROM meetings WHERE project_id=? AND id<>? AND date<? ORDER BY date DESC, id DESC",
                    (meeting.get("project_id"), meeting.get("id"), str(meeting["date"])[:10]))
+    своей_темы = встречи_той_же_темы(store, meeting)
+    if своей_темы is not None:
+        rows = [m for m in rows if m["id"] in своей_темы]
     return rows[0] if rows else None
 
 

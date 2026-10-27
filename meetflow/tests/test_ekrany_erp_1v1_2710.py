@@ -647,7 +647,7 @@ def test_темы_планёрок_день_недели_и_выбор_вруч�
     assert t["weekdays"] == [1] and t["sections"] == ["Объекты", "Сроки"]
     assert c.post("/meeting-topics", json={"name": "стройка"}, headers=h()).status_code == 409
     got = c.get(f"/meeting-topics/meeting/{mid}", headers=h()).json()
-    assert got["name"] == "Стройка" and got["source"] == "день недели"
+    assert got["name"] == "Стройка" and got["source"] == "по дню недели"
     assert c.app.state.pipe._skeleton(c.st.get("meetings", mid)) == ["Объекты", "Сроки"]
     off = c.put(f"/meeting-topics/meeting/{mid}", json={"topic_id": None}, headers=h("project_admin")).json()
     assert off["name"] is None and off["source"] == "вручную"

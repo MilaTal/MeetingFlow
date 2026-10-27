@@ -145,7 +145,7 @@ class PromptBuilder:
         return self._system(task), body + self.p.no_think_suffix
 
     def protocol(self, sections: list[str], source_text: str, notes_text: str = "",
-                 participants: list[str] | None = None, leader: str = "") -> tuple[str, str]:
+                 participants: list[str] | None = None, leader: str = "", topic_hint: str = "") -> tuple[str, str]:
         task = ("ЗАДАЧА: кратко изложи обсуждение по разделам протокола. Только то, что есть в "
                 "тексте встречи; задачи и таблицы не пиши — их вставит система. Без оценок и "
                 "домыслов, деловым языком.\nРАЗДЕЛЫ:\n" + "\n".join(f"- {s}" for s in sections) +
@@ -158,6 +158,8 @@ class PromptBuilder:
                      "имена, других не придумывай): " + "; ".join(participants[:60]))
         if leader:
             task += f"\nВедущий встречи: {leader}."
+        # тема планёрки — последней (как ERP: разделы темы, порядок объектов, «что важно»); темы нет — пусто
+        task += topic_hint or ""
         body, _ = fence(source_text, "текст встречи")
         if notes_text:
             nb, _ = fence(notes_text, "заметки — акцент: что точно обязательно, но не предел")

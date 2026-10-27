@@ -825,7 +825,7 @@ def mount(r: APIRouter, ctx: Ctx) -> None:
         ctx.need_user(request)
         m = ctx.meeting_or_404(mid)
         t = tp.тема_встречи(store, m)
-        source = m.get("topic_source") or (tp.ПО_ДНЮ if t else "")
+        source = tp.источник(store, m)
         return {"meeting_id": mid, "topic_id": t["id"] if t else None, "name": t["name"] if t else None,
                 "source": source, "set_at": iso_dt(m.get("topic_set_at")), "set_by": m.get("topic_set_by") or ""}
 

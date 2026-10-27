@@ -469,15 +469,29 @@ class MeetingPipeline:
         d = lenient_date(meeting.get("date"))
         if d is None:
             return ""
-        обычные = []
-        for r in self.s.q("SELECT m.date, s.text FROM sources s JOIN meetings m ON m.id = s.meeting_id "
-                          "WHERE m.project_id=? AND s.meeting_id != ? AND s.kind=? AND s.removed_at IS NULL "
-                          "ORDER BY m.date DESC, s.id", (project_id, meeting_id, SourceKind.TRANSCRIPT.value)):
-            md = lenient_date(r["date"])
-            if md is not None and md.isoweekday() == d.isoweekday():
-                обычные.append(len(r["text"] or ""))
+        # соседи — прошлые встречи той же темы, а без темы — того же дня недели; у встречи — самая длинная расшифровка
+        # (как ERP _длины_расшифровок_соседей, тема планёрки 24.10.2026)
+        from .topics import тема_встречи
+        tp = тема_встречи(self.s, meeting)
+        обычные: list[int] = []
+        for m in self.s.q("SELECT * FROM meetings WHERE project_id=? AND id<>? AND date<? ORDER BY date DESC, id DESC",
+                          (project_id, meeting_id, d.isoformat())):
+            if len(обычные) >= polnota.ПРЕДЕЛ_ОБЫЧНЫХ:
+                break
+            md = lenient_date(m["date"])
+            if tp is not None:
+                tm = тема_встречи(self.s, m)
+                if not tm or tm["id"] != tp["id"]:
+                    continue
+            elif md is None or md.isoweekday() != d.isoweekday():
+                continue
+            лучшая = max([len((r["text"] or "").strip()) for r in self.s.q(
+                "SELECT text FROM sources WHERE meeting_id=? AND kind=? AND removed_at IS NULL",
+                (m["id"], SourceKind.TRANSCRIPT.value))] or [0])
+            if лучшая:
+                обычные.append(лучшая)
         return polnota.короче_обычной(len(base.get("text") or ""), обычные,
-                                      polnota.основа_сравнения(None, d.isoweekday()))
+                                      polnota.основа_сравнения(tp["name"] if tp else None, d.isoweekday()))
 
     def ingest(self, project_id: int, meeting_id: int, filename: str, data: bytes | None = None,
                path: Path | None = None) -> dict:
@@ -638,6 +652,11 @@ class MeetingPipeline:
         srcs = self.s.q("SELECT * FROM sources WHERE meeting_id=? AND removed_at IS NULL ORDER BY id", (meeting_id,))
         transcripts = [s for s in srcs if s["kind"] == SourceKind.TRANSCRIPT.value]
         notes = [s for s in srcs if s["kind"] == SourceKind.NOTES.value]
+        # Тема планёрки (как ERP 26.10.2026): тема стоит по дню недели или её нет, а у встречи есть протокол секретаря —
+        # тема по его шапке; шапка без темы — «Общие вопросы» (её нет — встреча без темы). Выбор человека не трогается.
+        if meeting.get("id"):
+            from . import topics
+            topics.сверить_со_сборкой(self.s, meeting, [s.get("text") for s in notes])
         if not transcripts and not notes:
             notes = [s for s in srcs if s["kind"] == SourceKind.OTHER.value
                      and not s["name"].endswith("(описание изображения)")]
@@ -887,8 +906,10 @@ class MeetingPipeline:
 
                     # 3. протокол — разделы пишет модель, таблицы и шапку — код
                     participants, leader = self._participants(meeting_id, meeting)
+                    from . import topics
                     sysm, user = self.pb.protocol(self._skeleton(meeting), safe_source.text, notes_text,
-                                                  participants=participants, leader=leader)
+                                                  participants=participants, leader=leader,
+                                                  topic_hint=topics.подсказка_протокола(self._topic(meeting)))
                     try:
                         out = self._call(self.gen, budget, "protocol", sysm, user, meeting_id)
                         sections = {k: str(v)[:20000] for k, v in _dict(out, "sections").items()
@@ -1356,7 +1377,9 @@ class MeetingPipeline:
             secs = [s for s in json.loads((tp or {}).get("sections") or "[]") if str(s).strip()]
         except (TypeError, ValueError):
             secs = []
-        return [str(s).strip() for s in secs] or list(self.theme["protocol_skeleton"])
+        from .topics import РАЗДЕЛ_ЗАДАЧ          # таблицу задач собирает программа, модель её не пишет (как ERP)
+        secs = [str(s).strip() for s in secs if str(s).strip() != РАЗДЕЛ_ЗАДАЧ]
+        return secs or list(self.theme["protocol_skeleton"])
 
     def _render_protocol(self, meeting: dict, sections: dict[str, str | None], added, closings, srcs,
                          removals=(), *, record: str | None = None, people=(), rep: RunReport | None = None,
@@ -1375,10 +1398,9 @@ class MeetingPipeline:
             date_h = datetime.strptime(date_s, "%Y-%m-%d").strftime(th.get("formats.date", "%d.%m.%Y"))
         except ValueError:
             date_h = date_s
-        out = [f"# {th.word('protocol')} {date_h}", ""]
         tp = self._topic(meeting)
-        if tp:                                   # тема — в шапку протокола (как ERP)
-            out += [f"Тема: {tp['name']}", ""]
+        # тема — в шапку протокола кодом: «# Протокол 01.10.2026. Стройка.» (как ERP, оформить_протокол)
+        out = [f"# {th.word('protocol')} {date_h}" + (f". {tp['name'].strip().rstrip('.')}." if tp else ""), ""]
         for sec in self._skeleton(meeting):
             body = sections.get(sec, "")
             if body is None:              # не собран (предел, потолок ответа) — пусто, причина в карточке

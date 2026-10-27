@@ -528,6 +528,18 @@ def mount(r: APIRouter, ctx: Ctx) -> None:
                 "uploaded_by_user_id": meta.get("uploaded_by_user_id"),
                 "moved_from_meeting_id": meta.get("moved_from_meeting_id"), "moved_from_date": meta.get("moved_from_date")}
 
+    def тема_из_эталона(mid: int, sid) -> None:
+        """Пришёл протокол секретаря (источник «заметки») — тема планёрки по его шапке, молча; выбор человека не трогается
+        (как ERP meeting_service.тема_из_эталона, Р3 24.10.2026). Сбой разбора загрузке не мешает."""
+        s = store.get("sources", sid or 0) or {}
+        if s.get("kind") != "notes":
+            return
+        try:
+            from ...core import topics
+            topics.применить_эталон(store, store.get("meetings", mid), s.get("text"))
+        except Exception:  # noqa: BLE001
+            pass
+
     @r.post("/meetings/{mid}/sources", status_code=201)
     async def upload_source(mid: int, request: Request, kind: str = Form("other"), file: UploadFile = File(...)):
         u = ctx.need_user(request)
@@ -575,6 +587,7 @@ def mount(r: APIRouter, ctx: Ctx) -> None:
             raise HTTPException(400, f"Файл «{name}» не принят. {reason}")
         if st == "held":
             raise HTTPException(409, res.get("reason") or "Файл ждёт решения в «Разборе»")
+        тема_из_эталона(mid, res.get("source_id"))
         run_now, why = autorun_maybe(store.get("meetings", mid))
         return {"id": res.get("source_id"), "kind": res.get("kind"), "original_filename": name, "relevance_warnings": [],
                 "autorun": run_now, "autorun_note": why}

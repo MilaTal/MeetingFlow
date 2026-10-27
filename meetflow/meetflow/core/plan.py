@@ -25,9 +25,11 @@ def collect(store: Store, meeting: dict) -> dict:
     """Что известно до встречи: прошлый протокол, открытые пункты, задачи, материалы."""
     project_id, mid = meeting.get("project_id"), meeting.get("id")
     day = _iso(meeting.get("date"))
-    prev = store.q("SELECT date, protocol_md FROM meetings WHERE project_id=? AND id<>? AND date<? "
-                   "AND protocol_md IS NOT NULL AND protocol_md<>'' ORDER BY date DESC LIMIT 1",
-                   (project_id, mid, day))
+    # прошлый протокол: у темы «с прошлой встречи той же темы» — сначала встречи этой темы (как ERP, Р4 24.10.2026)
+    from .topics import по_теме_сначала
+    prev = по_теме_сначала(store, meeting, store.q(
+        "SELECT * FROM meetings WHERE project_id=? AND id<>? AND date<? AND protocol_md IS NOT NULL AND protocol_md<>'' "
+        "ORDER BY date DESC, id DESC", (project_id, mid, day)))[:1]
     units = store.q("SELECT kind, text, planned_date FROM units WHERE project_id=? AND status IN ('open','active') "
                     "ORDER BY CASE kind WHEN 'open_question' THEN 0 WHEN 'decision' THEN 1 ELSE 2 END, id",
                     (project_id,))
