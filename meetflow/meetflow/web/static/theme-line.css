@@ -924,7 +924,8 @@ a.mt-btn { text-decoration: none; }
    нет, над текстом браузер ставил текстовый I-образный — «Точечная правка» в панели «Ещё» выглядела так, будто курсор
    пропал), но не перебивает намеренные cursor: default / help / not-allowed. Блок одинаковый в обеих системах (ERP
    theme-line.css, Планёрка line.css) — сторож test_navedenie_kursor_1710. */
-:root { --hover-tone: #f4f4f5; --hover-line: #a1a1aa; }
+:root:not([data-theme="dark"]) { --hover-tone: #f4f4f5; --hover-line: #a1a1aa; }
+:root[data-theme="dark"] { --hover-tone: #2a2a31; --hover-line: #50505c; }
 
 :where(a[href], button, summary, select, [role="button"], [role="tab"], label:has(> input[type="checkbox"]),
   label:has(> input[type="radio"])) { cursor: pointer; }
