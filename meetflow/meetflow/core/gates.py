@@ -129,6 +129,7 @@ class TaskGate:
         # строка по номеру проходит тот же порог, что и поиск (находка ревью:
         # при line_no порог был 0.3 и пропускал дописанное моделью содержание)
         quote = None
+        строки_цитаты: list[str] | None = None   # строки записи цитаты по отдельности — для подписи голоса (27.10.2026)
         want = draft.quote or desc
         if draft.line_no is not None and 0 <= draft.line_no < len(source.lines):
             lines = source.lines
@@ -139,6 +140,7 @@ class TaskGate:
                 acc |= set(stems(lines[draft.line_no + w]))
                 if coverage(set(stems(want)), acc) >= self.cfg.quote_coverage:
                     quote = " ".join(lines[draft.line_no:draft.line_no + w + 1])
+                    строки_цитаты = lines[draft.line_no:draft.line_no + w + 1]
                     break
         if quote is None and want:
             quote = self.find_quote(want, source)
@@ -178,7 +180,11 @@ class TaskGate:
             # исполнитель «я» из подписи голоса (ERP `fill_self_assigned_responsibles`, перенос 27.10.2026): цитата в
             # строке, подписанной ФИО «Команды» по голосу, и говорящий сам в единственном числе обещает действие
             from .ispolnitel_golosom import из_подписи
-            named = из_подписи(quote, desc, [p.full_name for p in self.team.people])
+            # строки цитаты — по отдельности, и вся запись — чтобы найти подпись строки, если цитата её не несёт
+            # (15.10, отчёт ЛМ MeetFlow 0eb5a5f: 12 из 12 цитат без «ФИО:»; окно из двух строк склеивалось пробелом и
+            # подпись второй строки терялась)
+            named = из_подписи("\n".join(строки_цитаты) if строки_цитаты else quote, desc,
+                               [p.full_name for p in self.team.people], строки_записи=source.lines)
         if not named:
             if self.cfg.require_assignee:
                 reasons.append("no_assignee")
