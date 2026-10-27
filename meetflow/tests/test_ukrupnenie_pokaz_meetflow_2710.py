@@ -79,3 +79,23 @@ def test_экран_и_word_собирают_полотно_нет(tmp_path):
     assert f"(№{a})" in экран
     assert app.state.erp.shown(st.get("meetings", эта)["protocol_md"], куст).count("Ершов Пётр") == 3   # полотно
     assert "(№" not in st.get("meetings", эта)["protocol_md"]          # хранимый текст не тронут
+
+
+def test_снятая_задача_подпроекта_не_видна_в_протоколе_проекта(tmp_path, monkeypatch):
+    """Снятые задачи не показываются нигде (решение владелицы 26.10.2026) — и задача, переведённая в подпроект: скрытие
+    берёт проект встречи вместе с подпроектами (27.10.2026). Экран обеих дверей, Word — той же дверью."""
+    from meetflow.web.app import create_app
+    monkeypatch.setenv(u.ПЕРЕМЕННАЯ_ПОКАЗ, "off")
+    app = create_app("erp_rollout", str(tmp_path / "t.db"), str(tmp_path / "j.jsonl"), watch=False)
+    c = TestClient(app)
+    st = app.state.store
+    куст, эта, (a, b, _c, new) = _сцена(st)
+    st.update("tasks", new, project_id=st.q("SELECT id FROM projects WHERE name='Озёрная'")[0]["id"])
+    st.update("meetings", эта, protocol_md=_таблица(st, эта), protocol_built_at="2026-10-27T12:00:00")
+    assert "Согласовать график смен" in st.get("meetings", эта)["protocol_md"]
+    TaskRegistry(st).set_status(new, __import__("meetflow.core.types", fromlist=["TaskStatus"]).TaskStatus.DROPPED,
+                                "operator", "не нужна")
+    sup = {"X-User-Role": "super_admin"}
+    assert "Согласовать график смен" not in c.get(f"/api/meetings/{эта}/protocol", headers=sup).json()["markdown"]
+    assert "Согласовать график смен" not in app.state.erp.shown(st.get("meetings", эта)["protocol_md"], куст)
+    assert "Согласовать график смен" in st.get("meetings", эта)["protocol_md"]     # хранимый текст не тронут

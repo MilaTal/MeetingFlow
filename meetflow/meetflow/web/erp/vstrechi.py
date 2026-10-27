@@ -1013,12 +1013,10 @@ def mount(r: APIRouter, ctx: Ctx) -> None:
     def shown(md: str | None, project_id: int | None, meeting: dict | None = None) -> str:
         """Дверь показа: снятые задачи не показываются; с `meeting` (протокол на экране и в Word, не полотно правки) —
         открытые задачи из реестра одной строкой (ERP 3550fc6, `tablica_zadach.укрупнить_показ`, 27.10.2026)."""
-        from ...core.tablica_zadach import без_снятых, укрупнить_показ
+        from ...core.tablica_zadach import без_снятых, задачи_для_скрытия, укрупнить_показ
         if not md or project_id is None:
             return md or ""
-        rows = store.q("SELECT description, status FROM tasks WHERE project_id=?", (project_id,))
-        md = без_снятых(md, {r["description"] for r in rows if r["status"] == "dropped"},
-                        {r["description"] for r in rows if r["status"] != "dropped"})
+        md = без_снятых(md, *задачи_для_скрытия(store, project_id))     # проект с подпроектами (27.10.2026)
         return укрупнить_показ(store, meeting, md) if meeting else md
     ctx.shown = shown
 

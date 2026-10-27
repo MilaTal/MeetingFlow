@@ -295,6 +295,25 @@ def отметить_по_секретарю(store, строки: list[str], *, 
 
 # --- снятые задачи в хранимом документе не показываются (решение владелицы 26.10.2026) ---------------------------------
 
+def семья_проекта(store, project_id: int | None) -> list[int]:
+    """Проект и его подпроекты (`projects.parent_id`, 27.10.2026): задачи встречи проекта могут стоять в подпроекте."""
+    if project_id is None:
+        return []
+    return [project_id] + [r["id"] for r in store.q("SELECT id FROM projects WHERE parent_id=?", (project_id,))]
+
+
+def задачи_для_скрытия(store, project_id: int | None) -> tuple[set[str], set[str]]:
+    """(формулировки снятых, формулировки живых) задач проекта с подпроектами — для `без_снятых` в дверях показа: снятые
+    задачи не показываются нигде (решение владелицы 26.10.2026), и снятая задача подпроекта тоже."""
+    семья = семья_проекта(store, project_id)
+    if not семья:
+        return set(), set()
+    rows = store.q(f"SELECT description, status FROM tasks WHERE project_id IN ({','.join('?' * len(семья))})",
+                   tuple(семья))
+    return ({r["description"] for r in rows if r["status"] == "dropped"},
+            {r["description"] for r in rows if r["status"] != "dropped"})
+
+
 def _ключ(текст: str | None) -> str:
     return " ".join(str(текст or "").replace("\\|", "|").replace("ё", "е").replace("Ё", "Е").lower().split())
 
