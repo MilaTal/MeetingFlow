@@ -44,3 +44,11 @@ def test_ворота_не_требуют_имени_в_цитате_у_испо
                         lambda self, want, source: "[00:05:12] Я подготовлю спецификацию по шкафу до пятницы.")
     r = g.TaskGate(team).check(TaskDraft("Подготовить спецификацию по шкафу", None), src)
     assert r.accepted and r.assignee is not None and r.assignee.full_name == "Иванов Иван", r
+
+
+def test_участник_только_с_репликой():
+    """Решение владелицы 28.10.2026: участник — тот, у кого есть реплика; голос без строк — ошибка опознания."""
+    from meetflow.core.pipeline import MeetingPipeline
+    имена = ["Иванов Иван", "Петрова Анна", "Сидоров Пётр"]          # Сидоров опознан по голосу, реплик нет
+    assert MeetingPipeline._с_репликой(имена, ЗАПИСЬ) == ["Иванов Иван", "Петрова Анна"]
+    assert MeetingPipeline._с_репликой(имена, ["без подписей вовсе"]) == имена

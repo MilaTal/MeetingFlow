@@ -366,6 +366,17 @@ class MeetingPipeline:
         return names, " ".join(str(meeting.get("leader") or "").split())
 
     @staticmethod
+    def _с_репликой(names: list[str], lines: list[str]) -> list[str]:
+        """Только те, чьё ФИО стоит подписью хотя бы одной строки записи («[чч:мм:сс] ФИО: текст»), е = ё. Записи с
+        подписями нет — список как есть (голоса без строк — прежнее поведение, раздел решает модель)."""
+        from .ispolnitel_golosom import разобрать_строку
+        ключ = lambda s: " ".join(str(s or "").replace("ё", "е").replace("Ё", "Е").lower().split())
+        подписи = {ключ(р[0]) for р in (разобрать_строку(l) for l in lines or []) if р}
+        if not подписи:
+            return list(names)
+        return [n for n in names if ключ(n) in подписи]
+
+    @staticmethod
     def _participants_by_code(names: list[str], leader: str) -> list[str]:
         """Состав раздела «Участники» кодом: ведущий (если задан) и ФИО, опознанные по голосам правилом 0,65 / 0,10 и
         подтверждённые «Командой» (`voice_names`), без повторов, е = ё. Голосов нет — пусто: раздел пишет модель по
@@ -984,6 +995,9 @@ class MeetingPipeline:
 
                     # 3. протокол — разделы пишет модель, таблицы и шапку — код
                     participants, leader = self._participants(meeting_id, meeting)
+                    # участник — тот, у кого в записи есть реплика (решение владелицы 28.10.2026: опознанный голос без
+                    # единой строки расшифровки — ошибка опознания, а не участник; 26.10 — «Говорящий 6», 0 реплик)
+                    participants = self._с_репликой(participants, source.lines)
                     # «Участники» — кодом из опознанных голосов и «Команды» (27.10.2026): раздел модель не пишет, если
                     # голоса опознаны; без голосов (заметки, протокол секретаря) — как раньше, по тексту
                     участники_кодом = self._participants_by_code(participants, leader)
