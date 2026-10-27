@@ -228,10 +228,21 @@ def _llm(theme: Theme, side: str, journal: str | None = None):
                      num_ctx=int(cfg.get("num_ctx", 32768)), max_answer_tokens=cap)
 
 
+ПАПКА_ПРОГРАММЫ = Path(__file__).resolve().parents[2]
+
+
+def путь_данных(путь: str) -> str:
+    """Относительный путь данных («data/meetflow.db») — от папки программы, а не от папки запуска (27.10.2026: на 8005
+    пропали проекты и встречи; сервер, запущенный не из папки программы, открыл бы новую пустую базу). Абсолютный —
+    как есть."""
+    п = Path(путь)
+    return str(п if п.is_absolute() else ПАПКА_ПРОГРАММЫ / п)
+
+
 def create_app(theme_name: str | None = None, db_path: str | None = None, journal: str | None = None,
                watch: bool | None = None) -> FastAPI:
     theme = load_theme(theme_name or os.environ.get("MEETFLOW_THEME", "_default"))
-    store = Store(db_path or os.environ.get("MEETFLOW_DB", "data/meetflow.db"))
+    store = Store(путь_данных(db_path or os.environ.get("MEETFLOW_DB", "data/meetflow.db")))
     plugins = default_registry()
     journal = journal or os.environ.get("MEETFLOW_JOURNAL", "data/logs/llm_calls.jsonl")
     pipe = MeetingPipeline(theme, store, plugins, _llm(theme, "generator", journal), _llm(theme, "verifier", journal),
