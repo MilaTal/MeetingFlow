@@ -451,3 +451,86 @@ def test_поиск_два_этапа(env):
     assert d2["results"][0]["source_type"] == "transcript_hit" and d2["results"][0]["speaker"] == "Петров Илья"
     assert c.get("/search/deep?q=несуществующее слово", headers=h()).json()["message"] == "По запросу информации нет"
     assert c.get("/search/markers", headers=h()).json()["examples"]
+
+
+# --- группа е: «Разбор», карточки, «Возможные поручения», правила оператора --------------------------------------------
+
+def _card(env, kind, payload, meeting_id=None, title="Карточка"):
+    import json as _j
+    return env.st.insert("cards", project_id=env.pid, meeting_id=meeting_id, kind=kind, title=title,
+                         payload=_j.dumps(payload, ensure_ascii=False), status="open", created_at="2026-10-27T09:00:00")
+
+
+def test_разбор_одна_очередь_и_карточки_в_виде_erp(env):
+    c, h = env, env.h
+    tid = _task(env, doubt_reason="без опоры в записи")
+    _card(env, "task_doubt", {"task_id": tid, "description": "Подготовить акт приёмки"})
+    t2 = _task(env, description="Согласовать график", assignee=None)
+    cid = _card(env, "assign_person", {"task_id": t2, "named": "Вера", "candidates": [{"id": 1, "name": "Сидорова Вера"}]})
+    _card(env, "technical", {"error": "x"})
+    d = c.get("/razbor", headers=h()).json()
+    assert d["total"] == 2 and {x["source"] for x in d["items"]} == {"task", "card"} and d["norm"] == 15
+    assert c.get("/razbor", headers=h("member")).status_code == 403
+    lst = c.get("/task-conflicts?status=open", headers=h()).json()
+    assert [x["id"] for x in lst] == [cid] and lst[0]["source"] == "unconfirmed_person" and lst[0]["candidates"]
+    assert c.get("/badges", headers=h()).json()["razbor"] == 2
+    r = c.post("/razbor/batch", json={"source": "task", "ids": [tid], "action": "to_task"}, headers=h()).json()
+    assert r["done"] == 1 and c.get(f"/tasks/{tid}", headers=h()).json()["under_question_label"] is None
+
+
+def test_карточка_отметки_исполнителя_и_замечания(env):
+    c, h, st = env, env.h, env.st
+    tid = _task(env)
+    note = _card(env, "member_note", {"task_id": tid, "note": "Сделано — проверьте", "proposed": "done", "by": "Сидорова Вера"})
+    assert c.patch(f"/task-conflicts/{note}", json={"action": "accept"}, headers=h()).json()["status"] == "accepted"
+    assert c.get(f"/tasks/{tid}", headers=h()).json()["status"] == "done"
+    assert c.patch(f"/task-conflicts/{note}", json={"action": "accept"}, headers=h()).status_code == 409
+    rf = _card(env, "review_finding", {"issue": "Срок не прозвучал", "quote": "до пятницы"})
+    c.patch(f"/task-conflicts/{rf}", json={"action": "reject"}, headers=h())
+    assert st.get("cards", rf) is None                                      # «Замечание неверно» — карточки нет
+    held = _card(env, "held_task", {"description": "Закупить стеллажи", "quote": "закупить стеллажи"})
+    c.patch(f"/task-conflicts/{held}", json={"action": "custom", "custom_value": "Закупить стеллажи для второго ряда"},
+            headers=h())
+    assert any(t["description"] == "Закупить стеллажи для второго ряда" for t in c.get("/tasks", headers=h()).json())
+
+
+def test_возможные_поручения_порог_и_решения(env):
+    c, h, st = env, env.h, env.st
+    from meetflow.core import vozmozhnye
+    mid = st.insert("meetings", project_id=env.pid, date=iso(-1))
+    pa = st.insert("possible_assignments", project_id=env.pid, meeting_id=mid, meeting_date=iso(-1), text="Надо бы убрать склад",
+                   reason=vozmozhnye.НЕТ_АДРЕСАТА, state="новое", created_at=vozmozhnye.now())
+    lst = c.get("/possible-assignments", headers=h()).json()
+    assert lst["unresolved"] == 1 and lst["items"][0]["description"] == "Надо бы убрать склад"
+    assert c.get("/badges", headers=h()).json()["possible"] == 1
+    r = c.post(f"/possible-assignments/{pa}/to-task", json={"responsible": "Петров Илья"}, headers=h()).json()
+    assert r["state"] == "в задачу" and c.get(f"/tasks/{r['task_id']}", headers=h()).json()["responsible_text"] == "Петров Илья"
+    assert c.post(f"/possible-assignments/{pa}/not-task", headers=h()).status_code == 409
+    assert c.get("/possible-assignments/threshold", headers=h()).json()["enabled"] is False
+    assert c.put("/possible-assignments/threshold", json={"enabled": True}, headers=h()).json()["enabled"] is True
+    assert c.put("/possible-assignments/settings", json={"days": 400}, headers=h()).status_code == 400
+
+
+def test_порог_сборки_задача_без_адресата_в_возможные(make_pipe, store, project):
+    from meetflow.core import vozmozhnye
+    from conftest import TRANSCRIPT as TR
+    vozmozhnye.задать(store, True)
+    p = make_pipe()
+    mid = store.insert("meetings", project_id=project, date="2026-10-01", label="в")
+    p.ingest(project, mid, "t 01.10.2026.txt", TR.encode())
+    start = vozmozhnye.now()
+    tid = p.reg.add(project, "Обновить спецификации склада", None, mid, "обновить спецификации")
+    assert vozmozhnye.разделить_после_сборки(store, p.reg, project, mid, start) == 1
+    assert store.get("tasks", tid)["status"] == "dropped"
+    assert store.q("SELECT text FROM possible_assignments")[0]["text"] == "Обновить спецификации склада"
+
+
+def test_правила_оператора_отмена_и_возврат(env):
+    c, h, st = env, env.h, env.st
+    rid = st.insert("operator_rules", project_id=env.pid, kind="not_a_task", key="уборк склад", active=1,
+                    created_at="2026-10-27T09:00:00")
+    assert c.get("/operator-rules", headers=h()).json()[0]["state"] == "действует"
+    c.post(f"/operator-rules/{rid}/revoke", headers=h())
+    assert c.get("/operator-rules", headers=h()).json()[0]["state"] == "отменено"
+    c.post(f"/operator-rules/{rid}/restore", headers=h())
+    assert c.get("/operator-rules", headers=h()).json()[0]["state"] != "отменено"

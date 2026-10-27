@@ -1079,6 +1079,9 @@ def create_app(theme_name: str | None = None, db_path: str | None = None, journa
             out = dict(out, rule=rule["status_text"])
         return out
 
+    app.state.resolve_card = resolve       # тот же разбор карточки — для «Разбора» фронта ERP (web/erp/razbor.py)
+    app.state.ResolveIn = ResolveIn
+
     @app.get("/api/projects/{pid}/decisions")
     def decisions(pid: int, u: dict = Depends(admin)):
         return store.q("SELECT what, decision, why, at FROM decisions WHERE project_id=? ORDER BY id DESC", (pid,))

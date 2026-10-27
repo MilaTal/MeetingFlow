@@ -48,7 +48,7 @@ def test_two_meetings_at_once_no_overlap_by_date(tmp_path, monkeypatch):
         return type("R", (), {"__dict__": {"status": "ok", "meeting_id": mid}})()
     monkeypatch.setattr(pipe, "run", slow_run)
     q = app.state.queue
-    nb = later(1)                      # одно «не раньше» на обе: «не раньше» — с точностью до секунды
+    nb = later(2)                      # одно «не раньше» на обе (с точностью до секунды; 2 с — без гонки на границе секунды)
     r1 = q.enqueue(pid, mids[0], "тест", not_before=nb)
     r2 = q.enqueue(pid, mids[1], "тест", not_before=nb)
     q.wait(r1, 10), q.wait(r2, 10)

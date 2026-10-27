@@ -597,7 +597,16 @@ class MeetingPipeline:
         if not lock.acquire(blocking=False):
             return RunReport(meeting_id, status="busy", detail="Протокол этой встречи уже формируется.")
         try:
-            return self._run(project_id, meeting_id, limits)
+            начало = now()
+            rep = self._run(project_id, meeting_id, limits)
+            # узкий порог (как ERP 24.10.2026, перенос 27.10.2026): задача без адресата — строкой «Возможных поручений»
+            if getattr(rep, "protocol_saved", False):
+                from . import vozmozhnye
+                try:
+                    vozmozhnye.разделить_после_сборки(self.s, self.reg, project_id, meeting_id, начало)
+                except Exception as e:  # noqa: BLE001 — сбой порога не отменяет сохранённый протокол
+                    self.step_failed(project_id, meeting_id, "Возможные поручения", e)
+            return rep
         finally:
             lock.release()
 

@@ -107,6 +107,13 @@ SCHEMA: dict[str, dict[str, str]] = {
     "doc_corrections": {"id": "INTEGER PRIMARY KEY", "meeting_id": "INTEGER", "doc": "TEXT", "who": "TEXT",
                         "at": "TEXT", "place": "TEXT", "old_text": "TEXT DEFAULT ''", "new_text": "TEXT DEFAULT ''",
                         "fix": "INTEGER DEFAULT 1"},
+    # «Возможные поручения» (узкий порог, как ERP и Планёрка 24.10.2026): похоже на поручение, но без адресата — не
+    # задача реестра, а строка здесь; «В задачу» заводит обычную задачу встречи, «Не задача» закрывает, срок — истекает
+    "possible_assignments": {"id": "INTEGER PRIMARY KEY", "project_id": "INTEGER", "meeting_id": "INTEGER",
+                             "meeting_date": "TEXT", "text": "TEXT", "quote": "TEXT DEFAULT ''", "quote_ref": "TEXT DEFAULT ''",
+                             "responsible": "TEXT DEFAULT ''", "due": "TEXT DEFAULT ''", "reason": "TEXT",
+                             "state": "TEXT DEFAULT 'новое'", "task_id": "INTEGER", "decided_by": "TEXT DEFAULT ''",
+                             "decided_at": "TEXT", "created_at": "TEXT"},
     "sessions": {"id": "INTEGER PRIMARY KEY", "token_hash": "TEXT", "account_id": "INTEGER", "created_at": "TEXT",
                  "expires_at": "TEXT", "remember": "INTEGER DEFAULT 0", "via_shared": "INTEGER DEFAULT 0"},
 }
