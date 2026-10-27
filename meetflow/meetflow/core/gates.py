@@ -174,6 +174,11 @@ class TaskGate:
             # D5 (прогон 09.10.26): модель исполнителя не дала, а реплика обращена к отделу или человеку из
             # «Команды» («ПТО, обновите график») — адресат берётся из цитаты
             named = self.team.addressee(quote)
+        if not named and quote:
+            # исполнитель «я» из подписи голоса (ERP `fill_self_assigned_responsibles`, перенос 27.10.2026): цитата в
+            # строке, подписанной ФИО «Команды» по голосу, и говорящий сам в единственном числе обещает действие
+            from .ispolnitel_golosom import из_подписи
+            named = из_подписи(quote, desc, [p.full_name for p in self.team.people])
         if not named:
             if self.cfg.require_assignee:
                 reasons.append("no_assignee")
@@ -237,5 +242,17 @@ class TaskGate:
         if any(x and looks_like_injection(x) for x in (desc, quote, draft.quote, named)) or \
                 (not quote and self._echoes_injection(desc, source)):
             reasons.append("suspicious_instruction")
+
+        # 6. существенность — правило кодом (ERP `sushchestvennost.решение`, решения владелицы 21–22.10.2026, перенос
+        # 27.10.2026): мелочь, обрывок реплики, общее пожелание без предмета — не задача (отсеивается строкой журнала,
+        # при узком пороге — «Возможные поручения»); пересказ в третьем лице с именем внутри — «под вопросом». Только у
+        # кандидата, прошедшего остальные проверки; оценка моделью (поля significance ERP) в MeetFlow не переносилась
+        if not reasons:
+            from .sushchestvennost import ОТСЕЯТЬ, ПОД_ВОПРОСОМ, решение
+            как, _почему = решение(desc)
+            if как == ОТСЕЯТЬ:
+                reasons.append("insignificant")
+            elif как == ПОД_ВОПРОСОМ:
+                reasons.append("third_person_retelling")
 
         return GateResult(not reasons, reasons, person, quote or "", desc, pending if not reasons else None)

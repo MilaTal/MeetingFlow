@@ -114,9 +114,10 @@ def test_one_word_unknown_task_without_assignee_and_card(env):
 def test_department_without_head_task_first(env):
     line = "Гаврилов Павел: ОТН, проверьте пломбы на цистернах"
     r = run(env, line, "ОТН", desc="Проверить пломбы на цистернах")
-    assert r["tasks_added"] == 1 and tasks(env)[0]["assignee"] is None
-    card = cards(env, "assign_person")[0]
-    assert card["payload"]["reason"] == "department" and not cards(env, "held_task")
+    # перевёрнут 27.10.2026 (решение владелицы 16.10.2026, ERP `test_otdel_tekstom_1610`, обе системы): задача отделу
+    # без руководителя — исполнителем название отдела текстом, как у секретаря, без карточки
+    assert r["tasks_added"] == 1 and tasks(env)[0]["assignee"] == "ОТН"
+    assert not cards(env, "assign_person") and not cards(env, "held_task")
 
 
 # 1 — карточка выбора исполнителя не снимается по сроку

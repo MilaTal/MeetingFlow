@@ -1327,22 +1327,35 @@ def create_app(theme_name: str | None = None, db_path: str | None = None, journa
             use(body.role, body.point, by=u.get("name") or u["role"])
         except (ConnectorError, FileNotFoundError) as e:
             raise HTTPException(400, str(e))
+        except (OSError, ValueError) as e:
+            # файл моделей занят другим процессом (Windows: os.replace при открытом файле) или не читается — ответ
+            # словами, а не обрыв (отчёт локальной машины 27.10.2026: «сделать основной» оборвала соединение)
+            raise HTTPException(409, f"Файл моделей сейчас не записать: {type(e).__name__}: {str(e)[:200]}") from e
         if old != body.point:      # переключение на точку, которая и так основная, — не событие (локальная машина)
-            running = pipe.running_meetings()
-            pause = float(os.environ.get("MEETFLOW_MODEL_SWITCH_PAUSE_SEC", "900"))
-            note = ""
-            if running and body.role == "generate":
-                note = (f" Сейчас идёт сборка: текущий вызов дождётся ответа, через {int(pause // 60)} мин и после конца "
-                        "сборки протокол соберётся заново на новой модели.")
-            m = store.get("meetings", running[0]) if running else None
-            pipe.cards.open(m["project_id"] if m else None, "technical",
-                            f"Модель роли «{ROLE_TITLES.get(body.role, body.role)}» сменена: {old or '—'} → {body.point}",
-                            {"why": ("Следующий вызов пойдёт на новую модель." + note).strip(), "by": u.get("name") or u["role"]},
-                            running[0] if running else None)
-            if running and body.role == "generate":
-                for mid in running:
-                    queue_rebuild(mid, pause)
+            try:
+                _after_switch(old, body, u)
+            except Exception as e:  # noqa: BLE001 — переключение уже записано; сбой сообщения его не отменяет
+                pipe.journal.write(purpose="models_use", role=body.role, point=body.point,
+                                   error=f"{type(e).__name__}: {str(e)[:300]}")
         return panel()
+
+    def _after_switch(old, body, u) -> None:
+        """Сообщение о смене модели и пересборка идущих сборок — отдельно от записи файла (27.10.2026)."""
+        from ..connectors.llm_routes import ROLE_TITLES
+        running = pipe.running_meetings()
+        pause = float(os.environ.get("MEETFLOW_MODEL_SWITCH_PAUSE_SEC", "900"))
+        note = ""
+        if running and body.role == "generate":
+            note = (f" Сейчас идёт сборка: текущий вызов дождётся ответа, через {int(pause // 60)} мин и после конца "
+                    "сборки протокол соберётся заново на новой модели.")
+        m = store.get("meetings", running[0]) if running else None
+        pipe.cards.open(m["project_id"] if m else None, "technical",
+                        f"Модель роли «{ROLE_TITLES.get(body.role, body.role)}» сменена: {old or '—'} → {body.point}",
+                        {"why": ("Следующий вызов пойдёт на новую модель." + note).strip(), "by": u.get("name") or u["role"]},
+                        running[0] if running else None)
+        if running and body.role == "generate":
+            for mid in running:
+                queue_rebuild(mid, pause)
 
     # Справочник подключений (09.10.26): завести, изменить, удалить, проверить до сохранения; запасная, убрать из
     # роли; откат к прежней версии файла. Только супер-администратору, каждое изменение — в журнал с именем.

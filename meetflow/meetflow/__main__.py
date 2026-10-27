@@ -132,8 +132,25 @@ def main(argv: list[str] | None = None) -> int:
             print("Внимание: сервер открыт в локальную сеть, вход по паролю выключен — роль берётся из заголовка. "
                   "Открыто по слову владелицы 26.10.2026 (http://m46-ai-vm1.nevalab.ru:8005/).", file=sys.stderr)
         os.environ["MEETFLOW_PORT"] = str(a.port)      # метка запуска знает свой порт (стенд 34)
+        _crash_log(a.db)
         uvicorn.run(create_app(), host=a.host, port=a.port)
     return 0
+
+
+def _crash_log(db: str) -> None:
+    """Падение процесса на уровне C (не исключение Python) — в файл `logs/server_crash.log` рядом с базой
+    (27.10.2026). Отчёт локальной машины: «сделать основной» оборвала соединение и сервер перезапустился, а журнала
+    сервера нет — `run_dev` пишет в скрытое окно. `faulthandler` пишет трассу всех потоков в момент падения."""
+    import faulthandler
+    from pathlib import Path
+    try:
+        folder = Path(db).resolve().parent / "logs"
+        folder.mkdir(parents=True, exist_ok=True)
+        f = open(folder / "server_crash.log", "a", encoding="utf-8")   # noqa: SIM115 — открыт до конца процесса
+        faulthandler.enable(file=f, all_threads=True)
+        globals()["_CRASH_FILE"] = f
+    except OSError:
+        faulthandler.enable()
 
 
 if __name__ == "__main__":

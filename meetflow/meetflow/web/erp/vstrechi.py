@@ -34,6 +34,12 @@ MEDIA_EXT = (".mp4", ".mkv", ".avi", ".mov", ".webm", ".m4a", ".mp3", ".wav", ".
 DOCX = "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
 
 
+class MoveProjectIn(BaseModel):
+    """«Перенести встречу в другой проект» (27.10.2026): номер проекта и пересобрать ли протокол после переноса."""
+    project_id: int
+    rebuild: bool = True
+
+
 class InModel(BaseModel):
     model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
 
@@ -432,6 +438,24 @@ def mount(r: APIRouter, ctx: Ctx) -> None:
         ctx.sys_msg(f"Сводка возвращена на новую дату {ru_date(day)}", f"{ctx.name(admin)}: материалов {moved}.",
                     "meetings")
         return {"meeting": meeting_out(store.get("meetings", nid)), "moved": moved}
+
+    @r.post("/meetings/{mid}/move-project")
+    def move_project(mid: int, payload: MoveProjectIn, request: Request):
+        """«Перенести встречу в другой проект» вместе с её задачами (27.10.2026): встреча из общей папки попала не в свой
+        проект. Протокол не переписывается — после переноса сборка встаёт в очередь заново (`rebuild`)."""
+        from ...core import proekt_zapisi as pz
+        admin = ctx.need_admin(request)
+        ctx.meeting_or_404(mid)
+        try:
+            out = pz.перенести_встречу(store, mid, payload.project_id, ctx.name(admin))
+        except ValueError as exc:
+            raise HTTPException(404, str(exc)) from exc
+        rid = pz.собрать_после_выбора(store, getattr(ctx.pipe, "queue", None), mid, ctx.name(admin)) \
+            if payload.rebuild else None
+        ctx.sys_msg("Встреча перенесена в другой проект",
+                    f"{ctx.name(admin)}: задач {out['tasks']}" + ("; сборка поставлена в очередь" if rid else ""),
+                    "meetings")
+        return {**out, "queued": bool(rid), "meeting": meeting_out(store.get("meetings", mid))}
 
     @r.post("/meetings/{mid}/move-materials")
     def move_mats(mid: int, payload: MeetingMoveIn, request: Request):

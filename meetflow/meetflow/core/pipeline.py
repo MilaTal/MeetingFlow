@@ -41,7 +41,7 @@ from . import deadline
 from . import asr_journal, plan as plan_mod, voice_step
 from . import petlya_raspoznavaniya as petlya, polnota_rasshifrovki as polnota
 from . import korotkiy_protokol, schet_zadach, tablica_zadach, tekst_po_zapisi
-from . import iskazheniya_nazvaniy, slovar_whisper
+from . import iskazheniya_nazvaniy, slovar_whisper, ukrupnenie_sborka
 from .team_sync import sync_people
 from ..connectors.team_shared import team_shared_state
 from .dates import due_text, lenient_date
@@ -93,9 +93,17 @@ class RunReport:
     text_removed: list = field(default_factory=list)     # убранные предложения (до 40) — в журнал, не в документ
     tasks_returned: int = 0     # возвращены в работу после снятия прежней пересборкой (26.10.2026, как ERP)
     tasks_by_steps: str = ""    # «задачи по шагам: от модели → после стражей → … » — итог сборки, не документ
+    ukrupnenie: str = ""        # «укрупнение задач: …» — итог сборки (как ERP 25–26.10.2026, перенос 27.10.2026)
+    participants: str = ""      # «участники кодом: N по голосам» — итог сборки (27.10.2026)
 
 
 HIDDEN = "[строка скрыта: похожа на инструкцию для модели]"
+
+
+def _раздел_участников(name: str) -> bool:
+    """Раздел протокола «Участники» (в теме может зваться «Участники встречи», «Присутствовали»)."""
+    n = (name or "").strip().lower()
+    return n.startswith("участник") or n.startswith("присутств")
 
 
 def _span(text: str) -> int:
@@ -178,11 +186,15 @@ def _int(v: Any) -> int | None:
 # документа 14). Вне реестра — дубль, пустая формулировка и внедрённая инструкция: текст реестра идёт в подсказки
 # модели на следующих встречах. Уже отклонённое оператором отсекается раньше — по правилу памяти.
 # отсеиваются целиком: ни задачи, ни карточки — строкой в журнал разбора (владелец 15.10.26, вечер; Планёрка ddfa618)
-SIFTED = {"negation_in_quote", "question_not_assignment", "condition_not_assignment", "intent_not_assignment"}
+SIFTED = {"negation_in_quote", "question_not_assignment", "condition_not_assignment", "intent_not_assignment",
+          "insignificant"}     # мелочь и обрывок — правилом существенности (ERP 21–22.10.2026, перенос 27.10.2026)
 OUT_OF_REGISTRY = {"duplicate", "empty_description", "suspicious_instruction",
                    # отрицание, вопрос, условие, намерение отсеиваются ДО «под вопросом» (владелец 15.10.26, вечер)
-                   "negation_in_quote", "question_not_assignment", "condition_not_assignment", "intent_not_assignment"}
+                   "negation_in_quote", "question_not_assignment", "condition_not_assignment", "intent_not_assignment",
+                   "insignificant"}
 REASON_TEXT = {
+    "insignificant": "несущественное поручение: мелочь или обрывок без предмета",
+    "third_person_retelling": "формулировка в третьем лице: пересказ, а не поручение",
     "no_verbatim_quote": "нет дословной цитаты", "no_assignee": "исполнитель не назван",
     "assignee_not_in_team": "человека нет в Команде", "assignee_not_said": "исполнитель не прозвучал",
     "assignee_ambiguous": "неясно, о ком речь", "question_not_assignment": "это вопрос, а не поручение",
@@ -352,6 +364,22 @@ class MeetingPipeline:
                     seen.add(clean)
                     names.append(clean)
         return names, " ".join(str(meeting.get("leader") or "").split())
+
+    @staticmethod
+    def _participants_by_code(names: list[str], leader: str) -> list[str]:
+        """Состав раздела «Участники» кодом: ведущий (если задан) и ФИО, опознанные по голосам правилом 0,65 / 0,10 и
+        подтверждённые «Командой» (`voice_names`), без повторов, е = ё. Голосов нет — пусто: раздел пишет модель по
+        тексту, как раньше (заметки, протокол секретаря). Модель в состав никого не добавляет (замечание 27.10.2026: в
+        протокол 26.10 попал человек, которого во встрече нет)."""
+        if not names:
+            return []
+        out, seen = [], set()
+        for n in ([leader] if leader else []) + list(names):
+            key = " ".join((n or "").replace("ё", "е").replace("Ё", "Е").lower().split())
+            if key and key not in seen:
+                seen.add(key)
+                out.append(" ".join(n.split()))
+        return out
 
     # ---------------------------------------------------------------- приём
     def _voice_step(self, project_id: int, meeting_id: int, wav_path: Path | None, doc, filename: str) -> None:
@@ -594,8 +622,12 @@ class MeetingPipeline:
                                prompt_tokens=res.prompt_tokens, completion_tokens=res.completion_tokens,
                                cost_usd=res.cost_usd, seconds=round(res.seconds, 2), chars=len(system) + len(user),
                                **{k: raw[k] for k in ("route", "provider", "cost_source", "cached_tokens",
-                                                      "reasoning_effort")   # рассуждение вызова (27.10.2026)
-                                  if raw.get(k) is not None})
+                                                      "reasoning_effort",   # рассуждение вызова (27.10.2026)
+                                                      # почему модель остановилась — как журнал ERP (orchestrator_qwen,
+                                                      # 25.10.2026): «length» отличает обрыв по потолку от обычного ответа
+                                                      "finish_reason")
+                                  if raw.get(k) is not None},
+                               chars_out=len(res.text or ""))
             try:
                 return parse_json(res.text, self.prof.strip_think)
             except (ValueError, json.JSONDecodeError) as e:
@@ -661,6 +693,11 @@ class MeetingPipeline:
         self.cards.cleanup(project_id, int(days if days is not None else self.theme.get("operator.card_cleanup_days", 0) or 0))
         budget = RunBudget(limits or BudgetLimits(**self.theme.get("budget", {})))
         meeting = self.s.get("meetings", meeting_id) or {}
+        if meeting.get("project_pending"):
+            # проект записи из общей папки не определён (27.10.2026): ни одного вызова, пока человек не выберет проект
+            rep.status = "waiting_project"
+            rep.detail = "Проект записи не определён — выберите проект в карточке «Проект записи не определён»."
+            return rep
         if meeting.get("date"):          # дата не в ISO не ломает сравнения и единицы (01/24)
             d0 = lenient_date(meeting["date"])
             meeting = {**meeting, "date": d0.isoformat() if d0 else None}
@@ -720,6 +757,7 @@ class MeetingPipeline:
         gate = TaskGate(team, self.neg, GateConfig(**self.theme.get("gates", {})))
 
         planned: list[tuple[TaskDraft, Any]] = []
+        merged_history: dict[int, str] = {}     # id черновика объединённой задачи → «Объединено из: …» (укрупнение)
         due_unconfirmed: dict[int, str] = {}
         due_kinds: dict[int, str] = {}           # id черновика → вид срока: «сегодня» / «оценка» (12.10.26)     # id черновика → срок модели, не прозвучавший рядом (12.10.26)
         held: list[tuple[TaskDraft, list[str], str, Any]] = []
@@ -732,6 +770,7 @@ class MeetingPipeline:
         closing_mentioned = 0                     # «названо больше 60» — в журнал прогона, не в документ (13.10)
         limited = False                           # дополнение (единицы, проверка) остановлено пределом (01/8)
         mass_closing = None
+        участники_кодом: list[str] = []
         ures = None
         active: list[dict] = []
         try:
@@ -852,6 +891,24 @@ class MeetingPipeline:
                 else:
                     held.append((d, g.reasons, g.quote, g))
 
+            # Укрупнение задач (ERP 25–26.10.2026, близнец `ukrupnenie_zadach`, перенос 27.10.2026): после ворот и стража
+            # исполнителя, до реестра и таблицы документа — сведение с открытыми задачами того же исполнителя, затем
+            # соседние поручения одного предмета или контрагента одной строкой. Сбой укрупнения сборку не роняет.
+            try:
+                ук = ukrupnenie_sborka.применить(self.s, project_id, meeting_id, planned, source.text,
+                                                 set(due_unconfirmed), meeting.get("date"))
+                planned = ук["planned"]
+                merged_history.update(ук["истории"])
+                for новый, прежний in ук["замены"].items():     # вид срока объединённой — от первой части
+                    if прежний in due_kinds:
+                        due_kinds[новый] = due_kinds[прежний]
+                rep.ukrupnenie = ук["строка"]
+                for t in ук["сведённые"]:      # та же открытая задача прошлой встречи — не новая, строкой журнала
+                    self.journal.write(purpose="triage", meeting_id=meeting_id, verdict="сведено с реестром",
+                                       task_id=t.get("duplicate_of"), description=str(t.get("description"))[:300])
+            except Exception as exc:  # noqa: BLE001
+                self.step_failed(project_id, meeting_id, "Укрупнение задач", exc)
+
             # строки, похожие на внедрённую инструкцию, не становятся основанием закрытия (01/12)
             inj_lines = {i for i, ln in enumerate(source.lines) if looks_like_injection(ln)}
             if self.guard_llm:   # обращение к системе без явной темы — досмотр моделью, не больше 10 строк за прогон
@@ -927,8 +984,13 @@ class MeetingPipeline:
 
                     # 3. протокол — разделы пишет модель, таблицы и шапку — код
                     participants, leader = self._participants(meeting_id, meeting)
+                    # «Участники» — кодом из опознанных голосов и «Команды» (27.10.2026): раздел модель не пишет, если
+                    # голоса опознаны; без голосов (заметки, протокол секретаря) — как раньше, по тексту
+                    участники_кодом = self._participants_by_code(participants, leader)
+                    скелет_модели = [s for s in self._skeleton(meeting)
+                                     if not (участники_кодом and _раздел_участников(s))]
                     from . import topics
-                    sysm, user = self.pb.protocol(self._skeleton(meeting), safe_source.text, notes_text,
+                    sysm, user = self.pb.protocol(скелет_модели, safe_source.text, notes_text,
                                                   participants=participants, leader=leader,
                                                   topic_hint=topics.подсказка_протокола(self._topic(meeting)))
                     try:
@@ -1002,9 +1064,15 @@ class MeetingPipeline:
                         # документ 14: фамилия и имя, похожих нет — сразу в «Команду» «не подтверждён», задача на
                         # него, оператору карточка на подтверждение; в одном прогоне — одна запись на человека
                         who, np_id, np_new = new_person(pend["name"])
+                    elif pend.get("reason") == "department":
+                        # отдел без руководителя — исполнителем название отдела текстом, как у секретаря, без карточки
+                        # (решение владелицы 16.10.2026 и 24.10.2026, ERP `test_otdel_tekstom_1610`; перенос 27.10.2026)
+                        who = (pend.get("name") or "").strip() or None
                     tid = self.reg.add(project_id, g.description, who, meeting_id, g.quote, d.due_date, mdate,
                                        due_kinds.get(id(d)))
                     added.append((tid, d, g))
+                    if id(d) in merged_history:
+                        ukrupnenie_sborka.записать_историю(self.s, tid, merged_history[id(d)])
                     if id(d) in due_unconfirmed:
                         self._due_card(project_id, meeting_id, tid, g, due_unconfirmed[id(d)], mdate)
                     if pend.get("reason") == "new_person":
@@ -1015,14 +1083,7 @@ class MeetingPipeline:
                                             meeting_id)
                         g.pending = None
                     elif pend.get("reason") == "department":
-                        self.cards.open(project_id, "assign_person",
-                                        f"Отдел без руководителя: назначьте ответственного — {g.description[:100]}",
-                                        {"task_id": tid, "description": g.description, "quote": g.quote,
-                                         "department": pend["name"], "reason": "department", "marks": [],
-                                         "candidates": [{"id": p.id, "name": p.label,
-                                                         "hints": [f"отдел «{p.department}»"]}
-                                                        for p in pend["candidates"]]}, meeting_id)
-                        g.pending = None
+                        g.pending = None          # отдел записан исполнителем текстом, карточки нет (16.10.2026)
                     elif pend.get("reason") == "unknown":
                         self.cards.open(project_id, "assign_person",
                                         f"Кто исполнитель: {d.assignee} — {g.description[:100]}",
@@ -1144,6 +1205,8 @@ class MeetingPipeline:
                         pend = g.pending or {}
                         if pend.get("reason") == "new_person":       # документ 14 — тот же путь, что у протокола
                             who, np_id, np_new = new_person(pend["name"])
+                        elif pend.get("reason") == "department":     # отдел текстом, без карточки (16.10.2026)
+                            who, pend = (pend.get("name") or "").strip() or None, {}
                         tid = self.reg.add(project_id, g.description, who, meeting_id, g.quote, None, mdate)
                         added.append((tid, TaskDraft(unit.text, None), g))
                         rep.units_tasks += 1
@@ -1209,10 +1272,12 @@ class MeetingPipeline:
                 # пометка «оперативная» из раздела секретаря — сама, до таблицы (как ERP, 26.10.2026)
                 if notes:
                     self._operativnye_po_sekretaryu(project_id, notes)
+                if участники_кодом:
+                    rep.participants = f"участники кодом: {len(участники_кодом)} по голосам и «Команде»"
                 protocol_md = self._render_protocol(meeting, sections, added, closings, srcs, removals,
                                                     record=safe_source.text + ("\n" + notes_text if notes_text else ""),
                                                     people=[p.full_name for p in team.people], rep=rep,
-                                                    base_kind=source.kind.value)
+                                                    base_kind=source.kind.value, participants=участники_кодом)
                 # то же правило для абзацев «**Проект** – …» тела: без опоры — «Проект не определён» (как ERP)
                 protocol_md, _оп, _св = iskazheniya_nazvaniy.применить_к_встрече(self.s, project_id, protocol_md, [],
                                                                                  safe_source.text)
@@ -1311,6 +1376,8 @@ class MeetingPipeline:
                            **({"tekst_po_zapisi": rep.text_check, "tekst_ubrano": rep.text_removed}
                               if rep.text_check else {}),
                            **({"zadachi_po_shagam": rep.tasks_by_steps} if rep.tasks_by_steps else {}),
+                           **({"ukrupnenie": rep.ukrupnenie} if rep.ukrupnenie else {}),
+                           **({"uchastniki": rep.participants} if rep.participants else {}),
                            answered_by={k: sorted(set(v)) for k, v in budget.answered.items() if not k.startswith("_")},
                            **self.tool_info)
         return rep
@@ -1407,7 +1474,7 @@ class MeetingPipeline:
 
     def _render_protocol(self, meeting: dict, sections: dict[str, str | None], added, closings, srcs,
                          removals=(), *, record: str | None = None, people=(), rep: RunReport | None = None,
-                         base_kind: str = "transcript") -> str:
+                         base_kind: str = "transcript", participants: list[str] | None = None) -> str:
         """Документ для читателя — без системных пометок: модель, стенд, файлы, пределы и замечания
         уходят в карточки и журнал (правило владельца 13.10.26 для всех систем).
 
@@ -1425,7 +1492,12 @@ class MeetingPipeline:
         tp = self._topic(meeting)
         # тема — в шапку протокола кодом: «# Протокол 01.10.2026. Стройка.» (как ERP, оформить_протокол)
         out = [f"# {th.word('protocol')} {date_h}" + (f". {tp['name'].strip().rstrip('.')}." if tp else ""), ""]
+        участники_строкой: list[str] = []
         for sec in self._skeleton(meeting):
+            if participants and _раздел_участников(sec):
+                # кодом и после проверки опоры (ФИО — не речь, проверять нечего); раздел участников — первым после шапки
+                участники_строкой = [f"## {sec}", ", ".join(participants) + ".", ""]
+                continue
             body = sections.get(sec, "")
             if body is None:              # не собран (предел, потолок ответа) — пусто, причина в карточке
                 out += [f"## {sec}", ""]
@@ -1440,6 +1512,9 @@ class MeetingPipeline:
                 rep.text_check = tekst_po_zapisi.строка_хода(отчёт)
                 rep.text_removed = list(отчёт.get("предложения") or [])
         head = korotkiy_protokol.разбить_длинные(head).rstrip("\n")
+        if участники_строкой:
+            строки_шапки = head.split("\n")
+            head = "\n".join(строки_шапки[:2] + участники_строкой + строки_шапки[2:]).rstrip("\n")
         out = head.split("\n") + [""]
         откуда = "запись" if base_kind == SourceKind.TRANSCRIPT.value else "заметки"
         строки = tablica_zadach.строки_встречи(
