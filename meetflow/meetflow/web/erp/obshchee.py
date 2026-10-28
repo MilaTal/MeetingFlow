@@ -142,7 +142,7 @@ class Ctx:
             rows = self.store.q("SELECT id FROM projects WHERE COALESCE(archived,0)=0 ORDER BY id")
             if len(rows) == 1:
                 return rows[0]["id"]
-            raise HTTPException(400, "Выберите проект внизу левой панели: «Все проекты» показывают, но не заводят.")
+            raise HTTPException(400, "Выберите проект вверху левой панели: «Все проекты» показывают, но не заводят.")
         return pid
 
     # Проект и подпроекты (справочник ЛМ 6c6933f, `projects.parent_id`; возвращено 27.10.2026): подпроект — запись проекта

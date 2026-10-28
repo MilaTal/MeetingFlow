@@ -68,7 +68,7 @@ async function renderMeetingReader(id) {
   const сведения = встречи.find(m => m.id === Number(id)) || встреча;
   const состояние = сведения.building ? "идёт сборка" : сведения.draft_pending ? "черновик ждёт решения"
     : протокол.available ? "протокол готов" : (сведения.состояние_протокола || "протокола нет");
-  const назад = откуда === "reg" ? `<a href="#dashboard" class="mt-back">← Реестр</a>` : `<a href="#meetings" class="mt-back">← Встречи по проекту</a>`;
+  const назад = откуда === "reg" ? `<a href="#dashboard" class="mt-back">← Реестр</a>` : `<a href="#meetings" class="mt-back">← Реестр встреч</a>`;
   const кнопка = (k, знак, текст, n) => `<button type="button" class="mt-btn" data-drawer="${k}" aria-expanded="false">${знак}${esc(текст)}${n !== undefined ? ` <span class="n">${n}</span>` : ""}</button>`;
   const естьПлан = !!(планЭтой && планЭтой.available);
   const заголовок = протокол.available ? `Протокол встречи ${fmtRuDate(встреча.date)}`
@@ -384,7 +384,7 @@ async function renderAgreements() {
   const всего = data.total ?? data.items.length;
   const кнопкаЕщё = всего > data.items.length
     ? `<tr class="more-row"><td colspan="6" style="text-align:center; padding:12px 8px;"><button class="btn-sm" type="button" data-agr-more>Показать все (${data.total})</button></td></tr>` : "";
-  $main.innerHTML = `<div class="feed-head"><div class="feed-head-text"><h1>Договорённости</h1>
+  $main.innerHTML = `<div class="feed-head"><div class="feed-head-text"><h1>Договорённости по проекту</h1>
       <div class="feed-sub">Решения, правила работы, открытые вопросы и обсуждённое без решения. Договорённость с понятным действием и
         исполнителем — задача, она в реестре задач. ${data.mode === "on"
         ? "В протоколе — решения и открытые вопросы обычными предложениями в разделах тем." : "Режим «в тени»: в протокол строки не идут."}</div></div></div>

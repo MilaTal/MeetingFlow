@@ -135,7 +135,7 @@ def mount(r: APIRouter, ctx: Ctx) -> None:
     def need_pid(request: Request, what: str = "Папка-приёмник, интервал обхода и автозапуск") -> int:
         pid = ctx.project(request)
         if not pid:
-            raise HTTPException(400, f"{what} — у каждого проекта свои: выберите проект внизу левой панели")
+            raise HTTPException(400, f"{what} — у каждого проекта свои: выберите проект вверху левой панели")
         return pid
 
     def check_password(u: dict, password: str) -> None:
@@ -318,7 +318,7 @@ def mount(r: APIRouter, ctx: Ctx) -> None:
                   ws.get("interval_source") or "", "переменная окружения" if "переменн" in (ws.get("interval_source") or "") else "по умолчанию"),
               "poll_every_var": "MEETFLOW_WATCH_INTERVAL_SEC", "poll_every_min": 10, "poll_every_max": 86400,
               "poll_every_value_setting": store.get_setting("watch_interval", pid) if pid else None,
-              "poll_every_note": "" if pid else "выберите проект внизу левой панели — у каждого проекта своя папка"}
+              "poll_every_note": "" if pid else "выберите проект вверху левой панели — у каждого проекта своя папка"}
         cards_open = store.q("SELECT kind, COUNT(*) AS n FROM cards WHERE status='open' AND kind NOT IN ('technical') GROUP BY kind")
         n_open = sum(x["n"] for x in cards_open)
         from ...core import asr_journal

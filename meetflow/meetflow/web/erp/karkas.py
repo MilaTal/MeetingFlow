@@ -147,7 +147,7 @@ def mount(r: APIRouter, ctx: Ctx) -> None:
 
     @r.get("/projects-list")
     def projects_list(request: Request):
-        """Выбор проекта внизу левой панели: проект, под ним подпроекты, «Все проекты» (многопроектность — разрешённое
+        """Выбор проекта вверху левой панели: проект, под ним подпроекты, «Все проекты» (многопроектность — разрешённое
         отличие от ERP). Архивные не показываются; подпроект архивного проекта — тоже."""
         rows = store.q("SELECT id, name, parent_id, archived FROM projects")
         live = [r for r in rows if not r.get("archived")]

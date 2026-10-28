@@ -178,7 +178,7 @@ def mount(r: APIRouter, ctx: Ctx) -> None:
     def need_pid(request: Request) -> int:
         pid = ctx.project(request)
         if not pid:
-            raise HTTPException(400, "Сводка и Дорожная карта собираются по одному проекту — выберите проект внизу левой панели")
+            raise HTTPException(400, "Сводка и Дорожная карта собираются по одному проекту — выберите проект вверху левой панели")
         return pid
 
     def summary_md(pid: int) -> str:
