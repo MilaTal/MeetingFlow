@@ -158,9 +158,11 @@ function менюВстречи($кнопка, m) {
     if (!(await confirmDialog(текст, "Удалить"))) return;
     try {
       await api(`/meetings/${m.id}${ch.can_delete ? "" : "?with_tasks=true"}`, { method: "DELETE" });
+      await загрузитьПроекты();          // число встреч у проекта в блоке «Проекты» (отчёт ЛМ 83714c5, 29.10.2026)
       renderProtocols();
       if (!ch.can_delete) уведомлениеСОтменой(`Встреча ${fmtRuDate(m.date)} удалена`, async () => {
         await api(`/meetings/${m.id}/restore`, { method: "POST" });
+        await загрузитьПроекты();
         toast("Удаление отменено"); renderProtocols();
       });
       else toast("Встреча удалена");
@@ -181,6 +183,9 @@ function перенестиВстречу(m) {
     const r = await api(`/meetings/${m.id}/move-project`, { method: "POST", json: { project_id: Number(v.value), rebuild: true } });
     const п = _проекты.find(x => x.id === Number(v.value));
     toast(`Встреча перенесена в «${п ? п.name : ""}»${r.tasks ? `, задач: ${r.tasks}` : ""}`);
+    // число встреч у проектов в блоке «Проекты» после переноса — иначе окно удаления проекта до Ctrl+F5 писало
+    // «Встреч в нём нет» (отчёт ЛМ 83714c5, шаг 4, 29.10.2026)
+    await загрузитьПроекты();
     renderProtocols();
   });
   ov.querySelector("#mv-find").addEventListener("input", (e) => {

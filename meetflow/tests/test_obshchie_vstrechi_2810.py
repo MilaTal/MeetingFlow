@@ -195,3 +195,17 @@ def test_экран_блок_проектов_и_меню_встречи():
     for фраза in ("Общие встречи", "+ Новый проект", "Переименовать", "Удалить", "Переместить в проект",
                   "/projects-list/", "/move-project", "/restore", "with_tasks=true", "/label"):
         assert фраза in js, фраза
+
+
+def test_число_встреч_проекта_свежее_после_переноса():
+    """Отчёт ЛМ 83714c5, шаг 4 (29.10.2026): после «Переместить в проект…» окно удаления проекта без Ctrl+F5 писало
+    «Встреч в нём нет». Теперь после переноса и удаления встречи список проектов перечитывается, а окно удаления проекта
+    берёт число встреч с сервера."""
+    nav = (STATIC / "nav.js").read_text(encoding="utf-8")
+    app = (STATIC / "app.js").read_text(encoding="utf-8")
+    перенос = nav[nav.index("function перенестиВстречу(m)"):nav.index("function уведомлениеСОтменой")]
+    assert перенос.index("await загрузитьПроекты();") < перенос.index("renderProtocols();", перенос.index("move-project"))
+    удаление = nav[nav.index("function менюВстречи("):nav.index("function перенестиВстречу(m)")]
+    assert удаление.count("await загрузитьПроекты();") == 2
+    окно = app[app.index("$m.querySelector('[data-act=\"delete\"]')"):app.index("function нуженПроект(")]
+    assert окно.index("await загрузитьПроекты();") < окно.index("Встреч в нём")
