@@ -76,3 +76,20 @@
   border-bottom-color: var(--accent-border) !important; }
 :root[data-palette] .card { background: linear-gradient(to bottom, var(--card-top) 0%, var(--card-bottom) 100%); }
 :root[data-palette] :is(input, select, textarea):focus { border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-soft); }
+
+/* 4. Тёмная тема: акцент цветом текста — светлым тоном палитры (отчёт ЛМ 42e9992, замер 28.10.2026). Счётчики меню,
+   вкладок и пути встречи, «Завести», «Показать список», «Сбросить», «Искать везде» брали var(--accent) — тёмный тон палитры
+   на тёмном фоне давал 1,5–1,9:1 при любой палитре, индиго тоже. Красная и лиловая метки и «просрочена» — тем же приёмом
+   от своего цвета. Светлая тема не затрагивается; размеры и начертание прежние. */
+/* Счётчики — токеном текста акцента в обеих темах: в светлой он равен акценту, кроме polaris и meadow ниже. */
+:root[data-palette] :is(.tab-badge, #conflicts-badge, #pod-badge, #system-badge, #voice-review-badge, #razbor-badge):not(:empty) {
+  color: var(--accent-text) !important; }
+/* Светлая тема, polaris и meadow: акцент на собственной подложке давал 4,25:1 (кнопки, вкладки, счётчики на выбранном
+   пункте). Текст акцента — тоном наведения (≥ 5,4:1); заливки и линии остаются цветом палитры. */
+:root:is([data-palette="polaris"], [data-palette="meadow"]):not([data-theme="dark"]) { --accent-text: var(--accent-hover); }
+:root[data-theme="dark"] :is(.reg-views .n, .mt-btn .n, .aw-what .n, .doc-tab.doc-tab-action, .disclosure-summary, .search-everywhere) {
+  color: var(--accent-text); }
+:root[data-theme="dark"] .disclosure-summary::marker { color: var(--accent-text); }
+:root[data-theme="dark"] .search-reset-link { color: var(--accent-text) !important; }
+:root[data-theme="dark"] :is(.badge-danger, .reg-over, #reg-list .task-table .doc-cell-sub.reg-over) { color: color-mix(in srgb, var(--danger) 55%, #fff); }
+:root[data-theme="dark"] .badge-warning { color: color-mix(in srgb, var(--warning) 45%, #fff); }

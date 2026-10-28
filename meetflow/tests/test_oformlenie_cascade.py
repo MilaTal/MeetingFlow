@@ -184,3 +184,53 @@ def test_old_meetflow_application_rules():
     assert ".btn-primary { background: var(--accent-fill) !important" in css
     assert "#main table:not(.reg-closed) thead th { background: var(--accent-soft) !important" in css
     assert "linear-gradient(to bottom, var(--card-top) 0%, var(--card-bottom) 100%)" in css
+
+
+DARK_ACCENT_AS_TEXT = ("#razbor-badge", "#system-badge", ".tab-badge", ".reg-views .n", ".mt-btn .n", ".doc-tab.doc-tab-action",
+                       ".disclosure-summary", ".search-everywhere", ".search-reset-link")
+
+
+def test_dark_accent_as_text_uses_light_tone():
+    """Отчёт ЛМ 42e9992 и замер 28.10.2026: в тёмной теме счётчики и ссылки цветом var(--accent) давали 1,5–1,9:1 при любой
+    палитре. Слой переводит их на var(--accent-text) — светлый тон палитры; красная и лиловая метки — от своего цвета."""
+    css = (STATIC / "oformlenie.css").read_text(encoding="utf-8")
+    part = css[css.index("/* 4. Тёмная тема"):]
+    for sel in DARK_ACCENT_AS_TEXT:
+        assert sel in part, sel
+    assert ":root[data-theme=\"dark\"] .search-reset-link { color: var(--accent-text) !important; }" in part
+    assert "color: color-mix(in srgb, var(--danger) 55%, #fff)" in part
+    assert "color: color-mix(in srgb, var(--warning) 45%, #fff)" in part
+
+
+def _mix_white(hex_color: str, share: float) -> str:
+    r, g, b = (int(hex_color[i:i + 2], 16) for i in (1, 3, 5))
+    return "#%02x%02x%02x" % tuple(round(c * share + 255 * (1 - share)) for c in (r, g, b))
+
+
+@pytest.mark.parametrize("name", sorted(PALETTES))
+def test_dark_accent_text_readable(name):
+    """Светлый тон акцента в тёмной теме читается на карточке #1b1b1f и на подложке выбранного пункта (смесь 22 %)."""
+    import sys
+    sys.path.insert(0, str(STATIC.parents[2] / "scripts"))
+    from gen_palettes import contrast
+    acc = palette_accent(name)
+    dark = re.search(r'\[data-palette="%s"\]\s*\{[^}]*?--accent-dark:\s*(#[0-9a-fA-F]{6})' % name, STYLES)
+    text = dark.group(1) if dark else _mix_white(acc, 0.55)
+    soft = "#%02x%02x%02x" % tuple(round(int(acc[i:i + 2], 16) * 0.22 + c * 0.78) for i, c in zip((1, 3, 5), (0x1b, 0x1b, 0x1f)))
+    assert contrast(text, "#1b1b1f") >= 4.5, (name, text)
+    assert contrast(text, soft) >= 4.5, (name, text, soft)
+
+
+@pytest.mark.parametrize("name", ["polaris", "meadow"])
+def test_light_accent_text_darker_for_bright_greens(name):
+    """polaris и meadow: акцент на собственной подложке давал 4,25:1 (замер 28.10.2026) — текст акцента тоном наведения."""
+    import sys
+    sys.path.insert(0, str(STATIC.parents[2] / "scripts"))
+    from gen_palettes import contrast
+    assert resolve("--accent-text", {"data-palette": name}) == "var(--accent-hover)"
+    assert contrast(palette_var(name, "accent-hover"), palette_var(name, "accent-soft")) >= 4.5
+    assert contrast(palette_accent(name), palette_var(name, "accent-soft")) < 4.5   # прибор: без правки было ниже нормы
+
+
+def test_light_accent_text_kept_for_others():
+    assert resolve("--accent-text", {"data-palette": "clay"}) == "var(--accent)"
