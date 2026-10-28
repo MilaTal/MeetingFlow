@@ -53,7 +53,7 @@
     }
   },
   "budget": {
-    "max_calls": 14,
+    "max_calls": 30,
     "max_cost_usd": 0.4
   },
   "intake": {

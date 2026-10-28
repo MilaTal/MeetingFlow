@@ -26,7 +26,8 @@ class BudgetExceeded(RuntimeError):
 
 @dataclass
 class BudgetLimits:
-    max_calls: int = 14
+    max_calls: int = 30                # 28.10.2026: 14 → 30, как Планёрка (решения владелицы 16.10 и 18.10.2026: извлечение
+                                       # по темам и отдельный вызов договорённостей); на 14 сборка 15.10 обрывалась на шаге units
     max_calls_per_step: int = 12       # потолок шага: все вызовы шага, переспросы включены (25.10.2026)
     verify_reserve: int = 1
     max_cost_usd: float = 0.40

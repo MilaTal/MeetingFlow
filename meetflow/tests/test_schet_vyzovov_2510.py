@@ -31,3 +31,15 @@ def test_journal_records_run_id(tmp_path):
     j.write(purpose="extract_tasks", meeting_id=1)
     rec = json.loads((tmp_path / "j.jsonl").read_text(encoding="utf-8").splitlines()[0])
     assert rec["run_id"] == "run-42" and rec["purpose"] == "extract_tasks"
+
+
+def test_predel_vyzovov_kak_planerka_2810():
+    """28.10.2026, отчёт ЛМ d052f82: сборка 15.10 остановилась на «вызовов 14 из 14» (шаг units, 7 кусков записи) и не
+    сохранила единицы. Предел — как у Планёрки: 30 (решения владелицы 16.10 и 18.10.2026)."""
+    import json
+    from pathlib import Path
+    from meetflow.core.budget import BudgetLimits
+    assert BudgetLimits().max_calls == 30
+    корень = Path(__file__).resolve().parents[1] / "themes"
+    for имя in ("_default.json", "daily_ops.json", "erp_rollout.json"):
+        assert json.loads((корень / имя).read_text(encoding="utf-8"))["budget"]["max_calls"] == 30, имя

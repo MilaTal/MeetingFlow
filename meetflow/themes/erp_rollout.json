@@ -50,7 +50,7 @@
     "department_heads": {}
   },
   "budget": {
-    "max_calls": 20,
+    "max_calls": 30,
     "max_cost_usd": 2.0,
     "max_chars_per_call": 270000
   },

@@ -86,7 +86,7 @@
     "task_first": true
   },
   "budget": {
-    "max_calls": 14,
+    "max_calls": 30,
     "verify_reserve": 1,
     "max_cost_usd": 0.4,
     "max_chars_per_call": 400000,
