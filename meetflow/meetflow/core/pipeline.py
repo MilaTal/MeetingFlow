@@ -852,10 +852,15 @@ class MeetingPipeline:
                 None — не совпала ни с чем. Прежняя без исполнителя, новая с ним — та же задача (28.10.2026, отчёт ЛМ
                 2469aec: исполнитель по голосу находился, а прежняя пустая строка оставалась пустой)."""
                 ds = set(stems(desc))
-                for tid, q, a, s0 in known:
-                    if q == quote and (a == who or (not a and who)) and jaccard(ds, s0) >= 0.5:
-                        return tid if tid is not None else -1
-                return None
+                hits = [tid for tid, q, a, s0 in known
+                        if q == quote and (a == who or (not a and who)) and jaccard(ds, s0) >= 0.5]
+                if not hits:
+                    return None
+                # действующая задача прежде снятой пересборкой: иначе снятая 87 возвращалась рядом с действующей 101
+                # с той же цитатой — дубль (28.10.2026, отчёт ЛМ d096df6)
+                живые = [t for t in hits if t is None or not rebuild_mod.снята_пересборкой(self.s, t)]
+                tid = (живые or hits)[0]
+                return tid if tid is not None else -1
 
             def дополнить_исполнителя(tid: int, who: str | None) -> None:
                 """Прежняя задача этой встречи без исполнителя, новая сборка его нашла (ворота: голос, адресат) —
@@ -1283,13 +1288,15 @@ class MeetingPipeline:
                 # снятия «не вошедших» и до сборки таблицы: строка задачи в документе не теряется.
                 when_rb = rebuild_mod.когда_сейчас()
                 for tid in sorted(back_ids):
+                    if rebuild_mod.цитата_занята(self.s, meeting_id, tid, self.s.get("tasks", tid).get("source_quote")):
+                        continue          # ту же цитату несёт действующая задача — замена, не возвращаем (d096df6)
                     if rebuild_mod.вернуть(self.s, self.reg, tid, when_rb):
                         rep.tasks_returned += 1
                 # Пересборка снимает задачи прежней сборки, которых нет в новой (решение владелицы 21.10.2026).
                 # Неполное извлечение (остановка по пределу) ничего не снимает: «не найдена» не доказано.
                 res = rebuild_mod.drop_missing(self.s, self.reg, meeting_id, mdate,
                                                kept_ids | {tid for tid, _d, _g in added},
-                                               incomplete=stopped is not None)
+                                               incomplete=stopped is not None, текст_записи=source.text)
                 for t, edits in res["kept"]:
                     # одна карточка на задачу за всё время: повторная пересборка новых не заводит
                     if any(json.loads(c["payload"] or "{}").get("task_id") == t["id"]
