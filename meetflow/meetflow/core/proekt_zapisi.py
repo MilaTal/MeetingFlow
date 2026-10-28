@@ -137,6 +137,16 @@ def проект_файла(store, project_id: int, папка: Path, файл: 
     if pid is not None:
         return {"project_id": pid, "how": f"название в имени файла «{Path(файл).name}»", "disputed": []}
     спорные = спорные or спор
+    # Общая база компании (28.10.2026): свой справочник не узнал, а назван проект общей базы — встреча общей тематики
+    # остаётся проекту папки, если он ведёт такие встречи (`obshchaya_baza.включена`); спор своих проектов — как был
+    if not спорные:
+        from . import obshchaya_baza
+        общие = [{**п, "aliases": _варианты(п["aliases"])} for п in obshchaya_baza.проекты(store, project_id)]
+        for текст in list(reversed(подпапки)) + [Path(файл).stem]:
+            pid, спор = узнать(текст, общие) if общие else (None, [])
+            имена = [п["name"] for п in общие if п["id"] == pid or п["id"] in спор]
+            if имена:
+                return {"project_id": project_id, "how": f"проект общей базы компании «{имена[0]}»", "disputed": []}
     if not подпапки and not общая_папка(store, project_id, Path(папка)):
         return {"project_id": project_id, "how": "папка проекта", "disputed": []}
     return {"project_id": None, "how": "не определён", "disputed": спорные}

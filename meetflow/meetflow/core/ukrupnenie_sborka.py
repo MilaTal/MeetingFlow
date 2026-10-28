@@ -46,6 +46,12 @@ def _справочник(store, project_id: int):
             for p in store.q("SELECT * FROM people WHERE project_id=?", (project_id,))]
     проекты = [{"name": r["name"], "is_active": bool(r.get("active", 1)), "contract_chain": ""}
                for r in store.q("SELECT name, active FROM projects WHERE COALESCE(archived, 0) = 0")]
+    # общая база компании (28.10.2026): подтверждённые люди «Команды» Планёрки, которых нет в «Команде» проекта, и проекты
+    # общей базы с цепочкой договора — для проекта общей тематики; свой справочник главнее (`obshchaya_baza`)
+    from . import obshchaya_baza
+    люди += obshchaya_baza.люди(store, project_id)
+    проекты += [{"name": п["name"], "aliases": п["aliases"], "is_active": True, "contract_chain": п["contract_chain"]}
+                for п in obshchaya_baza.проекты(store, project_id)]
     return uz.справочник_контрагентов(люди, проекты)
 
 

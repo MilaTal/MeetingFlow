@@ -113,7 +113,7 @@ class PromptBuilder:
     def _system(self, task: str) -> str:
         return f"{self.role}\n\n{task}\n\n{DATA_NOT_INSTRUCTIONS}\n{self.p.json_hint}"
 
-    def extract_tasks(self, first_line: int, lines: list[str], team: list[str]) -> tuple[str, str]:
+    def extract_tasks(self, first_line: int, lines: list[str], team: list[str], projects: str = "") -> tuple[str, str]:
         # Прежняя формулировка «поручение есть, только если исполнителя назвали» заставляла модель
         # молча отбрасывать решённые действия без исполнителя — у протоколов секретаря ERP это
         # большинство (прогон 03.10.26: 06.03 — 1 задача против 13). Правило владельца: без
@@ -131,6 +131,8 @@ class PromptBuilder:
                 "поручение. Для каждого верни номер строки-основания.\n"
                 'Схема: {"tasks":[{"description":str,"assignee":str|null,"line":int,"due_date":str|null}]}')
         team_txt = "Команда (для написания имён, НЕ источник фактов): " + "; ".join(team[:120])
+        if projects:                     # общая база компании (28.10.2026): только у встреч общей тематики
+            team_txt += "\n" + projects
         body, _ = fence(numbered(lines, first_line), "кусок записи встречи, строки пронумерованы")
         return self._system(task), f"{team_txt}\n\n{body}{self.p.no_think_suffix}"
 

@@ -1164,6 +1164,47 @@ def create_app(theme_name: str | None = None, db_path: str | None = None, journa
         _lease_path()                       # аренда распознавания — рядом с новой базой голосов
         return voice_base_state(a or None)
 
+    # Общая база компании (28.10.2026): справочник проектов и внешние контакты «Команды» Планёрки, только чтение. Путь к
+    # её app.db — по паролю, как база голосов; флаг «встречи общей тематики компании» — у проекта; «всем проектам» — общий
+    from ..core import obshchaya_baza
+
+    @app.get("/api/settings/company-base")
+    def get_company_base(u: dict = Depends(super_admin)):
+        return {**obshchaya_baza.сводка(store),
+                "projects": [obshchaya_baza.сводка(store, p["id"]) | {"name": p["name"]}
+                             for p in store.q("SELECT id, name FROM projects WHERE COALESCE(archived, 0) = 0 ORDER BY id")]}
+
+    @app.post("/api/settings/company-base")
+    def set_company_base(body: FolderIn, request: Request, u: dict = Depends(super_admin)):
+        a, b = body.path.strip().strip('"'), body.path_repeat.strip().strip('"')
+        if a != b:
+            raise HTTPException(422, "Адрес и его повтор не совпадают — проверьте опечатку.")
+        if a and not Path(a).is_absolute():
+            raise HTTPException(422, r"Нужен полный путь к файлу базы Планёрки, например D:\Планёрка\data\app.db.")
+        confirm_super(u, body.login, body.current_password, request)
+        by = u["name"] or u["role"]
+        store.set_setting(obshchaya_baza.НАСТРОЙКА_ПУТЬ, a or None, None, by)
+        store.insert("decisions", project_id=None, what="Общая база компании: путь к базе Планёрки",
+                     decision="задан" if a else "снят", why=f"кто: {by}", at=now())
+        return obshchaya_baza.сводка(store)
+
+    @app.post("/api/settings/company-base/all")
+    def set_company_base_all(body: ToggleIn, u: dict = Depends(super_admin)):
+        by = u["name"] or u["role"]
+        store.set_setting(obshchaya_baza.НАСТРОЙКА_ВСЕМ, bool(body.enabled), None, by)
+        store.insert("decisions", project_id=None, what="Общая база компании всем проектам",
+                     decision="включена" if body.enabled else "выключена", why=f"кто: {by}", at=now())
+        return obshchaya_baza.сводка(store)
+
+    @app.post("/api/projects/{pid}/settings/company-topic")
+    def set_company_topic(pid: int, body: ToggleIn, u: dict = Depends(super_admin)):
+        project_or_404(pid)
+        by = u["name"] or u["role"]
+        store.set_setting(obshchaya_baza.НАСТРОЙКА_ТЕМАТИКА, bool(body.enabled), pid, by)
+        store.insert("decisions", project_id=pid, what="Встречи общей тематики компании (общая база проектов и контактов)",
+                     decision="включено" if body.enabled else "выключено", why=f"кто: {by}", at=now())
+        return obshchaya_baza.сводка(store, pid)
+
     @app.get("/api/monitoring/intake")
     def mon_intake(u: dict = Depends(super_admin)):
         return [{"project_id": p["id"], "project": p["name"], **intake.state(p["id"])}
