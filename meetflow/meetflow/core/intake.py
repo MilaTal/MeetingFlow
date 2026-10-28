@@ -222,8 +222,13 @@ class IntakeService:
             чей = pz.проект_файла(self.s, project_id, Path(path), item.path)
             цель = чей["project_id"]
             if цель is None:
-                mid = self.s.insert("meetings", project_id=project_id, date=item.meeting_date.isoformat(),
-                                    label="из папки-приёмника — проект не определён", project_pending=1)
+                # одна встреча «проект не определён» на дату (28.10.2026, отчёт ЛМ 7ede6e3: запись 28.10 дала две пустые
+                # встречи — каждый проход, пока запись распознавалась, и проход после перезапуска заводили новую)
+                уже = self.s.q("SELECT id FROM meetings WHERE project_id=? AND date=? AND project_pending=1 "
+                               "ORDER BY id", (project_id, item.meeting_date.isoformat()))
+                mid = уже[0]["id"] if уже else self.s.insert(
+                    "meetings", project_id=project_id, date=item.meeting_date.isoformat(),
+                    label="из папки-приёмника — проект не определён", project_pending=1)
             else:
                 mid = self._meeting_for(цель, item.meeting_date.isoformat())
             проект_приёма = цель or project_id

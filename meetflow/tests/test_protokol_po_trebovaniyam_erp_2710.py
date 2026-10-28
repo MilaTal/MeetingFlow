@@ -261,9 +261,12 @@ def test_общая_папка_корень_не_определён_карточ
     assert len(erp) == 1 and erp[0]["date"] == "2026-10-15"
     карточки = st.q("SELECT * FROM cards WHERE kind=? AND status='open'", (pz.КАРТОЧКА,))
     assert len(карточки) == 1 and карточки[0]["title"].startswith("Проект записи не определён")
-    # сборка ждёт выбора: ни одного вызова модели
+    # перевёрнуто 28.10.2026 (решение владелицы: запись вне проекта собирается сразу): было — сборка ждала выбора,
+    # «waiting_project» и ни одного вызова модели; теперь протокол собирается в проекте папки, карточка остаётся
     rep = client.app.state.pipe.run(client.pid, ждёт[0]["id"])
-    assert rep.status == "waiting_project" and rep.calls == 0
+    assert rep.status != "waiting_project" and rep.calls > 0
+    assert st.get("meetings", ждёт[0]["id"])["protocol_md"]
+    assert st.get("cards", карточки[0]["id"])["status"] == "open"
     # выбор проекта в «Разборе» переносит встречу и ставит сборку в очередь
     h = {"X-Requested-With": "erp-webapp", "X-User-Id": str(st.insert("accounts", login=None, full_name="Орлова Анна",
                                                                        role="super_admin", password_hash="", active=1,
@@ -363,3 +366,18 @@ def test_замена_файла_повторяет_при_занятом(tmp_pa
     monkeypatch.setattr(llm_routes.time, "sleep", lambda *_a: None)
     llm_routes._replace(a, b)
     assert b.exists() and len(попытки) == 3
+
+
+def test_odna_vstrecha_bez_proekta_na_datu_2810(client, tmp_path, monkeypatch):
+    """28.10.2026, отчёт ЛМ 7ede6e3: запись 28.10 из корня общей папки дала две пустые встречи «проект не определён» —
+    пока запись распознавалась, файл оставался в папке, и каждый проход заводил новую встречу. Теперь одна на дату."""
+    общая = tmp_path / "Встречи по всем проектам"
+    общая.mkdir()
+    _папка(client, общая)
+    (общая / "Расшифровка 21.10.2026.txt").write_text(TRANSCRIPT, encoding="utf-8")
+    pipe = client.app.state.pipe
+    monkeypatch.setattr(pipe, "ingest", lambda *a, **k: {"status": "held"})   # файл остаётся в папке, как при распознавании
+    _два_прохода(client)
+    _два_прохода(client)
+    st = client.app.state.store
+    assert len(st.q("SELECT id FROM meetings WHERE project_pending=1 AND date='2026-10-21'")) == 1

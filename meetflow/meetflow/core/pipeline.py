@@ -704,11 +704,9 @@ class MeetingPipeline:
         self.cards.cleanup(project_id, int(days if days is not None else self.theme.get("operator.card_cleanup_days", 0) or 0))
         budget = RunBudget(limits or BudgetLimits(**self.theme.get("budget", {})))
         meeting = self.s.get("meetings", meeting_id) or {}
-        if meeting.get("project_pending"):
-            # проект записи из общей папки не определён (27.10.2026): ни одного вызова, пока человек не выберет проект
-            rep.status = "waiting_project"
-            rep.detail = "Проект записи не определён — выберите проект в карточке «Проект записи не определён»."
-            return rep
+        # Проект записи из общей папки не определён: сборка идёт сразу в проекте папки (решение владелицы 28.10.2026:
+        # «запись вне проекта также должна сразу запускаться на создание протокола»); карточка выбора проекта остаётся,
+        # выбор переносит встречу и пересобирает. Было (27.10.2026): ни одного вызова до выбора — «waiting_project».
         if meeting.get("date"):          # дата не в ISO не ломает сравнения и единицы (01/24)
             d0 = lenient_date(meeting["date"])
             meeting = {**meeting, "date": d0.isoformat() if d0 else None}
