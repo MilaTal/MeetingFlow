@@ -2,23 +2,27 @@
    С переносом фронта ERP (1494432, 27.10.2026) слой theme-line.css ставит акцент правилом :root:not([data-theme="dark"]) —
    оно сильнее блоков [data-palette] из styles.css, и в светлой теме палитра выбиралась, а цвет оставался индиго.
    Здесь акцент палитры возвращается поверх «Линии», а жёстко прописанный индиго «Линии» берётся от акцента.
-   Индиго (палитра по умолчанию) не затронута ничем: утверждённый вид остаётся прежним до пикселя.
+   Применение палитры к экранам — как в MeetFlow до переноса фронта ERP (ff1eeee): меню, кнопки, вкладки, шапки таблиц и
+   карточки в тонах палитры, в тёмной теме — светлые тона акцента (решение владелицы 28.10.2026, часть 3).
    Значения — из блоков палитр styles.css; совпадение проверяет tests/test_oformlenie_cascade.py. */
 
-/* 1. Акцент палитры в светлой теме и в «Как в системе» (подложки «Линии» остаются нейтральными — решение 13.10.26) */
-:root[data-palette="forest"]:not([data-theme="dark"])   { --accent: #2f4f41; --accent-hover: #24382e; }
-:root[data-palette="emerald"]:not([data-theme="dark"])  { --accent: #1b7a52; --accent-hover: #186a48; }
-:root[data-palette="polaris"]:not([data-theme="dark"])  { --accent: #008060; --accent-hover: #006e52; }
-:root[data-palette="sage"]:not([data-theme="dark"])     { --accent: #4b6358; --accent-hover: #3d5148; }
-:root[data-palette="meadow"]:not([data-theme="dark"])   { --accent: #257e52; --accent-hover: #1d6541; }
-:root[data-palette="petrol"]:not([data-theme="dark"])   { --accent: #1d5e69; --accent-hover: #15454d; }
-:root[data-palette="ocean"]:not([data-theme="dark"])    { --accent: #245a8c; --accent-hover: #1d4870; }
-:root[data-palette="slate"]:not([data-theme="dark"])    { --accent: #46586f; --accent-hover: #384759; }
-:root[data-palette="graphite"]:not([data-theme="dark"]) { --accent: #3f4249; --accent-hover: #2e3136; }
-:root[data-palette="ochre"]:not([data-theme="dark"])    { --accent: #8a5a12; --accent-hover: #6a450e; }
-:root[data-palette="clay"]:not([data-theme="dark"])     { --accent: #a14e36; --accent-hover: #86412d; }
-:root[data-palette="copper"]:not([data-theme="dark"])   { --accent: #8c5232; --accent-hover: #724329; }
-:root[data-palette="claret"]:not([data-theme="dark"])   { --accent: #7d3045; --accent-hover: #632637; }
+/* 1. Тона палитры в светлой теме и в «Как в системе». «Линия» задаёт акцент, наведение и подложки правилом
+   :root:not([data-theme="dark"]) — сильнее блоков палитр; здесь они возвращаются для всех палитр, индиго тоже: подложки
+   снова в тоне палитры, как в MeetFlow до переноса фронта ERP (решение владелицы 28.10.2026). */
+:root[data-palette="indigo"]:not([data-theme="dark"])   { --accent: #6863bf; --accent-hover: #5a55ad; --accent-soft: #eef2ff; --accent-soft-hover: #e2e7fd; --accent-border: rgba(104, 99, 191, 0.16); }
+:root[data-palette="forest"]:not([data-theme="dark"])   { --accent: #2f4f41; --accent-hover: #24382e; --accent-soft: #e7eeea; --accent-soft-hover: #d9e5df; --accent-border: rgba(47, 79, 65, 0.22); }
+:root[data-palette="emerald"]:not([data-theme="dark"])  { --accent: #1b7a52; --accent-hover: #186a48; --accent-soft: #e3f2eb; --accent-soft-hover: #d3eadf; --accent-border: rgba(31, 132, 90, 0.22); }
+:root[data-palette="polaris"]:not([data-theme="dark"])  { --accent: #008060; --accent-hover: #006e52; --accent-soft: #e0f2ec; --accent-soft-hover: #cfe9e0; --accent-border: rgba(0, 128, 96, 0.22); }
+:root[data-palette="sage"]:not([data-theme="dark"])     { --accent: #4b6358; --accent-hover: #3d5148; --accent-soft: #eaefec; --accent-soft-hover: #dde5e0; --accent-border: rgba(75, 99, 88, 0.24); }
+:root[data-palette="meadow"]:not([data-theme="dark"])   { --accent: #257e52; --accent-hover: #1d6541; --accent-soft: #e4f1ea; --accent-soft-hover: #d5e9de; --accent-border: rgba(37, 126, 82, 0.22); }
+:root[data-palette="petrol"]:not([data-theme="dark"])   { --accent: #1d5e69; --accent-hover: #15454d; --accent-soft: #edf2f3; --accent-soft-hover: #dfe8ea; --accent-border: rgba(29, 94, 105, 0.2); }
+:root[data-palette="ocean"]:not([data-theme="dark"])    { --accent: #245a8c; --accent-hover: #1d4870; --accent-soft: #edf2f6; --accent-soft-hover: #e0e8ef; --accent-border: rgba(36, 90, 140, 0.2); }
+:root[data-palette="slate"]:not([data-theme="dark"])    { --accent: #46586f; --accent-hover: #384759; --accent-soft: #f0f2f3; --accent-soft-hover: #e5e8eb; --accent-border: rgba(70, 88, 111, 0.2); }
+:root[data-palette="graphite"]:not([data-theme="dark"]) { --accent: #3f4249; --accent-hover: #2e3136; --accent-soft: #f0f0f0; --accent-soft-hover: #e4e5e6; --accent-border: rgba(63, 66, 73, 0.2); }
+:root[data-palette="ochre"]:not([data-theme="dark"])    { --accent: #8a5a12; --accent-hover: #6a450e; --accent-soft: #f6f2ec; --accent-soft-hover: #efe8de; --accent-border: rgba(138, 90, 18, 0.2); }
+:root[data-palette="clay"]:not([data-theme="dark"])     { --accent: #a14e36; --accent-hover: #86412d; --accent-soft: #f7f1ef; --accent-soft-hover: #f2e6e3; --accent-border: rgba(161, 78, 54, 0.2); }
+:root[data-palette="copper"]:not([data-theme="dark"])   { --accent: #8c5232; --accent-hover: #724329; --accent-soft: #f6f1ef; --accent-soft-hover: #efe7e2; --accent-border: rgba(140, 82, 50, 0.2); }
+:root[data-palette="claret"]:not([data-theme="dark"])   { --accent: #7d3045; --accent-hover: #632637; --accent-soft: #f5eef0; --accent-soft-hover: #ede2e5; --accent-border: rgba(125, 48, 69, 0.2); }
 
 /* 2. Индиго, прописанный в «Линии» и styles.css числом, — от акцента палитры. Только там, где индиго у палитры по
    умолчанию действительно виден (замер в браузере 28.10.2026): шапки таблиц (#57529c) и рамка поиска перекрыты
@@ -46,3 +50,29 @@
 :root[data-palette]:not([data-palette="indigo"]) .search-box .search-submit { border-color: color-mix(in srgb, var(--accent) 16%, transparent) !important; }
 :root[data-palette]:not([data-palette="indigo"]) .prep-mark-acc { border-color: color-mix(in srgb, var(--accent) 35%, transparent); }
 :root[data-palette]:not([data-palette="indigo"]) .prep-table tr.prep-nearest-row td { background: color-mix(in srgb, var(--accent) 6%, transparent); }
+
+/* 3. Применение палитры к экранам — как в MeetFlow до переноса фронта ERP (ff1eeee, решение владелицы 28.10.2026):
+   «в тёмной теме было интереснее и гармоничнее сделаны акценты со шрифтами». Размеры, шрифт и раскладка экранов ERP
+   не меняются — только цвет: главные пункты меню цветом акцента полужирным, выбранный пункт и вкладки на подложке
+   акцента, кнопки в тоне палитры, главная кнопка — заливкой акцента, шапки таблиц на подложке акцента, карточки с
+   оттенком акцента сверху. В тёмной теме цвет текста акцента — светлый тон (--accent-text), подложки — смесь акцента
+   с фоном, как было. Правила «Линии» с !important перебиваются здесь тем же !important и большим весом. */
+:root[data-palette] .sidebar .nav-item.nav-main { color: var(--accent-text); font-weight: 600; }
+:root[data-palette] .sidebar .nav-item.nav-main .nav-ico { color: var(--accent-text); }
+:root[data-palette] .sidebar .nav-item.active { background: var(--accent-soft); color: var(--accent-text); border-radius: 8px; }
+/* выбранный пункт в светлой теме — тоном наведения: акцентом на его подложке polaris давал 4,2:1, meadow 4,3:1 (замер 28.10.2026) */
+:root[data-palette]:not([data-theme="dark"]) .sidebar .nav-item.active { color: var(--accent-hover); }
+:root[data-palette] .sidebar .nav-item:is(:hover, :focus-visible) { background: var(--accent-soft-hover); border-radius: 8px; }
+:root[data-palette] :is(.btn, button.btn, .btn-sm):not(.btn-primary, .btn-warning, .btn-danger, .btn-link) {
+  background: var(--accent-soft); color: var(--accent-text); border-color: var(--accent-border); }
+:root[data-palette] :is(.btn, button.btn, .btn-sm):not(.btn-primary, .btn-warning, .btn-danger, .btn-link):is(:hover, :focus-visible) {
+  background: var(--accent-soft-hover); border-color: var(--accent); color: var(--accent-text); }
+:root[data-palette] .btn-primary { background: var(--accent-fill) !important; color: #fff !important; border-color: var(--accent-fill) !important;
+  box-shadow: 0 2px 10px var(--accent-shadow); }
+:root[data-palette] .btn-primary:is(:hover, :focus-visible) { background: var(--accent-fill-hover) !important; border-color: var(--accent-fill-hover) !important; }
+:root[data-palette] :is(.doc-tab-on, .reg-views button.on, .sys-tabs a.on, .pill-on) { color: var(--accent-text) !important; font-weight: 600; }
+:root[data-palette] :is(.doc-tab-on, .pill-on) { background: var(--accent-soft) !important; }
+:root[data-palette] #main table:not(.reg-closed) thead th { background: var(--accent-soft) !important; color: var(--text) !important;
+  border-bottom-color: var(--accent-border) !important; }
+:root[data-palette] .card { background: linear-gradient(to bottom, var(--card-top) 0%, var(--card-bottom) 100%); }
+:root[data-palette] :is(input, select, textarea):focus { border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-soft); }

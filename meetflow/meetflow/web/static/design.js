@@ -12,12 +12,17 @@
     set(k, v) { try { localStorage.setItem(k, v); } catch { /* приватное окно */ } },
   };
 
+  // «Как в системе» — по настройке системы, как в MeetFlow до переноса фронта ERP (решение владелицы 28.10.2026): при тёмной
+  // системе ставится та же тёмная тема, что по кнопке «Тёмная», и меняется вместе с системой без перезагрузки.
+  const systemDark = window.matchMedia ? window.matchMedia("(prefers-color-scheme: dark)") : null;
+
   function apply() {
     const palette = store.get("palette", "indigo");
     const theme = store.get("theme", "auto");
     if (PALETTES[palette] || PALETTES_NEW[palette]) document.documentElement.dataset.palette = palette;
-    if (theme === "auto") delete document.documentElement.dataset.theme;
-    else document.documentElement.dataset.theme = theme;
+    const resolved = theme === "auto" ? (systemDark && systemDark.matches ? "dark" : "") : theme;
+    if (resolved) document.documentElement.dataset.theme = resolved;
+    else delete document.documentElement.dataset.theme;
   }
 
   function renderDesign() {
@@ -47,5 +52,6 @@
   }
 
   if (typeof routes !== "undefined") routes.design = renderDesign;
+  if (systemDark && systemDark.addEventListener) systemDark.addEventListener("change", apply);
   apply();
 })();

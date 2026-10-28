@@ -145,9 +145,42 @@ def test_palette_accent_without_theme_choice(name):
     assert resolve("--accent", {"data-palette": name}).lower() == palette_accent(name)
 
 
-def test_indigo_light_unchanged():
-    """Утверждённый вид по умолчанию (индиго, светлая) не меняется: наведение и подложки «Линии» прежние."""
-    attrs = {"data-palette": "indigo"}
-    assert resolve("--accent-hover", attrs).lower() == "#4f4aa3"
-    assert resolve("--accent-soft", attrs).lower() == "#fafafa"
-    assert resolve("--tint-hover", attrs).lower() == "#e2e6fa"
+def palette_var(name: str, var: str) -> str:
+    m = re.search(r'\[data-palette="%s"\]\s*\{[^}]*?--%s:\s*([^;]+);' % (name, re.escape(var)), STYLES)
+    assert m, (name, var)
+    return m.group(1).strip().lower()
+
+
+@pytest.mark.parametrize("name", sorted(PALETTES))
+def test_palette_tones_light_as_old_meetflow(name):
+    """Перевёрнут 28.10.2026: прежде индиго в светлой теме сохраняла нейтральные подложки «Линии» (#fafafa, наведение
+    #4f4aa3). Решение владелицы — применение палитры как в MeetFlow до переноса фронта ERP: подложки, наведение и рамки
+    всех палитр, индиго тоже, — из её блока в styles.css."""
+    for theme in ({}, {"data-theme": "light"}):
+        attrs = {"data-palette": name, **theme}
+        for var in ("accent", "accent-hover", "accent-soft", "accent-soft-hover", "accent-border"):
+            assert resolve("--" + var, attrs).lower() == palette_var(name, var), (name, theme, var)
+    assert palette_var("indigo", "accent-soft") == "#eef2ff"
+
+
+def test_indigo_tint_hover_kept():
+    """Подложка наведения у индиго — прежняя «Линии»; от акцента она считается только у остальных палитр."""
+    assert resolve("--tint-hover", {"data-palette": "indigo"}).lower() == "#e2e6fa"
+
+
+def test_system_theme_follows_os():
+    """«Как в системе» следует настройке системы (как в MeetFlow до переноса фронта ERP): тёмная система — та же тёмная
+    тема, что по кнопке, и смена без перезагрузки."""
+    js = (STATIC / "design.js").read_text(encoding="utf-8")
+    assert 'matchMedia("(prefers-color-scheme: dark)")' in js
+    assert 'addEventListener("change", apply)' in js
+
+
+def test_old_meetflow_application_rules():
+    """Применение палитры к экранам: меню, главная кнопка заливкой акцента, шапки таблиц на подложке акцента, карточки
+    с оттенком акцента — правила слоя на месте и перебивают «Линию» (!important там, где он у «Линии»)."""
+    css = (STATIC / "oformlenie.css").read_text(encoding="utf-8")
+    assert ".sidebar .nav-item.nav-main { color: var(--accent-text); font-weight: 600; }" in css
+    assert ".btn-primary { background: var(--accent-fill) !important" in css
+    assert "#main table:not(.reg-closed) thead th { background: var(--accent-soft) !important" in css
+    assert "linear-gradient(to bottom, var(--card-top) 0%, var(--card-bottom) 100%)" in css
