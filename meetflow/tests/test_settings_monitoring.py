@@ -254,14 +254,16 @@ def test_unavailable_folder_is_not_empty_success(client, svc):
     shutil.rmtree(svc.d)
     r = svc.scan_project(client.pid)
     assert r["status"] == "unavailable"
-    assert client.get("/api/monitoring/intake", headers=SUPER).json()[0]["last_scan"]["status"] == "unavailable"
+    # список приёмников открывается «Общими встречами» (Доработка 2, 28.10.2026) — проект ищется по номеру
+    st = next(x for x in client.get("/api/monitoring/intake", headers=SUPER).json() if x["project_id"] == client.pid)
+    assert st["last_scan"]["status"] == "unavailable"
 
 
 def test_last_useful_scan_kept(client, svc):
     (svc.d / "Расшифровка 01.10.2026.txt").write_text(TRANSCRIPT, encoding="utf-8")
     _scan_twice(svc, client.pid)
     svc.scan_project(client.pid, date(2026, 10, 3))   # пустой проход
-    st = client.get("/api/monitoring/intake", headers=SUPER).json()[0]
+    st = next(x for x in client.get("/api/monitoring/intake", headers=SUPER).json() if x["project_id"] == client.pid)
     assert st["last_scan"]["ingested"] == [] and st["last_useful_scan"]["ingested"]
 
 

@@ -310,7 +310,7 @@ def встречи_той_же_темы(store, meeting: dict) -> set[int] | None
     if тема is None or not тема.get("carry_same_topic"):
         return None
     ключ = _id_темы(store, {})
-    return {m["id"] for m in store.q("SELECT * FROM meetings WHERE project_id=?", (meeting.get("project_id"),))
+    return {m["id"] for m in store.q("SELECT * FROM meetings WHERE deleted_at IS NULL AND project_id=?", (meeting.get("project_id"),))
             if ключ(m) == тема["id"]}
 
 

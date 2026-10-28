@@ -42,6 +42,7 @@ def test_выбор_проекта_деревом_и_подписи(env):
     c = env
     rows = c.get("/projects-list", headers=c.h()).json()
     assert [(r["name"], r["level"], r["label"]) for r in rows] == [
+        ("Общие встречи", 0, "Общие встречи"),  # «Общие встречи» — первой строкой (Доработка 2, 28.10.2026)
         ("Склад", 0, "Склад"), ("Приёмка", 1, "Склад – Приёмка"), ("Цех", 0, "Цех")]
     c.st.update("projects", c.priemka, archived=1)
     assert "Приёмка" not in [r["name"] for r in c.get("/projects-list", headers=c.h()).json()]
@@ -107,7 +108,7 @@ def test_договорённости_фильтр_проекта_и_подпр�
     assert [x["text"] for x in c.get("/agreements?project=Приёмка", headers=h(project=c.sklad)).json()["items"]] == ["Приёмка по акту"]
     assert [x["text"] for x in c.get("/agreements?project=__none__", headers=h(project=c.sklad)).json()["items"]] == ["Склад общий"]
     allp = c.get("/agreements", headers=h(project=0)).json()
-    assert allp["project_filter"]["options"] == ["Склад", "Склад – Приёмка", "Цех"]
+    assert allp["project_filter"]["options"] == ["Общие встречи", "Склад", "Склад – Приёмка", "Цех"]  # «Общие встречи» — первой строкой (Доработка 2, 28.10.2026)
     assert {x["text"] for x in c.get("/agreements?project=Склад", headers=h(project=0)).json()["items"]} == {"Склад общий", "Приёмка по акту"}
     assert [x["subproject"] for x in c.get("/agreements?project=Склад – Приёмка", headers=h(project=0)).json()["items"]] == ["Склад – Приёмка"]
 
@@ -156,7 +157,7 @@ def test_прежние_подпроекты_переносятся_в_спра�
 def test_окно_правки_задачи_проект_и_подпроект(env):
     c, h = env, env.h
     rows = c.get("/tasks/projects", headers=h("project_admin", c.sklad)).json()
-    assert [r["name"] for r in rows] == ["Склад", "Склад – Приёмка", "Цех"]
+    assert [r["name"] for r in rows] == ["Общие встречи", "Склад", "Склад – Приёмка", "Цех"]  # «Общие встречи» — первой строкой (Доработка 2, 28.10.2026)
     t = task(c.st, c.sklad, "Сверить остатки")
     r = c.patch(f"/tasks/{t}/project", json={"project_id": c.priemka}, headers=h("project_admin", c.sklad)).json()
     assert r["subproject"] == "Приёмка"

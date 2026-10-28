@@ -221,27 +221,32 @@ class IntakeService:
             # файла; не определился — встреча с пометкой «проект не определён» и карточка, сборка ждёт выбора
             чей = pz.проект_файла(self.s, project_id, Path(path), item.path)
             цель = чей["project_id"]
+            # Доработка 2 (28.10.2026): не узнан по имени — встреча в «Общих встречах», своя на каждый файл (две неузнанные
+            # записи одного дня — две встречи, а не одна на двоих, как 26.10); проект решит содержание после распознавания.
+            # Повторный проход, пока запись распознаётся, находит ту же встречу по дате и имени файла.
+            общие = pz.общие_встречи(self.s)
             if цель is None:
-                # одна встреча «проект не определён» на дату (28.10.2026, отчёт ЛМ 7ede6e3: запись 28.10 дала две пустые
-                # встречи — каждый проход, пока запись распознавалась, и проход после перезапуска заводили новую)
-                уже = self.s.q("SELECT id FROM meetings WHERE project_id=? AND date=? AND project_pending=1 "
-                               "ORDER BY id", (project_id, item.meeting_date.isoformat()))
+                метка = f"из папки-приёмника: {item.path.name}"
+                уже = self.s.q("SELECT id FROM meetings WHERE project_id=? AND date=? AND label=? AND deleted_at IS NULL "
+                               "ORDER BY id", (общие, item.meeting_date.isoformat(), метка))
                 mid = уже[0]["id"] if уже else self.s.insert(
-                    "meetings", project_id=project_id, date=item.meeting_date.isoformat(),
-                    label="из папки-приёмника — проект не определён", project_pending=1)
+                    "meetings", project_id=общие, date=item.meeting_date.isoformat(), label=метка,
+                    project_how="проект определится по содержанию записи")
             else:
                 mid = self._meeting_for(цель, item.meeting_date.isoformat())
-            проект_приёма = цель or project_id
+                self.s.update("meetings", mid, project_how=чей["how"])
+            проект_приёма = цель or общие
             is_media = self.pipe.plugins.resolve_source(item.path.name) is not None and \
                 self.pipe.plugins.resolve_source(item.path.name).kind == "asr"
             self._beat(project_id, "распознавание записи" if is_media else "приём файла", item.path.name)
             data = None if is_media else item.path.read_bytes()
             res = self.pipe.ingest(проект_приёма, mid, item.path.name, data, path=item.path if is_media else None)
             st = res.get("status")
-            if st == "ok" and цель is None:
-                pz.открыть_карточку(self.s, self.pipe.cards, project_id, mid, item.path.name, чей)
+            if st == "ok" and res.get("kind") == "transcript":
+                проект_приёма, как = self._по_содержанию(mid, цель, чей, item.path.name)
+                чей = {**чей, "how": как}
             if st == "ok":
-                result.setdefault("projects", []).append({"file": item.path.name, "project_id": цель,
+                result.setdefault("projects", []).append({"file": item.path.name, "project_id": проект_приёма,
                                                           "how": чей["how"]})
             if st in ("ok", "duplicate"):
                 fi.known.add(item.digest)
@@ -276,8 +281,30 @@ class IntakeService:
             self.s.set_setting("watch_last_useful_scan", result, project_id)
         return result
 
+    def _по_содержанию(self, mid: int, цель: int | None, чей: dict, файл: str) -> tuple[int, str]:
+        """Проект по содержанию расшифровки (Доработка 2, 28.10.2026). Имя не узнало проект — решает содержание: узнан —
+        встреча переносится туда вместе с тем, что к ней привязано, иначе остаётся в «Общих встречах». Имя узнало, а
+        содержание уверенно говорит о другом проекте — встреча остаётся по имени, оператору карточка о расхождении:
+        расхождение показывается, а не примиряется. Папка самого проекта сильнее содержания — там не сверяется."""
+        from . import proekt_zapisi as pz
+        справочник = pz.проекты(self.s)
+        по = pz.по_содержанию(pz.текст_встречи(self.s, mid), справочник)
+        if цель is None:
+            if по["project_id"]:
+                pz.перенести_встречу(self.s, mid, по["project_id"], "папка-приёмник")
+            self.s.update("meetings", mid, project_how=по["how"])
+            return по["project_id"] or pz.общие_встречи(self.s), по["how"]
+        if по["project_id"] and чей.get("how") != "папка проекта" and not str(чей.get("how")).startswith("проект общей базы"):
+            if pz.корень(справочник, по["project_id"]) != pz.корень(справочник, цель):
+                имя = (self.s.get("projects", по["project_id"]) or {}).get("name") or ""
+                self.pipe.cards.open(цель, "project_mismatch", f"Проект записи «{файл}»: по имени и по содержанию разный",
+                                     {"file": файл, "by_name": чей.get("how"), "by_content": по["how"],
+                                      "candidate_id": по["project_id"], "candidate": имя}, mid)
+        return цель, чей.get("how") or ""
+
     def _meeting_for(self, project_id: int, iso_date: str) -> int:
-        rows = self.s.q("SELECT id FROM meetings WHERE project_id=? AND date=? ORDER BY id", (project_id, iso_date))
+        rows = self.s.q("SELECT id FROM meetings WHERE project_id=? AND date=? AND deleted_at IS NULL ORDER BY id",
+                        (project_id, iso_date))
         if rows:
             return rows[0]["id"]
         return self.s.insert("meetings", project_id=project_id, date=iso_date, label="из папки-приёмника")

@@ -1597,6 +1597,7 @@ function выбранныйПроект() {
 function названиеСистемы() {
   const id = выбранныйПроект();
   const п = _проекты.find(x => x.id === id);
+  if (id && п && п.general) return "Общие встречи";                 // Доработка 2, 28.10.2026
   if (id && п) return `Проект — ${п.label || п.name}`;          // подпроект — «Проект — Проект – Подпроект»
   return id ? "MeetFlow" : "Все проекты компании";
 }
@@ -1609,11 +1610,13 @@ function показатьНазваниеПроекта() {
 async function загрузитьПроекты() {
   try { _проекты = await api("/projects-list", { вне_показа: true }); } catch (e) { _проекты = _проекты || []; }
   if (!Array.isArray(_проекты)) _проекты = [];
-  // сохранённый проект пропал (архив, удалён) — первый проект, а не пустой экран; проектов нет — «Все проекты»
+  // сохранённый проект пропал (архив, удалён) — первый проект, а не пустой экран; проектов нет — «Все проекты».
+  // «Общие встречи» стоят первой строкой (Доработка 2, 28.10.2026), но по умолчанию берётся первый настоящий проект, как прежде
+  const первый = (_проекты.find(x => !x.general) || _проекты[0] || {}).id || 0;
   if (выбранныйПроект() && !_проекты.some(x => x.id === выбранныйПроект())) {
-    localStorage.setItem("currentProjectId", String(_проекты.length ? _проекты[0].id : 0));
+    localStorage.setItem("currentProjectId", String(первый));
   }
-  if (localStorage.getItem("currentProjectId") === null && _проекты.length) localStorage.setItem("currentProjectId", String(_проекты[0].id));
+  if (localStorage.getItem("currentProjectId") === null && _проекты.length) localStorage.setItem("currentProjectId", String(первый));
   const $s = document.getElementById("project-select");
   if ($s) {
     // проект, под ним его подпроекты с отступом (справочник проектов, 27.10.2026); выбор проекта — вместе с подпроектами
@@ -1621,7 +1624,104 @@ async function загрузитьПроекты() {
       `<option value="${п.id}">${"\u00a0\u00a0\u00a0".repeat(п.level || 0)}${п.level ? "– " : ""}${esc(п.name)}</option>`).join("");
     $s.value = String(выбранныйПроект());
   }
+  рисоватьПроекты();
   показатьНазваниеПроекта();
+}
+
+// --- Блок «Проекты» вверху левой панели (Доработка 2, решение владелицы 28.10.2026) -----------------------------------
+// Как в чатах с моделями и в сервисах встреч (исследование: ChatGPT, Claude, Fireflies, Granola): «Общие встречи» первой
+// строкой, ниже проекты деревом, «Все проекты» последней. Суперадминистратору — «+ Новый проект» внизу и «…» у строки:
+// «Переименовать» (прямо в строке) и «Удалить» (встречи проекта уходят в «Общие встречи», ничего не теряется). Больше
+// восьми проектов верхнего уровня — показываются первые восемь, остальные — по «Ещё N». Выбор строки — тот же, что был у
+// выпадающего списка: `выбратьПроект`.
+const ПРОЕКТОВ_ВИДНО = 8;
+let _проектыРаскрыты = false;
+function рисоватьПроекты() {
+  const $l = document.getElementById("project-list");
+  if (!$l) return;
+  const тек = выбранныйПроект();
+  const супер = typeof isSuperAdmin === "function" && isSuperAdmin();
+  const общие = _проекты.filter(п => п.general);
+  const прочие = _проекты.filter(п => !п.general);
+  let верхних = 0;
+  const видимые = прочие.filter(п => {
+    if (!п.level) верхних += 1;
+    return _проектыРаскрыты || верхних <= ПРОЕКТОВ_ВИДНО || п.id === тек;
+  });
+  const скрыто = прочие.filter(п => !п.level).length - видимые.filter(п => !п.level).length;
+  const строка = (п) => `<div class="pl-row${п.id === тек ? " pl-on" : ""}" data-id="${п.id}">
+      <button type="button" class="pl-name" role="option" aria-selected="${п.id === тек}" title="${esc(п.label || п.name)}"
+        style="padding-left:${8 + 14 * (п.level || 0)}px">${п.level ? "– " : ""}${esc(п.name)}</button>
+      ${супер && !п.general && п.id ? `<button type="button" class="pl-more" aria-label="Действия с проектом «${esc(п.name)}»" aria-haspopup="menu">…</button>` : ""}</div>`;
+  $l.innerHTML = общие.map(строка).join("") + видимые.map(строка).join("") +
+    (скрыто > 0 ? `<button type="button" class="pl-extra" data-act="more">Ещё ${скрыто}</button>` : "") +
+    строка({ id: 0, name: "Все проекты" }) +
+    (супер ? `<button type="button" class="pl-extra" data-act="new">+ Новый проект</button>` : "");
+  $l.querySelectorAll(".pl-row").forEach(р => {
+    р.querySelector(".pl-name").addEventListener("click", () => выбратьПроект(р.dataset.id));
+    р.querySelector(".pl-more")?.addEventListener("click", (e) => { e.stopPropagation(); менюПроекта(р); });
+  });
+  $l.querySelector('[data-act="more"]')?.addEventListener("click", () => { _проектыРаскрыты = true; рисоватьПроекты(); });
+  $l.querySelector('[data-act="new"]')?.addEventListener("click", (e) => полеПроекта(e.currentTarget, "", async (имя) => {
+    const п = await api("/projects-list", { method: "POST", json: { name: имя } });
+    toast(`Проект «${п.name}» заведён`);
+    localStorage.setItem("currentProjectId", String(п.id));
+  }));
+}
+// Поле ввода на месте строки: Enter — сохранить, Escape или уход фокуса — вернуть как было
+function полеПроекта($где, значение, сохранить) {
+  const $in = document.createElement("input");
+  $in.className = "pl-input"; $in.value = значение; $in.maxLength = 200;
+  $in.setAttribute("aria-label", значение ? "Новое название проекта" : "Название нового проекта");
+  $где.replaceWith($in);
+  $in.focus(); $in.select();
+  let занят = false;
+  const готово = async (сохр) => {
+    if (занят) return;
+    const имя = $in.value.trim();
+    if (!сохр || !имя || имя === значение) { рисоватьПроекты(); return; }
+    занят = true;
+    try { await сохранить(имя); await загрузитьПроекты(); render(); }
+    catch (err) { toast(err.message, true); занят = false; $in.focus(); }
+  };
+  $in.addEventListener("keydown", (e) => {
+    if (e.key === "Enter") { e.preventDefault(); готово(true); }
+    if (e.key === "Escape") { e.preventDefault(); готово(false); }
+  });
+  $in.addEventListener("blur", () => { if (!занят) готово(false); });
+}
+function менюПроекта($строка) {
+  document.querySelectorAll(".pl-menu").forEach(x => x.remove());
+  const id = Number($строка.dataset.id);
+  const п = _проекты.find(x => x.id === id);
+  if (!п) return;
+  const $m = document.createElement("div");
+  $m.className = "pl-menu reg-menu"; $m.setAttribute("role", "menu");
+  $m.innerHTML = `<button type="button" role="menuitem" data-act="rename">Переименовать</button>
+    <button type="button" role="menuitem" data-act="delete">Удалить</button>`;
+  $строка.appendChild($m);
+  const закрыть = (e) => { if (!e || !$m.contains(e.target)) { $m.remove(); document.removeEventListener("click", закрыть); } };
+  setTimeout(() => document.addEventListener("click", закрыть), 0);
+  $m.querySelector('[data-act="rename"]').addEventListener("click", () => {
+    закрыть();
+    полеПроекта($строка.querySelector(".pl-name"), п.name, async (имя) => {
+      await api(`/projects-list/${id}`, { method: "PATCH", json: { name: имя } });
+      toast(`Проект переименован: «${имя}»`);
+    });
+  });
+  $m.querySelector('[data-act="delete"]').addEventListener("click", async () => {
+    закрыть();
+    const n = п.meetings || 0;
+    const текст = n ? `Удалить проект «${п.name}»? Встреч в нём: ${n}. Они не удаляются — перейдут в «Общие встречи» вместе со своими задачами.`
+      : `Удалить проект «${п.name}»? Встреч в нём нет.`;
+    if (!(await confirmDialog(текст, "Удалить"))) return;
+    try {
+      const r = await api(`/projects-list/${id}`, { method: "DELETE" });
+      if (выбранныйПроект() === id) localStorage.setItem("currentProjectId", String(r.to));
+      toast(r.meetings_moved ? `Проект удалён, встреч в «Общих встречах»: ${r.meetings_moved}` : "Проект удалён");
+      await загрузитьПроекты(); render();
+    } catch (err) { toast(err.message, true); }
+  });
 }
 function нуженПроект(заголовок) {
   // раздел по одному проекту при «Все проекты» — просьба выбрать проект (как у прежнего MeetFlow, 9c14cb6)
@@ -1637,6 +1737,7 @@ function выбратьПроект(id) {
   localStorage.setItem("currentProjectId", String(v));
   const $s = document.getElementById("project-select");
   if ($s) $s.value = String(v);
+  рисоватьПроекты();
   показатьНазваниеПроекта();
   render();
 }
@@ -2054,6 +2155,7 @@ let _unitsOn = null;
 async function render() {
   const seq = ++_renderSeq;
   const [route, ...rest] = currentRouteParts();
+  рисоватьПроекты();      // блок «Проекты»: роль известна только после выбора «Вы работаете как» (Доработка 2, 28.10.2026)
   // Решение 17.09.26 — render() вызывается и при смене вкладки
   // (hashchange), и напрямую из обработчиков действий (Выполнено,
   // комментарий, правка) для обновления текущего экрана без смены хеша.

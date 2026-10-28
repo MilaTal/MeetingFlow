@@ -34,6 +34,11 @@ MEDIA_EXT = (".mp4", ".mkv", ".avi", ".mov", ".webm", ".m4a", ".mp3", ".wav", ".
 DOCX = "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
 
 
+class MeetingLabelIn(BaseModel):
+    """Название встречи (Доработка 2, 28.10.2026): пусто — без названия, встреча видна по дате."""
+    label: str | None = Field(default=None, max_length=200)
+
+
 class MoveProjectIn(BaseModel):
     """«Перенести встречу в другой проект» (27.10.2026): номер проекта и пересобрать ли протокол после переноса."""
     project_id: int
@@ -133,7 +138,7 @@ def mount(r: APIRouter, ctx: Ctx) -> None:
 
     # ------------------------------------------------------------------ сведения о встрече
     def live(rows: list[dict]) -> list[dict]:
-        return [m for m in rows if (m.get("status") or "scheduled") != "cancelled"]
+        return [m for m in rows if (m.get("status") or "scheduled") != "cancelled" and not m.get("deleted_at")]
 
     def sources_of(mid: int, material: bool | None = None) -> list[dict]:
         rows = store.q("SELECT * FROM sources WHERE meeting_id=? AND removed_at IS NULL ORDER BY id", (mid,))
@@ -212,7 +217,10 @@ def mount(r: APIRouter, ctx: Ctx) -> None:
         # проект и подпроект встречи (справочник проектов, `projects.parent_id`): подпись «Проект – Подпроект»
         root_name, sub_name = ctx.project_names(m.get("project_id"))
         out.update(project_name=root_name, subproject=sub_name or None, project_label=ctx.project_label(m.get("project_id")),
-                   project_root_id=ctx.root_of(m.get("project_id")))
+                   project_root_id=ctx.root_of(m.get("project_id")),
+                   # как встреча попала в проект из папки-приёмника и лежит ли в «Общих встречах» (Доработка 2, 28.10.2026)
+                   project_how=m.get("project_how") or None,
+                   general=bool((store.get("projects", m.get("project_id") or 0) or {}).get("general")))
         return out
 
     def describe(m: dict) -> dict:
@@ -336,9 +344,41 @@ def mount(r: APIRouter, ctx: Ctx) -> None:
         m = ctx.meeting_or_404(mid)
         bl = blockers(m)
         cc = can_cancel(bl)
+        n = len(open_tasks(mid))
         return {"can_delete": not bl, "detail": refuse_text(m, bl) if bl else None,
-                "blockers": [{"what": w, "count": n} for w, n in bl], "can_cancel": cc,
-                "cancel_text": cancel_text(m) if cc else None}
+                "blockers": [{"what": w, "count": k} for w, k in bl], "can_cancel": cc,
+                "cancel_text": cancel_text(m) if cc else None,
+                # Доработка 2 (28.10.2026): встречу с протоколом и задачами можно удалить — задачи снимаются, отмена сразу
+                "can_delete_with_tasks": bool(bl),
+                "with_tasks_text": (f"Удалить встречу {ru_date(m['date'])}? "
+                                    + (f"Её задачи ({n}) будут сняты с причиной «встреча удалена». " if n else "")
+                                    + "Отменить удаление можно сразу после него.") if bl else None}
+
+    def open_tasks(mid: int) -> list[dict]:
+        return store.q("SELECT id, status FROM tasks WHERE source_meeting_id=? AND status NOT IN ('dropped','done')",
+                       (mid,))
+
+    def soft_delete(m: dict, who: str) -> dict:
+        """Удаление встречи с содержимым (Доработка 2, 28.10.2026): встреча скрывается отовсюду, её действующие задачи —
+        «снято» с причиной «встреча удалена», открытые карточки закрываются. Что было, хранится у встречи: отмена
+        возвращает задачам прежний статус и открывает карточки. Протокол, источники и история не стираются."""
+        mid = m["id"]
+        задачи = open_tasks(mid)
+        карточки = store.q("SELECT id FROM cards WHERE meeting_id=? AND status='open'", (mid,))
+        with store.tx():
+            for t in задачи:
+                store.update("tasks", t["id"], status="dropped", date_closed=today_iso())
+                store.insert("task_history", task_id=t["id"], old_status=t["status"], new_status="dropped",
+                             source="meeting_delete", evidence_quote="встреча удалена", changed_by=who, at=now())
+            for c in карточки:
+                store.update("cards", c["id"], status="rejected", resolution="встреча удалена", resolved_at=now())
+            for q in store.q("SELECT id FROM build_queue WHERE meeting_id=? AND status='queued'", (mid,)):
+                store.delete("build_queue", q["id"])
+            store.update("meetings", mid, deleted_at=now(), deleted_info=json.dumps(
+                {"tasks": [[t["id"], t["status"]] for t in задачи], "cards": [c["id"] for c in карточки]}))
+        ctx.sys_msg(f"Удалена встреча {ru_date(m['date'])} (№{mid})",
+                    f"Удалил: {who}. Задач снято: {len(задачи)}.", "meetings")
+        return {"deleted": True, "id": mid, "date": m["date"], "tasks_dropped": len(задачи), "can_undo": True}
 
     def _drop_meeting(m: dict, who: str) -> None:
         for s in store.q("SELECT id FROM sources WHERE meeting_id=?", (m["id"],)):
@@ -349,14 +389,48 @@ def mount(r: APIRouter, ctx: Ctx) -> None:
         ctx.sys_msg(f"Удалена встреча {ru_date(m['date'])} (№{m['id']})", f"Удалил: {who}.", "meetings")
 
     @r.delete("/meetings/{mid}")
-    def delete_meeting(mid: int, request: Request):
+    def delete_meeting(mid: int, request: Request, with_tasks: bool = False):
         admin = ctx.need_admin(request)
         m = ctx.meeting_or_404(mid)
         bl = blockers(m)
+        if bl and with_tasks:
+            return soft_delete(m, ctx.name(admin))
         if bl:
             return refuse(400, refuse_text(m, bl))
         _drop_meeting(m, ctx.name(admin))
         return {"deleted": True, "id": mid, "date": m["date"]}
+
+    @r.post("/meetings/{mid}/restore")
+    def restore_meeting(mid: int, request: Request):
+        """Отмена удаления (Доработка 2, 28.10.2026): задачам — прежний статус, карточкам — снова открыты."""
+        admin = ctx.need_admin(request)
+        m = store.get("meetings", mid)
+        if not m or not m.get("deleted_at"):
+            raise HTTPException(404, "Удалённой встречи с таким номером нет")
+        info = loads(m.get("deleted_info"), {})
+        with store.tx():
+            for tid, было in info.get("tasks", []):
+                t = store.get("tasks", tid)
+                if t and t["status"] == "dropped":
+                    store.update("tasks", tid, status=было, date_closed=None)
+                    store.insert("task_history", task_id=tid, old_status="dropped", new_status=было,
+                                 source="meeting_restore", evidence_quote="удаление встречи отменено",
+                                 changed_by=ctx.name(admin), at=now())
+            for cid in info.get("cards", []):
+                store.update("cards", cid, status="open", resolution=None, resolved_at=None)
+            store.update("meetings", mid, deleted_at=None, deleted_info="{}")
+        ctx.sys_msg(f"Удаление встречи {ru_date(m['date'])} (№{mid}) отменено", f"{ctx.name(admin)}.", "meetings")
+        return {"restored": True, "meeting": meeting_out(store.get("meetings", mid))}
+
+    @r.patch("/meetings/{mid}/label")
+    def set_label(mid: int, payload: MeetingLabelIn, request: Request):
+        """Переименовать встречу (Доработка 2, 28.10.2026). Пустое название — встреча показывается по дате."""
+        admin = ctx.need_admin(request)
+        ctx.meeting_or_404(mid)
+        label = " ".join((payload.label or "").split()) or None
+        store.update("meetings", mid, label=label)
+        ctx.sys_msg("Встреча переименована", f"{ctx.name(admin)}: «{label or 'без названия'}».", "meetings")
+        return meeting_out(store.get("meetings", mid))
 
     @r.post("/meetings/{mid}/cancel-with-plan")
     def cancel_with_plan(mid: int, request: Request):

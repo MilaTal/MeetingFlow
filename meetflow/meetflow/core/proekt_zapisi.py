@@ -57,11 +57,99 @@ def _варианты(aliases) -> list[str]:
     return [str(a).strip() for a in (aliases or []) if str(a).strip()]
 
 
+ОБЩИЕ = "Общие встречи"
+
+
+def общие_встречи(store, theme_id: str = "") -> int:
+    """Номер служебного проекта «Общие встречи» (Доработка 2, 28.10.2026): встречи без проекта лежат в нём, а не в пустом
+    значении — пустое значение у MeetFlow означает «Все проекты». Нет — заводится; переименовать, убрать в архив и удалить
+    его нельзя, в узнавании проекта записи он не участвует."""
+    from .store import now
+    r = store.q("SELECT id FROM projects WHERE COALESCE(general, 0)=1 ORDER BY id LIMIT 1")
+    if r:
+        return r[0]["id"]
+    if not theme_id:
+        t = store.q("SELECT theme FROM projects WHERE COALESCE(theme, '')<>'' ORDER BY id LIMIT 1")
+        theme_id = t[0]["theme"] if t else "_default"
+    return store.insert("projects", name=ОБЩИЕ, theme=theme_id, aliases="[]", active=1, archived=0, general=1,
+                        created_at=now())
+
+
 def проекты(store) -> list[dict]:
-    """Действующие проекты и подпроекты справочника: номер, название, варианты, надпроект."""
+    """Действующие проекты и подпроекты справочника: номер, название, варианты, надпроект. «Общие встречи» и удалённые
+    проекты в узнавании не участвуют."""
     return [{"id": r["id"], "name": r["name"] or "", "aliases": _варианты(r.get("aliases")), "parent_id": r.get("parent_id")}
             for r in store.q("SELECT id, name, aliases, parent_id FROM projects "
-                             "WHERE COALESCE(archived, 0) = 0 AND COALESCE(active, 1) = 1 ORDER BY id")]
+                             "WHERE COALESCE(archived, 0) = 0 AND COALESCE(active, 1) = 1 AND COALESCE(general, 0) = 0 "
+                             "AND COALESCE(deleted, 0) = 0 ORDER BY id")]
+
+
+# Узнавание по содержанию (Доработка 2, 28.10.2026; исследование отрасли: Gong, RingDNA, Syntex, Paperless-ngx — решает
+# отрыв лучшего кандидата от второго, а не абсолютное число; ошибочная раскладка хуже, чем раскладка в «Общие встречи»).
+# Считаются строки расшифровки, где названы проект или его вариант: все значимые основы написания есть в строке.
+ПОРОГ_УПОМИНАНИЙ = 3          # меньше трёх строк с названием — не узнан
+ОТРЫВ = 2.0                   # лучший кандидат должен быть назван хотя бы вдвое чаще второго
+
+
+def по_содержанию(текст: str, справочник: list[dict]) -> dict:
+    """{"project_id": номер или None, "how": причина строкой, "counts": {номер: строк}}. Подпроект и его надпроект — не
+    соперники: строки подпроекта засчитываются и надпроекту, а выбирается подпроект, если он сам набрал порог."""
+    строки = [_основы(x) for x in (текст or "").splitlines()]
+    строки = [x for x in строки if x]
+    счёт: dict[int, int] = {}
+    for п in справочник:
+        написания = [_основы(w) for w in [п["name"]] + list(п["aliases"])]
+        написания = [w for w in написания if w]
+        n = sum(1 for стр in строки if any(w <= стр for w in написания))
+        if n:
+            счёт[п["id"]] = n
+    if not счёт:
+        return {"project_id": None, "how": "в общих встречах: проект не назван ни в имени файла, ни в записи", "counts": {}}
+    имя = {п["id"]: п["name"] for п in справочник}
+    родитель = {п["id"]: п.get("parent_id") for п in справочник}
+    верх = {}
+    for pid, n in счёт.items():                      # соперничают проекты верхнего уровня: подпроект — часть надпроекта
+        корень = pid
+        while родитель.get(корень):
+            корень = родитель[корень]
+        верх[корень] = max(верх.get(корень, 0), n)
+    ряд = sorted(верх.items(), key=lambda x: -x[1])
+    (лучший, n1), n2 = ряд[0], (ряд[1][1] if len(ряд) > 1 else 0)
+    второй = f"; второй — «{имя[ряд[1][0]]}», упоминаний {n2}" if len(ряд) > 1 else ""
+    if n1 < ПОРОГ_УПОМИНАНИЙ:
+        return {"project_id": None, "counts": счёт,
+                "how": f"в общих встречах: «{имя[лучший]}» назван мало, упоминаний {n1}{второй}"}
+    if n2 and n1 < ОТРЫВ * n2:
+        return {"project_id": None, "counts": счёт,
+                "how": f"в общих встречах: два проекта близко — «{имя[лучший]}», упоминаний {n1}{второй}"}
+    точнее = [pid for pid, n in счёт.items() if pid != лучший and n >= ПОРОГ_УПОМИНАНИЙ and
+              лучший in _предки(pid, родитель)]
+    выбран = max(точнее, key=lambda pid: счёт[pid]) if точнее else лучший
+    return {"project_id": выбран, "counts": счёт,
+            "how": f"по содержанию записи: «{имя[выбран]}», упоминаний {счёт.get(выбран, n1)}{второй}"}
+
+
+def корень(справочник: list[dict], pid: int) -> int:
+    """Проект верхнего уровня для проекта или подпроекта справочника."""
+    родитель = {п["id"]: п.get("parent_id") for п in справочник}
+    seen = set()
+    while родитель.get(pid) and pid not in seen:
+        seen.add(pid)
+        pid = родитель[pid]
+    return pid
+
+
+def _предки(pid: int, родитель: dict) -> set[int]:
+    out, x = set(), родитель.get(pid)
+    while x and x not in out:
+        out.add(x)
+        x = родитель.get(x)
+    return out
+
+
+def текст_встречи(store, meeting_id: int) -> str:
+    return "\n".join(r["text"] or "" for r in store.q(
+        "SELECT text FROM sources WHERE meeting_id=? AND removed_at IS NULL AND kind='transcript'", (meeting_id,)))
 
 
 def узнать(текст: str, справочник: list[dict]) -> tuple[int | None, list[int]]:
@@ -87,6 +175,8 @@ def узнать(текст: str, справочник: list[dict]) -> tuple[int
 
 
 def общая_папка(store, project_id: int, папка: Path) -> bool:
+    if (store.get("projects", project_id) or {}).get("general"):
+        return True                   # приёмник «Общих встреч» — общая папка системы (Доработка 2, 28.10.2026)
     v = store.get_setting(НАСТРОЙКА_ОБЩАЯ, project_id, None)
     if v is not None:
         return bool(v)
@@ -188,7 +278,7 @@ def перенести_встречу(store, meeting_id: int, to_project_id: int
     if not m:
         raise ValueError("Встреча не найдена.")
     цель = store.get("projects", to_project_id)
-    if not цель or цель.get("archived"):
+    if not цель or цель.get("archived") or цель.get("deleted"):
         raise ValueError("Проект не найден.")
     было = m["project_id"]
     задачи = store.q("SELECT id FROM tasks WHERE source_meeting_id=?", (meeting_id,))

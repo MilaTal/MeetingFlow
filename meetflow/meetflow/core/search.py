@@ -189,7 +189,7 @@ def search(store, project_id: int, query: str, limit: int = 50, raw_speech: bool
 
     def shown_md(md):
         return без_снятых(md, _dropped, _alive)
-    for m in store.q("SELECT id, date, label, protocol_md FROM meetings WHERE project_id=? AND protocol_md IS NOT NULL",
+    for m in store.q("SELECT id, date, label, protocol_md FROM meetings WHERE deleted_at IS NULL AND project_id=? AND protocol_md IS NOT NULL",
                      (project_id,)):
         m = {**m, "protocol_md": shown_md(m["protocol_md"])}     # строки снятых задач не ищутся (26.10.2026)
         s = score(m["protocol_md"], m["date"], q)

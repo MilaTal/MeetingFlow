@@ -223,7 +223,8 @@ def test_backup_now_and_data_state_and_static(client):
     assert s["backup"]["files"][0]["manual"] and s["access"]["auth_required"] is False
     assert any(a["login"] == "admin" for a in s["access"]["accounts"])
     ds = client.get("/api/monitoring/data-state", headers=SUPER).json()
-    assert ds[0]["project"] == "Пилот" and ds[0]["people"] == len(TEAM)
+    пилот = next(x for x in ds if x["project"] == "Пилот")   # «Общие встречи» — тоже строка (Доработка 2, 28.10.2026)
+    assert пилот["people"] == len(TEAM)
 
 
 def test_everything_is_super_admin_only(client):

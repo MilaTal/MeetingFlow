@@ -79,7 +79,7 @@ def предыдущая_встреча(store, meeting: dict) -> dict | None:
     if not meeting or not meeting.get("date"):
         return None
     from .topics import встречи_той_же_темы
-    rows = store.q("SELECT * FROM meetings WHERE project_id=? AND id<>? AND date<? ORDER BY date DESC, id DESC",
+    rows = store.q("SELECT * FROM meetings WHERE deleted_at IS NULL AND project_id=? AND id<>? AND date<? ORDER BY date DESC, id DESC",
                    (meeting.get("project_id"), meeting.get("id"), str(meeting["date"])[:10]))
     своей_темы = встречи_той_же_темы(store, meeting)
     if своей_темы is not None:
@@ -141,7 +141,7 @@ def статус_задачи(t: dict, на_дату: date | None) -> str:
 
 def даты_прошедших_встреч(store, project_id: int, до: date | None = None) -> list[date]:
     до = до or date.today()
-    return sorted(d for d in (_д(r["date"]) for r in store.q("SELECT date FROM meetings WHERE project_id=?",
+    return sorted(d for d in (_д(r["date"]) for r in store.q("SELECT date FROM meetings WHERE deleted_at IS NULL AND project_id=?",
                                                              (project_id,))) if d and d <= до)
 
 

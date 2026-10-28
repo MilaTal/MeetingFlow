@@ -1171,8 +1171,9 @@ def create_app(theme_name: str | None = None, db_path: str | None = None, journa
     @app.get("/api/settings/company-base")
     def get_company_base(u: dict = Depends(super_admin)):
         return {**obshchaya_baza.сводка(store),
-                "projects": [obshchaya_baza.сводка(store, p["id"]) | {"name": p["name"]}
-                             for p in store.q("SELECT id, name FROM projects WHERE COALESCE(archived, 0) = 0 ORDER BY id")]}
+                "projects": [obshchaya_baza.сводка(store, p["id"]) | {"name": p["name"], "id": p["id"]}
+                             for p in store.q("SELECT id, name FROM projects WHERE COALESCE(archived, 0) = 0 "
+                                              "AND COALESCE(deleted, 0) = 0 ORDER BY id")]}
 
     @app.post("/api/settings/company-base")
     def set_company_base(body: FolderIn, request: Request, u: dict = Depends(super_admin)):

@@ -1,0 +1,33 @@
+/* Блок «Проекты» и «…» у встречи — только MeetFlow (Доработка 2, решение владелицы 28.10.2026). Как в чатах и сервисах
+   встреч: «Общие встречи», проекты, «Все проекты»; «+ Новый проект» и «…» у строки. Цвета — токены оформления (палитра
+   применяется сама), размеры — как у пунктов меню и «…» реестра задач; новых цветов и шрифтов нет. */
+.nav-project .pl-head { display: flex; align-items: center; justify-content: space-between; font-size: 12.5px;
+  color: var(--text-muted); margin-bottom: 4px; padding: 0 4px; }
+.project-list { display: flex; flex-direction: column; gap: 1px; }
+.pl-row { position: relative; display: flex; align-items: center; border-radius: 8px; }
+.pl-row:hover, .pl-row:focus-within { background: var(--hover-tone, var(--field-bg)); }
+.pl-row.pl-on { background: var(--accent-soft); }
+.pl-name { flex: 1; min-width: 0; text-align: left; background: none; border: 0; padding: 5px 8px; font: inherit;
+  font-size: 14px; color: var(--text); cursor: pointer; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.pl-row.pl-on .pl-name { color: var(--accent-text); font-weight: 600; }
+.pl-more { flex: none; background: none; border: 1px solid transparent; border-radius: 6px; width: 26px; height: 24px;
+  cursor: pointer; color: var(--text-muted); font-size: 14px; line-height: 1; padding: 0; opacity: 0; }
+.pl-row:hover .pl-more, .pl-row:focus-within .pl-more, .pl-more:focus-visible, .proto-row .pl-more { opacity: 1; }
+.pl-more:hover, .pl-more:focus-visible { border-color: var(--border); color: var(--text); }
+.pl-menu { top: 26px; right: 0; min-width: 190px; }
+.pl-extra { text-align: left; background: none; border: 0; padding: 5px 8px; font: inherit; font-size: 13px;
+  color: var(--text-muted); cursor: pointer; border-radius: 8px; }
+.pl-extra:hover, .pl-extra:focus-visible { color: var(--text); background: var(--hover-tone, var(--field-bg)); }
+.pl-input { width: 100%; padding: 5px 8px; font: inherit; font-size: 14px; border: 1px solid var(--accent);
+  border-radius: 8px; background: var(--surface); color: var(--text); outline: none; box-shadow: 0 0 0 3px var(--accent-soft); }
+/* «…» у встречи в реестре встреч — в конце строки; меню поверх строки */
+.proto-row { position: relative; }
+.proto-row .proto-tasks { white-space: nowrap; }
+.proto-row .proto-more { margin-left: 4px; width: 22px; height: 22px; vertical-align: middle; }
+/* окно «Переместить встречу» — список проектов с поиском */
+.pl-pick { max-height: 300px; overflow: auto; margin: 8px 0; border: 1px solid var(--border); border-radius: 8px; padding: 4px; }
+.pl-pick-row { display: flex; align-items: center; gap: 8px; padding: 5px 6px; border-radius: 6px; cursor: pointer; }
+.pl-pick-row:hover { background: var(--field-bg); }
+.pl-pick-row[hidden] { display: none; }
+/* уведомление с «Отменить» после удаления встречи */
+.toast-undo { display: flex; align-items: center; gap: 10px; }

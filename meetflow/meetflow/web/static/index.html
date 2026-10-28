@@ -5,12 +5,13 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <link rel="icon" href="data:,">
   <title>MeetFlow</title>
-  <link rel="stylesheet" href="styles.css?v=20261028mf16">
-  <link rel="stylesheet" href="theme-line.css?v=20261028mf16">
-  <link rel="stylesheet" href="polotno.css?v=20261028mf16">
-  <link rel="stylesheet" href="razbor.css?v=20261028mf16">
-  <link rel="stylesheet" href="contrast.css?v=20261028mf16">
-  <link rel="stylesheet" href="oformlenie.css?v=20261028mf16">
+  <link rel="stylesheet" href="styles.css?v=20261028mf17">
+  <link rel="stylesheet" href="theme-line.css?v=20261028mf17">
+  <link rel="stylesheet" href="polotno.css?v=20261028mf17">
+  <link rel="stylesheet" href="razbor.css?v=20261028mf17">
+  <link rel="stylesheet" href="contrast.css?v=20261028mf17">
+  <link rel="stylesheet" href="proekty.css?v=20261028mf17">
+  <link rel="stylesheet" href="oformlenie.css?v=20261028mf17">
 </head>
 <body>
   <!-- Экран входа рисует app.js (renderLoginScreen) поверх заставки-каркаса без данных (решение владелицы 18.10.2026,
@@ -23,10 +24,14 @@
       </div>
       <!-- Проект — многопроектность MeetFlow, одно из двух разрешённых отличий от ERP (27.10.2026): «Все проекты» и
            проекты по имени; шапка вверху — «Проект — название» или «Все проекты компании». С 28.10.2026 (решение
-           владелицы) — вверху левой панели, над меню; прежде — внизу, над «Вы работаете как». id и поведение прежние. -->
+           владелицы) — вверху левой панели, над меню; прежде — внизу, над «Вы работаете как». id и поведение прежние.
+           С 28.10.2026 (Доработка 2, решение владелицы) выпадающий список заменён блоком «Проекты», как в чатах:
+           «Общие встречи», проекты, «Все проекты»; «+ Новый проект» и «…» у строки — суперадминистратору. Список
+           #project-select остаётся скрытым: его читают другие экраны. -->
       <div class="whoami-project nav-project">
-        <label for="project-select">Проект</label>
-        <select id="project-select"><option value="0">Все проекты</option></select>
+        <div class="pl-head"><span id="project-list-title">Проекты</span></div>
+        <div class="project-list" id="project-list" role="listbox" aria-labelledby="project-list-title"></div>
+        <select id="project-select" hidden aria-hidden="true"><option value="0">Все проекты</option></select>
       </div>
       <button class="nav-toggle" id="nav-toggle" type="button" aria-expanded="false" aria-controls="nav">Меню</button>
       <div class="nav" id="nav">
@@ -118,20 +123,20 @@
       <div id="main"></div>
     </main>
   </div>
-  <script src="app.js?v=20261028mf16"></script>
-  <script src="polotno.js?v=20261028mf16"></script>
-  <script src="registry.js?v=20261028mf16"></script>
-  <script src="nav.js?v=20261028mf16"></script>
-  <script src="meeting.js?v=20261028mf16"></script>
-  <script src="prep.js?v=20261028mf16"></script>
-  <script src="conflicts.js?v=20261028mf16"></script>
-  <script src="razbor.js?v=20261028mf16"></script>
+  <script src="app.js?v=20261028mf17"></script>
+  <script src="polotno.js?v=20261028mf17"></script>
+  <script src="registry.js?v=20261028mf17"></script>
+  <script src="nav.js?v=20261028mf17"></script>
+  <script src="meeting.js?v=20261028mf17"></script>
+  <script src="prep.js?v=20261028mf17"></script>
+  <script src="conflicts.js?v=20261028mf17"></script>
+  <script src="razbor.js?v=20261028mf17"></script>
   <!-- team.js (надстройка «Команды» прототипа 13.10.26) снят: «Команда» — 1 в 1 как в старой ERP (владелец 13.10.26) -->
-  <script src="system.js?v=20261028mf16"></script>
-  <script src="design.js?v=20261028mf16"></script>
+  <script src="system.js?v=20261028mf17"></script>
+  <script src="design.js?v=20261028mf17"></script>
   <!-- тема планёрки: карточка «Темы планёрок» и «Тема планёрки» на подготовке (24.10.2026), близнец -->
-  <script src="tema.js?v=20261028mf16"></script>
+  <script src="tema.js?v=20261028mf17"></script>
   <!-- «оперативная» — пометка задачи в реестре одним нажатием и подсказка (26.10.2026), близнец -->
-  <script src="operativnaya.js?v=20261028mf16"></script>
+  <script src="operativnaya.js?v=20261028mf17"></script>
 </body>
 </html>

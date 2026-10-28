@@ -179,7 +179,8 @@ def test_выключатели_через_api(tmp_path):
     r = c.post(f"/api/projects/{pid}/settings/company-topic", json={"enabled": True}, headers=h)
     assert r.status_code == 200 and r.json()["enabled"] is True and r.json()["projects_taken"] == 5
     общее = c.get("/api/settings/company-base", headers=h).json()
-    assert общее["ok"] is True and общее["projects"][0]["company_topic"] is True
+    свой = next(x for x in общее["projects"] if x["id"] == pid)   # служебные «Общие встречи» — отдельная строка
+    assert общее["ok"] is True and свой["company_topic"] is True
     assert c.post(f"/api/projects/{pid}/settings/company-topic", json={"enabled": False}, headers=h).json()["enabled"] \
         is False
     assert c.post("/api/settings/company-base/all", json={"enabled": True}, headers=h).json()["all_projects"] is True

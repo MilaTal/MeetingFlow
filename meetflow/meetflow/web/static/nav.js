@@ -99,10 +99,10 @@ async function renderProtocols() {
         <a class="proto-date" href="#meetings/${m.id}">${esc(fmtRuDate(m.date))}</a>
         <span class="proto-acts"><a href="#meetings/${m.id}/protocol">Протокол</a><a href="#meetings/${m.id}">Встреча</a></span>
         ${название ? `<span class="proto-label">${esc(название)}</span>` : ""}
-        ${(!выбранныйПроект() && m.project_label) || m.subproject ? `<span class="proto-label">${esc(выбранныйПроект() ? m.subproject : m.project_label)}</span>` : ""}
+        ${(!выбранныйПроект() && m.project_label) || m.subproject ? `<span class="proto-label"${m.project_how ? ` title="${esc(m.project_how)}"` : ""}>${esc(выбранныйПроект() ? m.subproject : m.project_label)}</span>` : ""}
         <span class="proto-state${с.акцент ? " proto-state-acc" : ""}">${НАВ_ЗНАКИ[с.знак] || ""}${esc(с.текст)}</span>
         ${m.предложена_пересборка && isAdmin() ? `<a class="proto-state proto-state-acc" href="#razbor" title="Пришёл источник, добавляющий новое. Протокол правили вручную, встреча старше пяти рабочих дней или автопересборок уже две — сами не пересобираем. Решение — в «Разборе»">есть новые материалы — пересобрать?</a>` : ""}
-        <span class="proto-tasks">задач ${m.tasks_count || 0}</span></div></li>`;
+        <span class="proto-tasks">задач ${m.tasks_count || 0}${isAdmin() ? `<button type="button" class="pl-more proto-more" data-mid="${m.id}" aria-label="Действия со встречей ${esc(fmtRuDate(m.date))}" aria-haspopup="menu"${m.project_how ? ` title="${esc(m.project_how)}"` : ""}>…</button>` : ""}</span></div></li>`;
   };
   const список = (строки, ключ) => { месяцПрежний = ""; return `<div class="card reg-card feed-list"><ul class="proto-feed" data-list="${ключ}">${строки.map(строка).join("")}</ul></div>`; };
   const заСрок = НЕДЕЛЬ_ДО_АРХИВА === 1 ? "за последнюю неделю" : `за последние ${НЕДЕЛЬ_ДО_АРХИВА} ${недельВин(НЕДЕЛЬ_ДО_АРХИВА)}`;
@@ -119,6 +119,86 @@ async function renderProtocols() {
     if (e.target.closest("a, button")) return;
     location.hash = р.dataset.href;
   }));
+  $l.querySelectorAll(".proto-more").forEach(b => b.addEventListener("click", (e) => {
+    e.stopPropagation();
+    менюВстречи(b, встречи.find(m => m.id === Number(b.dataset.mid)));
+  }));
+}
+
+// «…» у встречи в реестре (Доработка 2, решение владелицы 28.10.2026): переименовать, переместить в проект или в «Общие
+// встречи», удалить. Перенос — вместе с задачами, протокол пересобирается в новом проекте из готовой расшифровки
+// (запись повторно не распознаётся). Удаление встречи с задачами снимает их с причиной «встреча удалена»; сразу после
+// удаления — «Отменить» в уведомлении. Администратору; сервер проверяет права сам.
+function менюВстречи($кнопка, m) {
+  document.querySelectorAll(".pl-menu").forEach(x => x.remove());
+  if (!m) return;
+  const $m = document.createElement("div");
+  $m.className = "pl-menu reg-menu"; $m.setAttribute("role", "menu");
+  $m.innerHTML = `<button type="button" role="menuitem" data-act="rename">Переименовать</button>
+    <button type="button" role="menuitem" data-act="move">Переместить в проект…</button>
+    <button type="button" role="menuitem" data-act="delete">Удалить</button>`;
+  $кнопка.parentElement.appendChild($m);
+  const закрыть = (e) => { if (!e || !$m.contains(e.target)) { $m.remove(); document.removeEventListener("click", закрыть); } };
+  setTimeout(() => document.addEventListener("click", закрыть), 0);
+  $m.querySelector('[data-act="rename"]').addEventListener("click", () => {
+    закрыть();
+    openModal("Переименовать встречу", `<label class="field-label" for="mt-label">Название встречи ${esc(fmtRuDate(m.date))}</label>
+      <input id="mt-label" maxlength="200" value="${esc(cleanLabel(m.label) || "")}" placeholder="без названия — по дате">`,
+    async (ov) => {
+      await api(`/meetings/${m.id}/label`, { method: "PATCH", json: { label: ov.querySelector("#mt-label").value } });
+      toast("Встреча переименована"); renderProtocols();
+    });
+  });
+  $m.querySelector('[data-act="move"]').addEventListener("click", () => { закрыть(); перенестиВстречу(m); });
+  $m.querySelector('[data-act="delete"]').addEventListener("click", async () => {
+    закрыть();
+    let ch;
+    try { ch = await api(`/meetings/${m.id}/delete-check`); } catch (err) { toast(err.message, true); return; }
+    const текст = ch.can_delete ? `Удалить встречу ${fmtRuDate(m.date)}? В ней ничего нет.` : ch.with_tasks_text;
+    if (!(await confirmDialog(текст, "Удалить"))) return;
+    try {
+      await api(`/meetings/${m.id}${ch.can_delete ? "" : "?with_tasks=true"}`, { method: "DELETE" });
+      renderProtocols();
+      if (!ch.can_delete) уведомлениеСОтменой(`Встреча ${fmtRuDate(m.date)} удалена`, async () => {
+        await api(`/meetings/${m.id}/restore`, { method: "POST" });
+        toast("Удаление отменено"); renderProtocols();
+      });
+      else toast("Встреча удалена");
+    } catch (err) { toast(err.message, true); }
+  });
+}
+// Окно выбора проекта: «Общие встречи» первой строкой, поиск по названию — как «Move chat» у Claude и «Move» у Fireflies
+function перенестиВстречу(m) {
+  const куда = _проекты.filter(п => п.id !== m.project_id);
+  const ov = openModal(`Переместить встречу ${fmtRuDate(m.date)}`, `
+    <input id="mv-find" class="pl-input" placeholder="Найти проект" autocomplete="off" aria-label="Найти проект">
+    <div class="pl-pick" role="listbox" aria-label="Проекты">${куда.map(п => `<label class="pl-pick-row" data-name="${esc((п.label || п.name).toLowerCase())}">
+      <input type="radio" name="mv-to" value="${п.id}"> <span style="padding-left:${14 * (п.level || 0)}px">${п.level ? "– " : ""}${esc(п.name)}</span></label>`).join("")}</div>
+    <div class="page-sub">Встреча переходит вместе со своими задачами; протокол пересоберётся в новом проекте из готовой расшифровки.</div>`,
+  async (ov) => {
+    const v = ov.querySelector('input[name="mv-to"]:checked');
+    if (!v) throw new Error("Выберите проект");
+    const r = await api(`/meetings/${m.id}/move-project`, { method: "POST", json: { project_id: Number(v.value), rebuild: true } });
+    const п = _проекты.find(x => x.id === Number(v.value));
+    toast(`Встреча перенесена в «${п ? п.name : ""}»${r.tasks ? `, задач: ${r.tasks}` : ""}`);
+    renderProtocols();
+  });
+  ov.querySelector("#mv-find").addEventListener("input", (e) => {
+    const q = e.target.value.trim().toLowerCase().replace(/ё/g, "е");
+    ov.querySelectorAll(".pl-pick-row").forEach(р => { р.hidden = q && !р.dataset.name.replace(/ё/g, "е").includes(q); });
+  });
+}
+// Уведомление с кнопкой «Отменить» — 8 секунд (обычное уведомление гаснет за 2,5 с и кнопку не успеть нажать)
+function уведомлениеСОтменой(текст, отменить) {
+  const el = document.createElement("div");
+  el.className = "toast toast-undo";
+  el.innerHTML = `<span>${esc(текст)}</span> <button type="button" class="btn-sm">Отменить</button>`;
+  document.body.appendChild(el);
+  const таймер = setTimeout(() => el.remove(), 8000);
+  el.querySelector("button").addEventListener("click", async () => {
+    clearTimeout(таймер); el.remove();
+    try { await отменить(); } catch (err) { toast(err.message, true); }
+  });
 }
 
 routes.meetings = (rest) => (rest && rest[0]) ? _экранВстреч(rest) : renderProtocols();
@@ -608,8 +688,13 @@ async function renderProjectsAdmin() {
       <td><select class="prj-parent"${p.archived ? " disabled" : ""}>${варианты(rows, p.id, p.parent_id)}</select></td>
       <td><input class="prj-aliases" value="${esc((p.aliases || []).join("; "))}" maxlength="2000"${p.archived ? " disabled" : ""}></td>
       <td>${p.meetings}</td><td>${p.active_tasks}</td><td>${p.watch_folder ? esc(p.watch_folder) : "не задана"}</td>
-      <td class="hstack">${p.archived ? `<button class="btn-sm prj-restore">Вернуть из архива</button>`
+      <td class="hstack">${p.general ? '<span class="page-sub">служебный: встречи без проекта, общая папка-приёмник</span>'
+        : p.archived ? `<button class="btn-sm prj-restore">Вернуть из архива</button>`
         : `<button class="btn-sm prj-save">Сохранить</button><button class="btn-sm prj-archive">В архив</button>`}</td></tr>`).join("")}</tbody></table>`;
+    // «Общие встречи» (Доработка 2, 28.10.2026): название, надпроект и варианты не правятся
+    список.querySelectorAll("tr[data-id]").forEach(tr => {
+      if (rows.find(p => String(p.id) === tr.dataset.id)?.general) tr.querySelectorAll("input, select").forEach(x => { x.disabled = true; });
+    });
     список.querySelectorAll("tr[data-id]").forEach(tr => {
       const id = tr.dataset.id;
       const изменить = async (тело, текст) => {

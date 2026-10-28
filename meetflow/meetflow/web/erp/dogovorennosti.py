@@ -191,7 +191,7 @@ def mount(r: APIRouter, ctx: Ctx) -> None:
         active = [t for t in tasks if t["status"] == "active"]
         over = [t for t in active if t.get("due_date") and t["due_date"] < today]
         units = store.q(f"SELECT kind, status, text FROM units WHERE project_id {inn}", tuple(fam))
-        meetings = store.q(f"SELECT date, protocol_built_at FROM meetings WHERE project_id {inn} AND COALESCE(status,'')!='cancelled'",
+        meetings = store.q(f"SELECT date, protocol_built_at FROM meetings WHERE deleted_at IS NULL AND project_id {inn} AND COALESCE(status,'')!='cancelled'",
                            tuple(fam))
         past = sorted(m["date"] for m in meetings if (m["date"] or "") <= today)
         lines = [f"Сводка по проекту «{p.get('name', '')}» на {ru_date(today)}", "",

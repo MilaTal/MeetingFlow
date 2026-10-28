@@ -178,7 +178,7 @@ def _короткое(написания: list[str]) -> str:
 def _недавние_протоколы(store, project_id: int | None, n: int = 6) -> str:
     """Текст последних протоколов проекта — для частоты названий."""
     try:
-        rows = store.q("SELECT protocol_md FROM meetings WHERE project_id IS ? AND COALESCE(protocol_md, '') != '' "
+        rows = store.q("SELECT protocol_md FROM meetings WHERE deleted_at IS NULL AND project_id IS ? AND COALESCE(protocol_md, '') != '' "
                        "ORDER BY date DESC, id DESC LIMIT ?", (project_id, n))
         return " ".join((r["protocol_md"] or "") for r in rows).lower().replace("ё", "е")
     except Exception:  # noqa: BLE001

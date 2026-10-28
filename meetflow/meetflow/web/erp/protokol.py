@@ -392,7 +392,7 @@ def mount(r: APIRouter, ctx: Ctx) -> None:
         ctx.need_admin(request)
         out = []
         extra, args = ctx.scope_sql(request)
-        for m in store.q("SELECT id, date, review_notes FROM meetings WHERE 1=1" + extra + " ORDER BY date DESC", args):
+        for m in store.q("SELECT id, date, review_notes FROM meetings WHERE deleted_at IS NULL" + extra + " ORDER BY date DESC", args):
             for i, n in enumerate(loads(m.get("review_notes"), [])):
                 if isinstance(n, dict) and n.get("dismissed"):
                     out.append({"run_id": m["id"], "idx": i, "meeting_id": m["id"], "meeting_date": m["date"],
@@ -424,7 +424,7 @@ def mount(r: APIRouter, ctx: Ctx) -> None:
         ctx.need_super(request)
         extra, args = ctx.scope_sql(request, "m.project_id")
         rows = store.q("SELECT m.id, m.date, m.label, COUNT(u.id) AS n FROM meetings m JOIN units u ON u.meeting_id=m.id "
-                       "WHERE 1=1" + extra + " GROUP BY m.id ORDER BY m.date DESC", args)
+                       "WHERE m.deleted_at IS NULL" + extra + " GROUP BY m.id ORDER BY m.date DESC", args)
         return [{"id": x["id"], "date": x["date"], "label": x.get("label"), "units": x["n"]} for x in rows]
 
     @r.get("/meetings/{mid}/units")

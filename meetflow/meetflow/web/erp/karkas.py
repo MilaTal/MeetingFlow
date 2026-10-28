@@ -126,6 +126,8 @@ def mount(r: APIRouter, ctx: Ctx) -> None:
         migrate_subprojects()
     except Exception:  # noqa: BLE001 — перенос старых подпроектов не должен мешать запуску
         pass
+    from ...core import proekt_zapisi as pz
+    pz.общие_встречи(store, ctx.theme.id)        # «Общие встречи» есть всегда (Доработка 2, 28.10.2026)
 
     def tree(rows: list[dict]) -> list[dict]:
         """Проекты деревом: проект, под ним его подпроекты по алфавиту (как справочник ЛМ 6c6933f)."""
@@ -149,10 +151,15 @@ def mount(r: APIRouter, ctx: Ctx) -> None:
     def projects_list(request: Request):
         """Выбор проекта вверху левой панели: проект, под ним подпроекты, «Все проекты» (многопроектность — разрешённое
         отличие от ERP). Архивные не показываются; подпроект архивного проекта — тоже."""
-        rows = store.q("SELECT id, name, parent_id, archived FROM projects")
+        rows = store.q("SELECT id, name, parent_id, archived, general FROM projects WHERE COALESCE(deleted,0)=0")
         live = [r for r in rows if not r.get("archived")]
+        n = {r["project_id"]: r["n"] for r in store.q("SELECT project_id, COUNT(*) AS n FROM meetings "
+                                                     "WHERE deleted_at IS NULL GROUP BY project_id")}
+        # «Общие встречи» — первой строкой (Доработка 2, 28.10.2026), дальше проекты деревом
+        out = sorted(tree(live), key=lambda r: not r.get("general"))
         return [{"id": r["id"], "name": r["name"], "parent_id": r.get("parent_id"), "level": r["level"],
-                 "label": ctx.project_label(r["id"])} for r in tree(live)]
+                 "label": ctx.project_label(r["id"]), "general": bool(r.get("general")), "meetings": n.get(r["id"], 0)}
+                for r in out]
 
     # «Параметры системы» → «Проекты»: справочник проектов и подпроектов — завести, переименовать, варианты написания,
     # надпроект, архив и возврат (справочник ЛМ 6c6933f, возвращён 27.10.2026). Папка-приёмник — у каждого проекта и
@@ -170,7 +177,8 @@ def mount(r: APIRouter, ctx: Ctx) -> None:
     @r.get("/projects-list/all")
     def projects_all(request: Request):
         ctx.need_super(request)
-        return [project_out(p) for p in tree(store.q("SELECT * FROM projects"))]
+        return [{**project_out(p), "general": bool(p.get("general"))}
+                for p in tree(store.q("SELECT * FROM projects WHERE COALESCE(deleted,0)=0"))]
 
     def clean(body: "ProjectIn") -> tuple[str, str]:
         import json
@@ -183,7 +191,7 @@ def mount(r: APIRouter, ctx: Ctx) -> None:
     def same_name(name: str, but: int | None = None) -> bool:
         key = " ".join(name.lower().replace("ё", "е").split())
         return any(" ".join((p["name"] or "").lower().replace("ё", "е").split()) == key and p["id"] != but
-                   for p in store.q("SELECT id, name FROM projects"))
+                   for p in store.q("SELECT id, name FROM projects WHERE COALESCE(deleted,0)=0"))
 
     def check_parent(pid: int | None, parent: int | None) -> int | None:
         """Надпроект есть, не сам проект и не его подпроект: кольца проектов нет (как ЛМ 6c6933f)."""
@@ -213,22 +221,59 @@ def mount(r: APIRouter, ctx: Ctx) -> None:
     def project_edit(pid: int, body: ProjectIn, request: Request):
         u = ctx.need_super(request)
         p = store.get("projects", pid)
-        if not p:
+        if not p or p.get("deleted"):
             raise HTTPException(404, "Проекта нет")
+        if p.get("general"):
+            raise HTTPException(400, "«Общие встречи» не переименовываются и не убираются в архив")
         vals: dict = {}
         data = body.model_dump(exclude_unset=True)
         if body.name is not None:
-            vals["name"], vals["aliases"] = clean(body)
+            vals["name"], aliases = clean(body)
+            if "aliases" in data:      # переименование из блока «Проекты» варианты написания не стирает (28.10.2026)
+                vals["aliases"] = aliases
             if same_name(vals["name"], pid):
                 raise HTTPException(409, f"Проект «{vals['name']}» уже есть")
         if "parent_id" in data:
             vals["parent_id"] = check_parent(pid, body.parent_id)
         if body.archived is not None:
             if body.archived and not p.get("archived") and not p.get("parent_id") and \
-                    len(store.q("SELECT id FROM projects WHERE COALESCE(archived,0)=0 AND parent_id IS NULL")) <= 1:
+                    len(store.q("SELECT id FROM projects WHERE COALESCE(archived,0)=0 AND COALESCE(general,0)=0 "
+                             "AND COALESCE(deleted,0)=0 AND parent_id IS NULL")) <= 1:
                 raise HTTPException(400, "Последний действующий проект в архив не убирается")
             vals["archived"] = int(body.archived)
         store.update("projects", pid, **vals)
         if body.archived:
             ctx.intake.set_folder(pid, None, ctx.name(u))     # у архивного проекта приёмник выключен
         return project_out(store.get("projects", pid))
+
+    @r.delete("/projects-list/{pid}")
+    def project_delete(pid: int, request: Request):
+        """Удалить проект (Доработка 2, 28.10.2026; так делают сервисы встреч — Fireflies, Granola): встречи проекта и его
+        подпроектов не удаляются, а уходят в «Общие встречи» вместе со своими задачами и карточками; задачи, заведённые
+        вручную без встречи, — туда же. Запись проекта остаётся с пометкой «удалён» для истории и нигде не показывается."""
+        from ...core import proekt_zapisi as pz
+        from ...core.store import now
+        u = ctx.need_super(request)
+        p = store.get("projects", pid)
+        if not p or p.get("deleted"):
+            raise HTTPException(404, "Проекта нет")
+        if p.get("general"):
+            raise HTTPException(400, "«Общие встречи» не удаляются")
+        общие = pz.общие_встречи(store, ctx.theme.id)
+        семья = ctx.family(pid)
+        знаки = ",".join("?" * len(семья))
+        встречи = store.q(f"SELECT id FROM meetings WHERE project_id IN ({знаки})", tuple(семья))
+        for m in встречи:
+            pz.перенести_встречу(store, m["id"], общие, ctx.name(u))
+        задачи = store.q(f"SELECT id FROM tasks WHERE project_id IN ({знаки})", tuple(семья))
+        for t in задачи:
+            store.update("tasks", t["id"], project_id=общие)
+        for x in семья:
+            ctx.intake.set_folder(x, None, ctx.name(u)) if ctx.intake.folder(x) else None
+            store.update("projects", x, deleted=1, archived=1)
+        имя = p["name"]
+        store.insert("decisions", project_id=общие, what=f"Удалён проект «{имя}»", decision="удалено",
+                     why=f"кто: {ctx.name(u)}; встреч в «Общие встречи»: {len(встречи)}", at=now())
+        ctx.sys_msg(f"Удалён проект «{имя}»", f"Удалил: {ctx.name(u)}. Встреч перенесено в «Общие встречи»: "
+                    f"{len(встречи)}.", "settings")
+        return {"deleted": True, "id": pid, "meetings_moved": len(встречи), "to": общие}

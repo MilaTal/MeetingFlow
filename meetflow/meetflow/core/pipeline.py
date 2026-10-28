@@ -339,7 +339,7 @@ class MeetingPipeline:
         if not got:
             return False
         for r in self.s.q("SELECT protocol_md FROM meetings m "
-                          "WHERE m.project_id=? AND m.protocol_md IS NOT NULL AND m.protocol_md != ''", (project_id,)):
+                          "WHERE m.deleted_at IS NULL AND m.project_id=? AND m.protocol_md IS NOT NULL AND m.protocol_md != ''", (project_id,)):
             own = lines(r["protocol_md"])
             if len(own) >= 3 and len(own & got) >= 0.6 * len(own):
                 return True
@@ -517,7 +517,7 @@ class MeetingPipeline:
         from .topics import тема_встречи
         tp = тема_встречи(self.s, meeting)
         обычные: list[int] = []
-        for m in self.s.q("SELECT * FROM meetings WHERE project_id=? AND id<>? AND date<? ORDER BY date DESC, id DESC",
+        for m in self.s.q("SELECT * FROM meetings WHERE deleted_at IS NULL AND project_id=? AND id<>? AND date<? ORDER BY date DESC, id DESC",
                           (project_id, meeting_id, d.isoformat())):
             if len(обычные) >= polnota.ПРЕДЕЛ_ОБЫЧНЫХ:
                 break

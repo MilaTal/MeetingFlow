@@ -22,7 +22,10 @@ from typing import Any, Iterator
 SCHEMA: dict[str, dict[str, str]] = {
     "projects": {"id": "INTEGER PRIMARY KEY", "name": "TEXT NOT NULL", "theme": "TEXT NOT NULL",
                  "created_at": "TEXT", "aliases": "TEXT DEFAULT '[]'", "active": "INTEGER DEFAULT 1",
-                 "archived": "INTEGER DEFAULT 0", "parent_id": "INTEGER"},
+                 "archived": "INTEGER DEFAULT 0", "parent_id": "INTEGER",
+                 # «Общие встречи» — служебный проект встреч без проекта; удалённый проект скрыт везде (Доработка 2,
+                 # 28.10.2026): его встречи уходят в «Общие встречи», запись остаётся для истории
+                 "general": "INTEGER DEFAULT 0", "deleted": "INTEGER DEFAULT 0"},
     "meetings": {"id": "INTEGER PRIMARY KEY", "project_id": "INTEGER", "date": "TEXT", "label": "TEXT",
                  "protocol_md": "TEXT", "protocol_built_at": "TEXT", "built_from": "TEXT DEFAULT '[]'",
                  "leader": "TEXT", "review_notes": "TEXT DEFAULT '[]'",
@@ -39,7 +42,10 @@ SCHEMA: dict[str, dict[str, str]] = {
                  "topic_id": "INTEGER", "topic_source": "TEXT DEFAULT ''", "topic_set_at": "TEXT",
                  "topic_set_by": "TEXT DEFAULT ''",
                  # проект записи из общей папки не определён (27.10.2026): сборка ждёт выбора проекта человеком
-                 "project_pending": "INTEGER DEFAULT 0"},
+                 "project_pending": "INTEGER DEFAULT 0",
+                 # как узнан проект записи из папки-приёмника (Доработка 2, 28.10.2026): «по имени файла», «по содержанию:
+                 # названо 7 раз», «не узнан — в общих встречах»; удалённая встреча: когда и что вернуть при отмене
+                 "project_how": "TEXT DEFAULT ''", "deleted_at": "TEXT", "deleted_info": "TEXT DEFAULT '{}'"},
     # «Темы планёрок» (основа из ERP, перенос 27.10.2026): самостоятельная сущность — дни недели (по умолчанию всем
     # встречам этих дней), свои разделы протокола, названия в шапке секретаря, объекты, подсказка сборки, переходящие
     # задачи с прошлой встречи той же темы; удаления нет — выключается

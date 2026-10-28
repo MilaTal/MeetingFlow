@@ -42,12 +42,15 @@ def test_порядок_и_подписи_блока_пользователей(
 
 
 def test_выбор_проекта_над_меню():
-    проект = HTML.index('<select id="project-select">')
-    assert HTML.count('id="project-select"') == 1
+    # Перевёрнуто 29.10.2026 (Доработка 2, решение владелицы 28.10.2026): было — видимый выпадающий список над меню;
+    # стало — блок «Проекты» на том же месте, список остаётся скрытым (его читают другие экраны)
+    проект = HTML.index('id="project-list"')
+    assert HTML.count('id="project-select"') == 1 and '<select id="project-select" hidden' in HTML
     assert проект < HTML.index('<div class="nav" id="nav">') < HTML.index('id="user-box"')
     assert 'class="whoami-project nav-project"' in HTML
-    # поведение прежнее: смена — через одну точку `выбратьПроект`
+    # поведение прежнее: смена — через одну точку `выбратьПроект`, и у списка, и у строки блока
     assert 'getElementById("project-select")?.addEventListener("change", (e) => выбратьПроект(e.target.value));' in APP
+    assert 'р.querySelector(".pl-name").addEventListener("click", () => выбратьПроект(р.dataset.id));' in APP
 
 
 def test_подготовка_при_всех_проектах_выбор_и_создать_проект():

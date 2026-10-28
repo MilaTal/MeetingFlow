@@ -255,29 +255,28 @@ def test_общая_папка_корень_не_определён_карточ
     r = _два_прохода(client)
     st = client.app.state.store
     assert sorted(r["ingested"]) == ["Встреча ERP 15.10.2026.txt", "Расшифровка 20.10.2026.txt"]
-    ждёт = st.q("SELECT * FROM meetings WHERE project_pending=1")
-    assert len(ждёт) == 1 and ждёт[0]["date"] == "2026-10-20" and ждёт[0]["project_id"] == client.pid
+    # Перевёрнуто 28.10.2026 (Доработка 2, решение владелицы): было — встреча «проект не определён» в проекте папки и
+    # карточка выбора проекта. Стало — проект решает содержание записи: склад назван в трёх строках, второго проекта нет,
+    # встреча уходит в «Склад»; карточки выбора нет, встреч «проект не определён» нет.
+    assert not st.q("SELECT * FROM meetings WHERE project_pending=1")
+    assert not st.q("SELECT * FROM cards WHERE kind=? AND status='open'", (pz.КАРТОЧКА,))
+    склад = st.q("SELECT * FROM meetings WHERE date='2026-10-20'")
+    assert len(склад) == 1 and склад[0]["project_id"] == client.pid
+    assert склад[0]["project_how"].startswith("по содержанию записи: «Склад», упоминаний 3")
+    # имя файла назвало ERP — встреча в ERP по имени; содержание говорит о складе — карточка о расхождении, без переноса
     erp = st.q("SELECT * FROM meetings WHERE project_id=?", (client.erp,))
-    assert len(erp) == 1 and erp[0]["date"] == "2026-10-15"
-    карточки = st.q("SELECT * FROM cards WHERE kind=? AND status='open'", (pz.КАРТОЧКА,))
-    assert len(карточки) == 1 and карточки[0]["title"].startswith("Проект записи не определён")
-    # перевёрнуто 28.10.2026 (решение владелицы: запись вне проекта собирается сразу): было — сборка ждала выбора,
-    # «waiting_project» и ни одного вызова модели; теперь протокол собирается в проекте папки, карточка остаётся
-    rep = client.app.state.pipe.run(client.pid, ждёт[0]["id"])
-    assert rep.status != "waiting_project" and rep.calls > 0
-    assert st.get("meetings", ждёт[0]["id"])["protocol_md"]
-    assert st.get("cards", карточки[0]["id"])["status"] == "open"
-    # выбор проекта в «Разборе» переносит встречу и ставит сборку в очередь
+    assert len(erp) == 1 and erp[0]["date"] == "2026-10-15" and erp[0]["project_how"].startswith("название в имени файла")
+    расход = st.q("SELECT * FROM cards WHERE kind='project_mismatch' AND status='open'")
+    assert len(расход) == 1 and расход[0]["meeting_id"] == erp[0]["id"]
+    # перенос встречи в «Общие встречи» — с экрана, вместе с задачами (`move-project`)
+    общие = pz.общие_встречи(st)
     h = {"X-Requested-With": "erp-webapp", "X-User-Id": str(st.insert("accounts", login=None, full_name="Орлова Анна",
                                                                        role="super_admin", password_hash="", active=1,
                                                                        confirmed=1))}
-    out = client.patch(f"/task-conflicts/{карточки[0]['id']}", json={"action": "accept", "person_id": client.erp},
-                       headers=h)
+    out = client.post(f"/meetings/{склад[0]['id']}/move-project", json={"project_id": общие, "rebuild": False},
+                      headers=h)
     assert out.status_code == 200, out.text
-    m = st.get("meetings", ждёт[0]["id"])
-    assert m["project_id"] == client.erp and not m["project_pending"]
-    assert st.get("cards", карточки[0]["id"])["status"] == "accepted"
-    assert st.q("SELECT id FROM build_queue WHERE meeting_id=?", (m["id"],))
+    assert st.get("meetings", склад[0]["id"])["project_id"] == общие
 
 
 def test_перенести_встречу_вместе_с_задачами(store, справочник):
@@ -380,4 +379,6 @@ def test_odna_vstrecha_bez_proekta_na_datu_2810(client, tmp_path, monkeypatch):
     _два_прохода(client)
     _два_прохода(client)
     st = client.app.state.store
-    assert len(st.q("SELECT id FROM meetings WHERE project_pending=1 AND date='2026-10-21'")) == 1
+    # перевёрнуто 28.10.2026 (Доработка 2): встреча неузнанной записи — в «Общих встречах», одна на файл, а не на дату
+    assert len(st.q("SELECT id FROM meetings WHERE project_id=? AND date='2026-10-21' AND label=?",
+                    (pz.общие_встречи(st), "из папки-приёмника: Расшифровка 21.10.2026.txt"))) == 1
