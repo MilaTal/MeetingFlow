@@ -109,3 +109,17 @@ def test_rebuild_drops_task_replaced_with_same_quote_2810(store, project, make_p
     new = p.reg.add(project, old["description"] + " (другими словами)", None, mid, old["source_quote"])
     res = drop_missing(store, p.reg, mid, "2026-10-01", {new}, текст_записи=TRANSCRIPT)
     assert old["id"] in [t["id"] for t in res["dropped"]]
+
+
+def test_rebuild_prefers_active_over_dropped_with_same_quote_2810(store, project, make_pipe):
+    """Отчёт ЛМ d096df6: снятая 87 и действующая 101 с той же цитатой — пересборка узнавала первой снятую (меньший номер)
+    и возвращала её: две пары дублей. Теперь узнаётся действующая, снятая остаётся снятой."""
+    p, mid = _build(make_pipe, store, project, gen=OnlyFirst())
+    old = store.q("SELECT * FROM tasks WHERE source_meeting_id=? AND description=?", (mid, FIRST["description"]))[0]
+    p.reg.set_status(old["id"], TaskStatus.DROPPED, "rebuild", "не вошла в пересборку (28.10.2026 14:52)")
+    new = p.reg.add(project, old["description"], old["assignee"], mid, old["source_quote"])
+    p.run(project, mid)
+    assert store.get("tasks", old["id"])["status"] == TaskStatus.DROPPED.value
+    assert store.get("tasks", new)["status"] == TaskStatus.ACTIVE.value
+    assert len(store.q("SELECT id FROM tasks WHERE source_meeting_id=? AND status='active' AND source_quote=?",
+                       (mid, old["source_quote"]))) == 1
