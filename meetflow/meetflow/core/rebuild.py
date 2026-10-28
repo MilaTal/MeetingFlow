@@ -76,6 +76,20 @@ def цитата_в_записи(цитата: str | None, текст_запис
     return any(" ".join(ц[i:i + окно]) in т for i in range(0, len(ц) - окно + 1))
 
 
+def та_же_цитата(a: str | None, b: str | None) -> bool:
+    """Две цитаты — одна строка записи: слова совпадают или одна целиком внутри другой (28.10.2026, отчёт ЛМ 8680ea4:
+    задачи 87 и 88 заменены новыми 101 и 102 с той же цитатой — возвращать их значит завести дубли)."""
+    x, y = " ".join(_слова(a)), " ".join(_слова(b))
+    return bool(x) and bool(y) and (x == y or (len(x) >= 20 and x in y) or (len(y) >= 20 and y in x))
+
+
+def цитата_занята(store, meeting_id: int, task_id: int, цитата: str | None) -> bool:
+    """Цитату задачи уже несёт другая действующая задача этой встречи — задача заменена, а не потеряна."""
+    return any(та_же_цитата(цитата, r["source_quote"]) for r in store.q(
+        "SELECT source_quote FROM tasks WHERE source_meeting_id=? AND status=? AND id<>?",
+        (meeting_id, TaskStatus.ACTIVE.value, task_id)))
+
+
 def drop_missing(store, reg, meeting_id: int | None, meeting_date: str | None, kept_ids: set[int], *,
                  incomplete: bool = False, when: str | None = None, текст_записи: str | None = None) -> dict:
     """Снять задачи прежней сборки, которых нет в новой. `kept_ids` — задачи этой встречи, которые новая сборка
@@ -91,7 +105,8 @@ def drop_missing(store, reg, meeting_id: int | None, meeting_date: str | None, k
                      (meeting_id, TaskStatus.ACTIVE.value)):
         if t["id"] in kept:
             continue
-        if текст_записи and цитата_в_записи(store.get("tasks", t["id"]).get("source_quote"), текст_записи):
+        цит = store.get("tasks", t["id"]).get("source_quote")
+        if текст_записи and цитата_в_записи(цит, текст_записи) and not цитата_занята(store, meeting_id, t["id"], цит):
             out.setdefault("kept_quote", []).append(dict(t))
             continue
         edits = правилась_человеком(store, t["id"])

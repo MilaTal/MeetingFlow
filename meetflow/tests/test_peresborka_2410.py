@@ -99,3 +99,13 @@ def test_rebuild_keeps_task_whose_quote_is_in_transcript_2810(store, project, ma
     alive = store.q("SELECT id FROM tasks WHERE source_meeting_id=? AND status='active'", (mid,))
     assert len(alive) == 2
     assert not store.q("SELECT id FROM tasks WHERE source_meeting_id=? AND status='dropped'", (mid,))
+
+
+def test_rebuild_drops_task_replaced_with_same_quote_2810(store, project, make_pipe):
+    """Отчёт ЛМ 8680ea4: прежняя задача, чью цитату несёт новая задача этой сборки, — замена, снимается (иначе дубль)."""
+    from meetflow.core.rebuild import drop_missing
+    p, mid = _build(make_pipe, store, project)
+    old = store.q("SELECT * FROM tasks WHERE source_meeting_id=? ORDER BY id", (mid,))[0]
+    new = p.reg.add(project, old["description"] + " (другими словами)", None, mid, old["source_quote"])
+    res = drop_missing(store, p.reg, mid, "2026-10-01", {new}, текст_записи=TRANSCRIPT)
+    assert old["id"] in [t["id"] for t in res["dropped"]]

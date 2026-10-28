@@ -22,7 +22,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from meetflow.core.rebuild import вернуть, снята_пересборкой, цитата_в_записи  # noqa: E402
+from meetflow.core.rebuild import вернуть, снята_пересборкой, цитата_в_записи, цитата_занята  # noqa: E402
 from meetflow.core.registry import TaskRegistry  # noqa: E402
 from meetflow.core.store import Store  # noqa: E402
 
@@ -43,13 +43,17 @@ def main(argv=None) -> int:
         print("у встречи нет расшифровки — возвращать не по чему")
         return 1
     reg = TaskRegistry(st)
-    вернуть_номера, без_цитаты = [], []
+    вернуть_номера, без_цитаты, заменены = [], [], []
     for t in st.q("SELECT id, source_quote FROM tasks WHERE source_meeting_id=? AND status='dropped'", (a.meeting,)):
         if not снята_пересборкой(st, t["id"]):
+            continue
+        if цитата_занята(st, a.meeting, t["id"], t["source_quote"]):
+            заменены.append(t["id"])         # ту же цитату несёт действующая задача — замена, не потеря (8680ea4)
             continue
         (вернуть_номера if цитата_в_записи(t["source_quote"], запись) else без_цитаты).append(t["id"])
     print(f"снято пересборкой, цитата в записи есть — вернуть: {len(вернуть_номера)} {вернуть_номера}")
     print(f"снято пересборкой, цитаты в записи нет — оставить снятыми: {len(без_цитаты)} {без_цитаты}")
+    print(f"снято пересборкой, заменены действующей задачей с той же цитатой — оставить: {len(заменены)} {заменены}")
     if a.apply:
         for tid in вернуть_номера:
             вернуть(st, reg, tid)

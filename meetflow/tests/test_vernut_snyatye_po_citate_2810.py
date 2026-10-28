@@ -35,3 +35,20 @@ def test_возвращает_только_с_цитатой_в_записи(tmp
     st2 = Store(str(db))
     assert st2.get("tasks", a)["status"] == "active" and st2.get("tasks", b)["status"] == "dropped"
     assert (tmp_path / "m.db.до-возврата-2810").exists()
+
+
+def test_заменённая_той_же_цитатой_не_возвращается(tmp_path):
+    """Отчёт ЛМ 8680ea4: снятые 87/88 заменены действующими 101/102 с той же цитатой — не возвращать, иначе дубли."""
+    db = tmp_path / "m.db"
+    st = Store(str(db))
+    pid = st.insert("projects", name="П", theme="_default")
+    mid = st.insert("meetings", project_id=pid, date="2026-10-28", label="в")
+    st.insert("sources", meeting_id=mid, name="t.txt", kind="transcript",
+              text="[00:01:00] Иванов Иван: Петров, подготовь спецификацию на краны по Бухте-Север до пятницы.")
+    reg = TaskRegistry(st)
+    q = "Петров, подготовь спецификацию на краны по Бухте-Север до пятницы"
+    старая = reg.add(pid, "Подготовить спецификацию на краны", None, mid, q)
+    reg.set_status(старая, TaskStatus.DROPPED, "rebuild", "не вошла в пересборку (28.10.2026 14:52)")
+    reg.add(pid, "Подготовить спецификацию кранов к пятнице", None, mid, q)        # замена — действующая
+    assert _скрипт().main(["--db", str(db), "--meeting", str(mid), "--apply"]) == 0
+    assert Store(str(db)).get("tasks", старая)["status"] == "dropped"
