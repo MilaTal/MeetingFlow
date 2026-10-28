@@ -1289,7 +1289,7 @@ class MeetingPipeline:
                 # Неполное извлечение (остановка по пределу) ничего не снимает: «не найдена» не доказано.
                 res = rebuild_mod.drop_missing(self.s, self.reg, meeting_id, mdate,
                                                kept_ids | {tid for tid, _d, _g in added},
-                                               incomplete=stopped is not None)
+                                               incomplete=stopped is not None, текст_записи=source.text)
                 for t, edits in res["kept"]:
                     # одна карточка на задачу за всё время: повторная пересборка новых не заводит
                     if any(json.loads(c["payload"] or "{}").get("task_id") == t["id"]

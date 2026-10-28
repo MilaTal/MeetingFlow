@@ -7,6 +7,7 @@
 from conftest import TRANSCRIPT
 
 from meetflow.connectors.llm_mock import MockLLM
+from meetflow.core import rebuild as rebuild_mod
 from meetflow.core.rebuild import drop_missing
 from meetflow.core.registry import TaskRegistry
 from meetflow.core.types import TaskStatus
@@ -30,7 +31,9 @@ def _build(make_pipe, store, project, gen=None):
     return p, mid
 
 
-def test_rebuild_drops_task_missing_from_new_build(store, project, make_pipe):
+def test_rebuild_drops_task_missing_from_new_build(store, project, make_pipe, monkeypatch):
+    # 28.10.2026: снимается только задача без цитаты в записи — здесь цитаты «нет», как при сменившейся записи
+    monkeypatch.setattr(rebuild_mod, "цитата_в_записи", lambda *a, **k: False)
     p, mid = _build(make_pipe, store, project)
     before = {t["description"]: t["id"] for t in
               store.q("SELECT id, description FROM tasks WHERE source_meeting_id=?", (mid,))}
@@ -48,7 +51,9 @@ def test_rebuild_drops_task_missing_from_new_build(store, project, make_pipe):
     assert not store.q("SELECT id FROM cards WHERE kind='rebuild_kept'")
 
 
-def test_rebuild_keeps_task_edited_by_human_with_one_card(store, project, make_pipe):
+def test_rebuild_keeps_task_edited_by_human_with_one_card(store, project, make_pipe, monkeypatch):
+    # 28.10.2026: снимается только задача без цитаты в записи — здесь цитаты «нет», как при сменившейся записи
+    monkeypatch.setattr(rebuild_mod, "цитата_в_записи", lambda *a, **k: False)
     p, mid = _build(make_pipe, store, project)
     missing = [t for t in store.q("SELECT * FROM tasks WHERE source_meeting_id=?", (mid,))
                if t["description"] != FIRST["description"]][0]
@@ -83,3 +88,14 @@ def test_rebuild_fills_empty_assignee_of_kept_task(store, project, make_pipe):
     assert len(store.q("SELECT id FROM tasks WHERE source_meeting_id=? AND status='active'", (mid,))) == 1
     hist = store.q("SELECT * FROM task_history WHERE task_id=? ORDER BY id DESC", (t["id"],))[0]
     assert "исполнитель найден при пересборке" in hist["evidence_quote"]
+
+
+def test_rebuild_keeps_task_whose_quote_is_in_transcript_2810(store, project, make_pipe):
+    """Решение владелицы 28.10.2026: задача прежней сборки, которую новая сборка той же записи не выдала, остаётся, если её
+    цитата в записи есть (28.10: вторая сборка сняла 9 задач из 18). Снимается — только без цитаты в записи."""
+    p, mid = _build(make_pipe, store, project)
+    p.gen = OnlyFirst()
+    p.run(project, mid)
+    alive = store.q("SELECT id FROM tasks WHERE source_meeting_id=? AND status='active'", (mid,))
+    assert len(alive) == 2
+    assert not store.q("SELECT id FROM tasks WHERE source_meeting_id=? AND status='dropped'", (mid,))

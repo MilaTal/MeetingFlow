@@ -15,6 +15,8 @@
 """
 from __future__ import annotations
 
+import re
+
 from datetime import datetime
 
 from .types import TaskStatus
@@ -56,10 +58,30 @@ def правилась_человеком(store, task_id: int) -> str:
     return ", ".join(dict.fromkeys(what))
 
 
+_НЕ_СЛОВО = re.compile(r"[^0-9a-zа-я]+")
+_ВРЕМЯ = re.compile(r"\[?\d{1,2}:\d{2}(?::\d{2})?\]?")
+
+
+def _слова(текст: str | None) -> list[str]:
+    return [w for w in _НЕ_СЛОВО.sub(" ", _ВРЕМЯ.sub(" ", (текст or "").lower().replace("ё", "е"))).split() if w]
+
+
+def цитата_в_записи(цитата: str | None, текст_записи: str | None) -> bool:
+    """Цитата задачи по-прежнему есть в записи: восемь слов подряд из неё (или вся, если короче) стоят в записи подряд
+    (перенос ERP/Планёрки `peresborka.цитата_в_записи`, 28.10.2026)."""
+    ц, т = _слова(цитата), " ".join(_слова(текст_записи))
+    if len(ц) < 4 or not т:
+        return False
+    окно = min(8, len(ц))
+    return any(" ".join(ц[i:i + окно]) in т for i in range(0, len(ц) - окно + 1))
+
+
 def drop_missing(store, reg, meeting_id: int | None, meeting_date: str | None, kept_ids: set[int], *,
-                 incomplete: bool = False, when: str | None = None) -> dict:
+                 incomplete: bool = False, when: str | None = None, текст_записи: str | None = None) -> dict:
     """Снять задачи прежней сборки, которых нет в новой. `kept_ids` — задачи этой встречи, которые новая сборка
-    подтвердила (в том числе заведённые заново в этом прогоне). `incomplete` — извлечение неполное: ничего не снимаем."""
+    подтвердила (в том числе заведённые заново в этом прогоне). `incomplete` — извлечение неполное: ничего не снимаем.
+    `текст_записи` — запись встречи: задача, цитата которой в ней есть, не снимается — модель просто не выдала её в этот
+    раз (решение владелицы 28.10.2026: 28.10 вторая сборка той же расшифровки сняла 9 задач из 18)."""
     when = when or когда_сейчас()
     out: dict = {"dropped": [], "kept": [], "when": when}
     if incomplete or meeting_id is None:
@@ -68,6 +90,9 @@ def drop_missing(store, reg, meeting_id: int | None, meeting_date: str | None, k
     for t in store.q("SELECT id, description FROM tasks WHERE source_meeting_id=? AND status=?", 
                      (meeting_id, TaskStatus.ACTIVE.value)):
         if t["id"] in kept:
+            continue
+        if текст_записи and цитата_в_записи(store.get("tasks", t["id"]).get("source_quote"), текст_записи):
+            out.setdefault("kept_quote", []).append(dict(t))
             continue
         edits = правилась_человеком(store, t["id"])
         if edits:

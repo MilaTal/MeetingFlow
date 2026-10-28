@@ -10,6 +10,7 @@ import pytest
 from conftest import TEAM, TRANSCRIPT
 from fastapi.testclient import TestClient
 
+from meetflow.core import rebuild as rebuild_mod
 from meetflow.connectors.llm_mock import MockLLM
 from meetflow.core import tablica_zadach
 from meetflow.core.types import TaskStatus
@@ -90,7 +91,9 @@ def _build(make_pipe, store, project, gen=None):
     return p, mid, rep
 
 
-def test_снятая_пересборкой_возвращается_с_прежним_номером(make_pipe, store, project):
+def test_снятая_пересборкой_возвращается_с_прежним_номером(make_pipe, store, project, monkeypatch):
+    # 28.10.2026: снимается только задача без цитаты в записи — здесь цитаты «нет», как при сменившейся записи
+    monkeypatch.setattr(rebuild_mod, "цитата_в_записи", lambda *a, **k: False)
     p, mid, _ = _build(make_pipe, store, project)
     first = next(t for t in store.q("SELECT * FROM tasks WHERE source_meeting_id=?", (mid,))
                  if t["description"] == FIRST["description"])
