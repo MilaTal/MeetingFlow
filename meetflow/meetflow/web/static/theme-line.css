@@ -539,7 +539,11 @@ input::placeholder, textarea::placeholder { color: var(--text-muted); font-size:
 #main table thead th { border-bottom: 0 !important; }   /* граница того же цвета невидима, но добавляла высоту (39,25 → 38,75) */
 /* Меню тремя блоками по ролям (владелец 14.10.26, как у Планёрки 79120fc): черта и тихая подпись блока */
 .nav-hr { border: 0; border-top: 1px solid #e4e4e7; margin: 10px 12px 6px; }
-.nav-cap { font-size: 13.5px; color: var(--text-muted); padding: 2px 12px 4px; }
+.nav-cap { font-size: 13.5px; color: #71717a; padding: 2px 12px 4px; }
+/* «Инфо по проекту» — подпись группы (не ссылка) и подпункты с отступом под ней (решение владелицы 28.10.2026): подпись —
+   тем же размером, что главные пункты; подпункты — с отступом под текст подписи (12 + значок 18 + 8) */
+.nav-group { font-size: 14.5px; font-weight: 500; color: var(--text-muted); padding: 8px 12px 2px; cursor: default; }
+.nav-item.nav-main.nav-sub { padding-left: 38px; font-size: 14px; }
 /* «Встречи по проекту» — устройство старого списка (владелец 14.10.26), оформление новое */
 .feed-head { margin: 0 0 12px; }
 .feed-head h1 { margin: 0 0 4px; }
@@ -1088,3 +1092,16 @@ a.mt-btn { text-decoration: none; }
 
 /* MeetFlow (27.10.2026): выбор проекта над «Вы работаете как» — тем же видом, что поле «Вы работаете как» */
 .whoami-project { margin-bottom: 12px; }
+/* С 28.10.2026 (решение владелицы) выбор проекта — вверху левой панели, над меню: вне блока «Вы работаете как», поэтому
+   вид его поля повторён здесь */
+.nav-project { margin: 16px 0 12px; padding: 0 8px; }
+.nav-project label { display: block; font-size: 12.5px; color: var(--text-muted); margin-bottom: 6px; }
+.nav-project select { width: 100%; padding: 6px 8px; border-radius: var(--radius-sm); border: 1px solid var(--field-border);
+  background: var(--field-bg); font-size: 13px; transition: background-color 0.15s, border-color 0.15s, box-shadow 0.15s; }
+.nav-project select:hover { background: var(--field-bg-hover); }
+.nav-project select:focus { outline: none; background: var(--surface); border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-soft); }
+/* «Подготовка встречи» при «Все проекты» — выбор проекта; «Создать проект» — в конце страницы (28.10.2026) */
+.prep-project-pick { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; }
+.prep-project-pick select { min-width: 240px; }
+.prep-new-project form { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+.prep-new-project input[type="text"] { min-width: 240px; }

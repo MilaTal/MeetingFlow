@@ -1586,7 +1586,7 @@ function conflictsRef() {
 }
 
 // --- Проект (многопроектность MeetFlow — одно из двух разрешённых отличий от ERP, 27.10.2026) --------------------------
-// Выбор — внизу левой панели над «Вы работаете как»: «Все проекты» и проекты по имени. Шапка — «Проект — <название>» или
+// Выбор — вверху левой панели, над меню (с 28.10.2026, решение владелицы; было — внизу, над «Вы работаете как»): «Все проекты» и проекты по имени. Шапка — «Проект — <название>» или
 // «Все проекты компании»; выбор помнится в браузере. Разделы, которые работают по одному проекту (подготовка встречи,
 // план, статус), при «Все проекты» просят выбрать проект.
 let _проекты = [];
@@ -1627,14 +1627,20 @@ function нуженПроект(заголовок) {
   // раздел по одному проекту при «Все проекты» — просьба выбрать проект (как у прежнего MeetFlow, 9c14cb6)
   if (выбранныйПроект()) return false;
   $main.innerHTML = `<div class="feed-head"><div class="feed-head-text"><h1>${esc(заголовок)}</h1>
-      <div class="feed-sub">Этот раздел работает по одному проекту — выберите его внизу левой панели. «Все проекты» есть во встречах, реестре задач и договорённостях.</div></div></div>`;
+      <div class="feed-sub">Этот раздел работает по одному проекту — выберите его вверху левой панели. «Все проекты» есть во встречах, реестре задач и договорённостях.</div></div></div>`;
   return true;
 }
-document.getElementById("project-select")?.addEventListener("change", (e) => {
-  localStorage.setItem("currentProjectId", String(Number(e.target.value) || 0));
+// Смена текущего проекта — одна точка для выбора вверху левой панели и для выбора на «Подготовке встречи» при «Все проекты»
+// (решение владелицы 28.10.2026): запомнить, выставить в #project-select, обновить шапку и перерисовать страницу
+function выбратьПроект(id) {
+  const v = Number(id) || 0;
+  localStorage.setItem("currentProjectId", String(v));
+  const $s = document.getElementById("project-select");
+  if ($s) $s.value = String(v);
   показатьНазваниеПроекта();
   render();
-});
+}
+document.getElementById("project-select")?.addEventListener("change", (e) => выбратьПроект(e.target.value));
 
 function showLogin(message) {
   me = null;
@@ -2098,7 +2104,8 @@ async function render() {
   const $teamNav = document.querySelector('.nav-item[data-route="team"]');
   if ($teamNav) $teamNav.hidden = !isAdmin();
   // «Подготовка встречи» — всем ролям (решение владелицы 21.10.2026; с 13.10.26 было — администратору). С 25.10.2026 — пунктом
-  // блока под чертой, рядом с «Командой» (решение владелицы): сменилось место, права те же
+  // блока под чертой, рядом с «Командой» (решение владелицы): сменилось место, права те же. С 28.10.2026 — вторым пунктом
+  // блока пользователей, за «Реестром встреч» (решение владелицы): права те же
   const $prepNav = document.getElementById("nav-prep");
   if ($prepNav) $prepNav.hidden = false;
   // «Договорённости» — пункт блока пользователей, всем ролям (решение владелицы 20.10.2026, п. 3; с 19.10.2026 — только
@@ -2124,9 +2131,11 @@ async function render() {
   // горизонтальной вкладкой в «Параметры системы».
   // Меню тремя блоками по ролям (владелец 14.10.26): черта блока — только тому, кто видит его пункты; подписей блоков нет
   // черта второго блока — администраторам: с 14.10.26 «Команду» участник не видит, у него в блоке пусто
-  // С 25.10.2026 в блоке и «Подготовка встречи» всем ролям — черта видна всем, у кого в блоке есть видимый пункт
+  // С 25.10.2026 в блоке и «Подготовка встречи» всем ролям — черта видна всем, у кого в блоке есть видимый пункт.
+  // С 28.10.2026 «Подготовка встречи» — в блоке пользователей (решение владелицы): в блоке под чертой у участника пусто,
+  // черта — снова только администраторам (было — `!(isAdmin() || ($prepNav && !$prepNav.hidden))`)
   const $adminHr = document.getElementById("nav-admin-hr");
-  if ($adminHr) $adminHr.hidden = !(isAdmin() || ($prepNav && !$prepNav.hidden));
+  if ($adminHr) $adminHr.hidden = !isAdmin();
   document.querySelectorAll(".nav-item[hidden]").forEach(el => el.removeAttribute("aria-current"));
   if (route === "conflicts" && !isAdmin()) { location.replace("#dashboard"); return; }     // цикл 2: hash оставался #conflicts
   if (route === "team" && !isAdmin()) { location.replace("#dashboard"); return; }          // владелец 14.10.26: и по прямому адресу
@@ -2140,7 +2149,7 @@ async function render() {
   if (["conflicts", "pod", "possible"].includes(route)) { location.replace(адресРазбора(route)); return; }
   if ((route === "system" || route === "voices" || route === "voice-review" || route === "live" || route === "units" || route === "awaiting" || route === "models" || route === "design") && !isSuperAdmin()) { location.replace("#dashboard"); return; }
   if (route === "units" && !_unitsOn) { location.replace("#dashboard"); return; }
-  // «Экран встречи» убран (решение владелицы 21.10.2026): старые ссылки — на «Встречи по проекту» и страницу встречи
+  // «Экран встречи» убран (решение владелицы 21.10.2026): старые ссылки — на «Реестр встреч» (до 28.10.2026 — «Встречи по проекту») и страницу встречи
   if (route === "screen") { location.replace(rest[0] ? `#meetings/${rest[0]}` : "#meetings"); return; }
   // Неизвестный адрес — на реестр задач. Прежде — на прежнюю страницу реестра (renderDashboard), а не на новую (аудит 13.10.26)
   const fn = routes[route] || routes.dashboard;   // routes.dashboard — реестр (registry.js); прежний renderDashboard удалён 18.10.2026

@@ -5,11 +5,11 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <link rel="icon" href="data:,">
   <title>MeetFlow</title>
-  <link rel="stylesheet" href="styles.css?v=20261027mf12">
-  <link rel="stylesheet" href="theme-line.css?v=20261027mf12">
-  <link rel="stylesheet" href="polotno.css?v=20261027mf12">
-  <link rel="stylesheet" href="razbor.css?v=20261027mf12">
-  <link rel="stylesheet" href="contrast.css?v=20261027mf12">
+  <link rel="stylesheet" href="styles.css?v=20261028mf13">
+  <link rel="stylesheet" href="theme-line.css?v=20261028mf13">
+  <link rel="stylesheet" href="polotno.css?v=20261028mf13">
+  <link rel="stylesheet" href="razbor.css?v=20261028mf13">
+  <link rel="stylesheet" href="contrast.css?v=20261028mf13">
 </head>
 <body>
   <!-- Экран входа рисует app.js (renderLoginScreen) поверх заставки-каркаса без данных (решение владелицы 18.10.2026,
@@ -19,6 +19,13 @@
       <div>
         <div class="brand">MeetFlow</div>
         <div class="brand-sub">Прогресс проекта</div>
+      </div>
+      <!-- Проект — многопроектность MeetFlow, одно из двух разрешённых отличий от ERP (27.10.2026): «Все проекты» и
+           проекты по имени; шапка вверху — «Проект — название» или «Все проекты компании». С 28.10.2026 (решение
+           владелицы) — вверху левой панели, над меню; прежде — внизу, над «Вы работаете как». id и поведение прежние. -->
+      <div class="whoami-project nav-project">
+        <label for="project-select">Проект</label>
+        <select id="project-select"><option value="0">Все проекты</option></select>
       </div>
       <button class="nav-toggle" id="nav-toggle" type="button" aria-expanded="false" aria-controls="nav">Меню</button>
       <div class="nav" id="nav">
@@ -38,20 +45,31 @@
              администраторам (сервер).
              С 25.10.2026 (решение владелицы) «Подготовка встречи» — пунктом блока под чертой, первым, рядом с «Командой» и
              «Конфликтами»; видят её по-прежнему все роли (права не сужены, сменилось только место; черта блока видна всем,
-             у кого в блоке есть пункт). Маршрут #prep и экран — как были. -->
-        <a class="nav-item nav-main" data-route="meetings" href="#meetings"><span class="nav-ico" aria-hidden="true"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M6 3h9l4 4v14H6z"/><path d="M9 11h7M9 15h7"/></svg></span>Встречи по проекту</a>
+             у кого в блоке есть пункт). Маршрут #prep и экран — как были.
+             С 28.10.2026 (решение владелицы, структура левого меню, часть для пользователей): «Встречи по проекту» —
+             «Реестр встреч» (#meetings); «Подготовка встречи» поднята из блока под чертой вторым пунктом блока пользователей
+             (видят все роли, права те же); «Актуализировать задачи из реестра» (#dashboard); «Инфо по проекту» — подпись
+             группы, а не страница, с двумя подпунктами с отступом: «Договорённости по проекту» (#agreements) и «Статус
+             проекта» (#status). Маршруты, id и видимость по ролям не менялись. Черта блока под ней — снова только
+             администраторам: у участника в блоке пунктов не осталось.
+             В MeetFlow выбор «Проект» с того же дня — вверху левой панели, над меню (был внизу, над «Вы работаете как»). -->
+        <a class="nav-item nav-main" data-route="meetings" href="#meetings"><span class="nav-ico" aria-hidden="true"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M6 3h9l4 4v14H6z"/><path d="M9 11h7M9 15h7"/></svg></span>Реестр встреч</a>
+        <a class="nav-item nav-main" data-route="prep" id="nav-prep" href="#prep"><span class="nav-ico" aria-hidden="true"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><rect x="4" y="5" width="16" height="15" rx="2"/><path d="M4 10h16M9 3v4M15 3v4"/></svg></span>Подготовка встречи</a>
         <a class="nav-item nav-main" data-route="dashboard" href="#dashboard"><span class="nav-ico" aria-hidden="true"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M4 7l2 2 3-3M4 15l2 2 3-3M12 8h8M12 16h8"/></svg></span>Актуализировать задачи из реестра</a>
+        <!-- «Инфо по проекту» — подпись группы, не пункт и не страница (решение владелицы 28.10.2026): под ней с отступом
+             «Договорённости по проекту» и «Статус проекта» -->
+        <div class="nav-group" id="nav-info"><span class="nav-ico" aria-hidden="true"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><circle cx="12" cy="12" r="9"/><path d="M12 11v6M12 7.5v.5"/></svg></span>Инфо по проекту</div>
         <!-- «Договорённости» — в блоке пользователей, сразу за реестром задач, всем ролям (решение владелицы 20.10.2026, п. 3;
-             с 19.10.2026 стояли в блоке администратора). В режиме «в тени» не-администратор видит пустой реестр с пояснением. -->
-        <a class="nav-item nav-main" data-route="agreements" id="nav-agreements" href="#agreements"><span class="nav-ico" aria-hidden="true"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M5 5h14v10l-4 4H5z"/><path d="M15 19v-4h4"/></svg></span>Договорённости</a>
+             с 19.10.2026 стояли в блоке администратора). В режиме «в тени» не-администратор видит пустой реестр с пояснением.
+             С 28.10.2026 — подпунктом «Инфо по проекту», подпись «Договорённости по проекту» (решение владелицы). -->
+        <a class="nav-item nav-main nav-sub" data-route="agreements" id="nav-agreements" href="#agreements">Договорённости по проекту</a>
         <!-- «Истории проектов» нет с 25.10.2026 (решение владелицы: убрать в обеих системах; архив по проекту системы ERP не нужен) -->
-        <a class="nav-item nav-main" data-route="status" href="#status"><span class="nav-ico" aria-hidden="true"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M4 19h16"/><path d="M5 15l4-5 4 3 6-7"/></svg></span>Статус проекта</a>
+        <a class="nav-item nav-main nav-sub" data-route="status" href="#status">Статус проекта</a>
         <!-- Три блока по ролям, как в старой версии (владелец 14.10.26, перенос из Планёрки 79120fc): для всех; администратору;
              супер-администратору. Блок супер-администратора — «Параметры системы», «Мониторинг RealTime», «Модели», «База голосов»
              слева, остальное служебное — горизонтальными вкладками «Параметров системы». Изменён только вид. Подписи блоков
              («Администратор», «Супер-администратор») сняты владельцем 14.10.26 — блоки разделяет только черта. -->
         <hr class="nav-hr" id="nav-admin-hr" hidden>
-        <a class="nav-item nav-service" data-route="prep" id="nav-prep" href="#prep">Подготовка встречи</a>
         <a class="nav-item nav-service" data-route="team" href="#team">Команда</a>
         <!-- «Разбор» — одна вкладка вместо «Конфликтов», «Под вопросом» и «Возможных поручений» (решение владелицы 25.10.2026):
              одно число — всё открытое в «Разборе»; виды — полосой внутри страницы. Прежние адреса ведут сюда с нужным видом. -->
@@ -67,14 +85,9 @@
       <!-- Блок «Вы работаете как» — сразу под блоком суперадминистратора, за чертой (решение владелицы 18.10.2026, зеркально
            Планёрке): прежде он прижимался к низу левой колонки и на длинной странице уезжал в её конец. Колонка теперь
            прилипает к окну (theme-line.css, «Меню 18.10»), поэтому блок виден при любой прокрутке. Главные пункты ERP
-           («Встречи по проекту», «Актуализировать задачи из реестра», «Статус проекта») — см. пояснение над меню. -->
+           («Реестр встреч», «Подготовка встречи», «Актуализировать задачи из реестра», «Инфо по проекту» — с 28.10.2026)
+           — см. пояснение над меню. -->
       <div class="whoami" id="user-box">
-        <!-- Проект — многопроектность MeetFlow, одно из двух разрешённых отличий от ERP (27.10.2026): «Все проекты» и
-             проекты по имени; шапка вверху — «Проект — название» или «Все проекты компании» -->
-        <div class="whoami-project">
-          <label for="project-select">Проект</label>
-          <select id="project-select"><option value="0">Все проекты</option></select>
-        </div>
         <div id="whoami-testing" hidden>
           <label for="whoami-select">Вы работаете как</label>
           <select id="whoami-select"></select>
@@ -104,20 +117,20 @@
       <div id="main"></div>
     </main>
   </div>
-  <script src="app.js?v=20261027mf12"></script>
-  <script src="polotno.js?v=20261027mf12"></script>
-  <script src="registry.js?v=20261027mf12"></script>
-  <script src="nav.js?v=20261027mf12"></script>
-  <script src="meeting.js?v=20261027mf12"></script>
-  <script src="prep.js?v=20261027mf12"></script>
-  <script src="conflicts.js?v=20261027mf12"></script>
-  <script src="razbor.js?v=20261027mf12"></script>
+  <script src="app.js?v=20261028mf13"></script>
+  <script src="polotno.js?v=20261028mf13"></script>
+  <script src="registry.js?v=20261028mf13"></script>
+  <script src="nav.js?v=20261028mf13"></script>
+  <script src="meeting.js?v=20261028mf13"></script>
+  <script src="prep.js?v=20261028mf13"></script>
+  <script src="conflicts.js?v=20261028mf13"></script>
+  <script src="razbor.js?v=20261028mf13"></script>
   <!-- team.js (надстройка «Команды» прототипа 13.10.26) снят: «Команда» — 1 в 1 как в старой ERP (владелец 13.10.26) -->
-  <script src="system.js?v=20261027mf12"></script>
-  <script src="design.js?v=20261027mf12"></script>
+  <script src="system.js?v=20261028mf13"></script>
+  <script src="design.js?v=20261028mf13"></script>
   <!-- тема планёрки: карточка «Темы планёрок» и «Тема планёрки» на подготовке (24.10.2026), близнец -->
-  <script src="tema.js?v=20261027mf12"></script>
+  <script src="tema.js?v=20261028mf13"></script>
   <!-- «оперативная» — пометка задачи в реестре одним нажатием и подсказка (26.10.2026), близнец -->
-  <script src="operativnaya.js?v=20261027mf12"></script>
+  <script src="operativnaya.js?v=20261028mf13"></script>
 </body>
 </html>
