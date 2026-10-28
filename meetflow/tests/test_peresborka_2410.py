@@ -68,3 +68,18 @@ def test_incomplete_extraction_drops_nothing(store, project):
                        source_meeting_id=mid, date_set="2026-10-01")
     res = drop_missing(store, TaskRegistry(store), mid, "2026-10-01", kept_ids=set(), incomplete=True)
     assert res["dropped"] == [] and store.get("tasks", tid)["status"] == "active"
+
+
+def test_rebuild_fills_empty_assignee_of_kept_task(store, project, make_pipe):
+    """28.10.2026, отчёт ЛМ 2469aec: при пересборке ворота нашли исполнителя, а прежняя строка этой встречи без
+    исполнителя оставалась пустой (повтор узнавался только при том же исполнителе). Теперь пустая строка получает его,
+    с историей; номер задачи прежний, заданного исполнителя не меняем."""
+    p, mid = _build(make_pipe, store, project, gen=OnlyFirst())
+    t = store.q("SELECT * FROM tasks WHERE source_meeting_id=? AND description=?", (mid, FIRST["description"]))[0]
+    store.update("tasks", t["id"], assignee=None)               # прежняя сборка исполнителя не дала
+    p.run(project, mid)
+    after = store.get("tasks", t["id"])
+    assert after["assignee"] == "Петрова Анастасия" and after["status"] == TaskStatus.ACTIVE.value
+    assert len(store.q("SELECT id FROM tasks WHERE source_meeting_id=? AND status='active'", (mid,))) == 1
+    hist = store.q("SELECT * FROM task_history WHERE task_id=? ORDER BY id DESC", (t["id"],))[0]
+    assert "исполнитель найден при пересборке" in hist["evidence_quote"]

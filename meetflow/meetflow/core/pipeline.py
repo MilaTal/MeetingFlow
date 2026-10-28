@@ -846,12 +846,24 @@ class MeetingPipeline:
 
             def already_set(quote: str, who: str, desc: str) -> int | None:
                 """Номер уже заведённой задачи этой встречи или -1, если совпала с заведённой в этом же прогоне;
-                None — не совпала ни с чем."""
+                None — не совпала ни с чем. Прежняя без исполнителя, новая с ним — та же задача (28.10.2026, отчёт ЛМ
+                2469aec: исполнитель по голосу находился, а прежняя пустая строка оставалась пустой)."""
                 ds = set(stems(desc))
                 for tid, q, a, s0 in known:
-                    if q == quote and a == who and jaccard(ds, s0) >= 0.5:
+                    if q == quote and (a == who or (not a and who)) and jaccard(ds, s0) >= 0.5:
                         return tid if tid is not None else -1
                 return None
+
+            def дополнить_исполнителя(tid: int, who: str | None) -> None:
+                """Прежняя задача этой встречи без исполнителя, новая сборка его нашла (ворота: голос, адресат) —
+                исполнитель ставится в прежнюю строку, с историей. Заданного исполнителя не меняем (28.10.2026)."""
+                if not who or not tid or tid < 0:
+                    return
+                t = self.s.get("tasks", tid)
+                if t and not (t.get("assignee") or "").strip():
+                    self.s.update("tasks", tid, assignee=who)
+                    self.reg._history(tid, t["status"], t["status"], "meeting",
+                                      f"исполнитель найден при пересборке: {who}")
             for d in drafts:
                 if self.memory.lookup(project_id, "not_a_task", " ".join(sorted(set(stems(d.description))))):
                     rep.skipped_by_rule += 1
@@ -861,6 +873,7 @@ class MeetingPipeline:
                 if g.quote and (hit := already_set(g.quote, who, g.description)) is not None:
                     if hit > 0:
                         hit_kept(hit)
+                        дополнить_исполнителя(hit, who)
                     repeats += 1
                     continue  # повторный прогон той же встречи: эта задача уже заведена
                 if d.due_date:            # срок — только если прозвучал рядом с цитатой (01/6)
@@ -1242,6 +1255,7 @@ class MeetingPipeline:
                                     if same_task_text(g.description or unit.text, [r["description"]])), None)
                         if hit is not None:
                             hit_kept(hit)
+                            дополнить_исполнителя(hit, g.assignee.label if g.assignee else None)
                             continue        # пересборка: эта задача встречи уже заведена
                         if set(g.reasons) & SIFTED:                  # отсеяно — строкой в журнал разбора
                             self.journal.write(purpose="triage", meeting_id=meeting_id, verdict="отсеяно",
