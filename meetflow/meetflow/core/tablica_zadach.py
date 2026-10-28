@@ -23,6 +23,7 @@
 from __future__ import annotations
 
 import bisect
+import os
 import re
 from dataclasses import dataclass
 from datetime import date
@@ -184,9 +185,58 @@ def таблица(строки: list[Строка], *, по_порядку: boo
     return out
 
 
-def строки_встречи(store, meeting: dict, срок_текстом, откуда_встречи: str = "запись") -> list[Строка]:
+ПЕРЕМЕННАЯ_ПРОЗВУЧАВШИЕ = "WEBAPP_PEREHODYASHCHIE_PROZVUCHAVSHIE"   # 28.10.2026, по умолчанию да (перенос ERP)
+СРОК_БЛИЗКО = 3
+ОКНО_СТРОК, ШАГ_ОКНА = 25, 10
+_СЛОВО = re.compile(r"[а-яёa-z0-9]+", re.IGNORECASE)
+_ОБЩИЕ = frozenset("""подго напра предо согла прове уточн получ запро собра сдела отпра перед контр орган обесп
+разра разоб посмо подтв испол готов задач вопро инфор данны докум работ срока сроки сроко числа неделе недел
+сегод завтр пятни понед вторн среда четве после через также нужно надо можно котор этого этому""".split())
+
+
+def только_прозвучавшие() -> bool:
+    return (os.environ.get(ПЕРЕМЕННАЯ_ПРОЗВУЧАВШИЕ) or "").strip().lower() not in ("0", "нет", "false", "off", "no")
+
+
+def основы(текст: str | None) -> frozenset:
+    return frozenset(w.lower().replace("ё", "е")[:5] for w in _СЛОВО.findall(текст or "") if len(w) >= 4) - _ОБЩИЕ
+
+
+def окна_записи(текст: str | None) -> list[frozenset] | None:
+    строки = [s for s in (текст or "").splitlines() if s.strip()]
+    if not строки:
+        return None
+    осн = [основы(s) for s in строки]
+    return [frozenset().union(*осн[i:i + ОКНО_СТРОК]) for i in range(0, max(1, len(осн) - ОКНО_СТРОК + ШАГ_ОКНА), ШАГ_ОКНА)]
+
+
+def прозвучала(описание: str | None, окна: list[frozenset] | None) -> bool:
+    if окна is None:
+        return True
+    о = основы(описание)
+    if len(о) < 2:
+        return True
+    нужно = max(2, -(-len(о) * 6 // 10))
+    return any(len(о & w) >= нужно for w in окна)
+
+
+def переходящая_в_таблице(t: dict, meeting: dict, окна: list[frozenset] | None) -> bool:
+    """Открытая задача предыдущей встречи остаётся в таблице протокола (решение владелицы 28.10.2026, перенос ERP): о ней
+    говорили — или срок прошёл / подходит в `СРОК_БЛИЗКО` дня. Выключено или записи нет — как раньше."""
+    if not только_прозвучавшие() or окна is None:
+        return True
+    срок, день = _д(t.get("due_date")), _д(meeting.get("date"))
+    if срок is not None and день is not None and (срок - день).days <= СРОК_БЛИЗКО:
+        return True
+    return прозвучала(t.get("description"), окна)
+
+
+def строки_встречи(store, meeting: dict, срок_текстом, откуда_встречи: str = "запись",
+                   текст_записи: str | None = None) -> list[Строка]:
     """Строки таблицы протокола по горизонту: эта встреча, затем предыдущая, затем оперативные; порядок — номер реестра.
-    `срок_текстом(задача) -> str` — как срок пишется в документе (у MeetFlow `dates.due_text`)."""
+    `срок_текстом(задача) -> str` — как срок пишется в документе (у MeetFlow `dates.due_text`). `текст_записи` — запись
+    встречи: перешедшие задачи предыдущей встречи — только прозвучавшие или со сроком близко (28.10.2026)."""
+    окна = окна_записи(текст_записи)
     предыдущая = предыдущая_встреча(store, meeting)
     день = _д(meeting.get("date"))
     ids = [meeting.get("id")] + ([предыдущая["id"]] if предыдущая else [])
@@ -203,6 +253,8 @@ def строки_встречи(store, meeting: dict, срок_текстом, �
         if раздел is None:
             continue
         своя = встреча_задачи(t, meeting)
+        if раздел != ОПЕРАТИВНАЯ and not своя and not переходящая_в_таблице(t, meeting, окна):
+            continue                                  # о перешедшей не говорили и срок не близко — она в реестре задач
         ранг = 2 if раздел == ОПЕРАТИВНАЯ else (0 if своя else 1)
         поставлена = _д(t.get("date_set"))
         порядок.append((ранг, Строка(

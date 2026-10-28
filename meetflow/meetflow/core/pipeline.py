@@ -1547,7 +1547,8 @@ class MeetingPipeline:
         откуда = "запись" if base_kind == SourceKind.TRANSCRIPT.value else "заметки"
         строки = tablica_zadach.строки_встречи(
             self.s, meeting,
-            lambda t: due_text(t.get("due_date"), t.get("date_set"), t.get("due_kind")) or "", откуда)
+            lambda t: due_text(t.get("due_date"), t.get("date_set"), t.get("due_kind")) or "", откуда,
+            текст_записи=record if base_kind == SourceKind.TRANSCRIPT.value else None)
         out += tablica_zadach.раздел_задач(строки)
         if closings:
             out += [f"## {th.word('closed_tasks')}", ""]
