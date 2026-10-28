@@ -1,0 +1,48 @@
+/* «Оформление»: выбранная палитра снова меняет цвет (замечание владелицы 28.10.2026). Только MeetFlow, файл идёт последним.
+   С переносом фронта ERP (1494432, 27.10.2026) слой theme-line.css ставит акцент правилом :root:not([data-theme="dark"]) —
+   оно сильнее блоков [data-palette] из styles.css, и в светлой теме палитра выбиралась, а цвет оставался индиго.
+   Здесь акцент палитры возвращается поверх «Линии», а жёстко прописанный индиго «Линии» берётся от акцента.
+   Индиго (палитра по умолчанию) не затронута ничем: утверждённый вид остаётся прежним до пикселя.
+   Значения — из блоков палитр styles.css; совпадение проверяет tests/test_oformlenie_cascade.py. */
+
+/* 1. Акцент палитры в светлой теме и в «Как в системе» (подложки «Линии» остаются нейтральными — решение 13.10.26) */
+:root[data-palette="forest"]:not([data-theme="dark"])   { --accent: #2f4f41; --accent-hover: #24382e; }
+:root[data-palette="emerald"]:not([data-theme="dark"])  { --accent: #1b7a52; --accent-hover: #186a48; }
+:root[data-palette="polaris"]:not([data-theme="dark"])  { --accent: #008060; --accent-hover: #006e52; }
+:root[data-palette="sage"]:not([data-theme="dark"])     { --accent: #4b6358; --accent-hover: #3d5148; }
+:root[data-palette="meadow"]:not([data-theme="dark"])   { --accent: #257e52; --accent-hover: #1d6541; }
+:root[data-palette="petrol"]:not([data-theme="dark"])   { --accent: #1d5e69; --accent-hover: #15454d; }
+:root[data-palette="ocean"]:not([data-theme="dark"])    { --accent: #245a8c; --accent-hover: #1d4870; }
+:root[data-palette="slate"]:not([data-theme="dark"])    { --accent: #46586f; --accent-hover: #384759; }
+:root[data-palette="graphite"]:not([data-theme="dark"]) { --accent: #3f4249; --accent-hover: #2e3136; }
+:root[data-palette="ochre"]:not([data-theme="dark"])    { --accent: #8a5a12; --accent-hover: #6a450e; }
+:root[data-palette="clay"]:not([data-theme="dark"])     { --accent: #a14e36; --accent-hover: #86412d; }
+:root[data-palette="copper"]:not([data-theme="dark"])   { --accent: #8c5232; --accent-hover: #724329; }
+:root[data-palette="claret"]:not([data-theme="dark"])   { --accent: #7d3045; --accent-hover: #632637; }
+
+/* 2. Индиго, прописанный в «Линии» и styles.css числом, — от акцента палитры. Только там, где индиго у палитры по
+   умолчанию действительно виден (замер в браузере 28.10.2026): шапки таблиц (#57529c) и рамка поиска перекрыты
+   графитом и цветом текста ещё в «Линии» — их не трогаем. Тёмная заливка чипа #57529c = акцент на 84 % к чёрному
+   (как у индиго: #6863bf → #57529c); ореолы и рамки — та же доля прозрачности, что была. */
+:root[data-palette]:not([data-palette="indigo"]) {
+  --accent-deep: color-mix(in srgb, var(--accent) 84%, #000);
+  --tint-hover: color-mix(in srgb, var(--accent) 14%, #fff);
+}
+:root[data-palette]:not([data-palette="indigo"])[data-theme="dark"] { --tint-hover: color-mix(in srgb, var(--accent) 30%, #1b1b1f); }
+:root[data-palette]:not([data-palette="indigo"]) :is(.chip:active, .chip.on, .chip[aria-pressed="true"]) { background: var(--accent-deep) !important; }
+:root[data-palette]:not([data-palette="indigo"]) .doc-protocol table.doc-table thead th:first-child { border-left-color: var(--accent) !important; }
+:root[data-palette]:not([data-palette="indigo"]) :is(.doc-protocol > .doc-heading, .doc-protocol .doc-theme) { border-left-color: var(--accent); }
+:root[data-palette]:not([data-palette="indigo"]):not([data-theme="dark"]) :is(.doc-protocol > .doc-heading, .doc-protocol .doc-theme-name) {
+  background: color-mix(in srgb, var(--accent) 7%, #fff); color: var(--accent-hover); }
+:root[data-palette]:not([data-palette="indigo"]) .qa-btn.qa-on { background: var(--accent); border-color: var(--accent); }
+:root[data-palette]:not([data-palette="indigo"]) .mp-now { box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 15%, transparent); }
+:root[data-palette]:not([data-palette="indigo"]) .card { box-shadow: 0 2px 10px color-mix(in srgb, var(--accent) 8%, transparent); }
+:root[data-palette]:not([data-palette="indigo"]) :is(#main:has(#users-list) #users-list.card, #reg-list.card,
+  #main:is([data-screen="system"], [data-screen="live"], [data-screen="models"], [data-screen="voices"], [data-screen="units"]) .card) {
+  box-shadow: 0 6px 20px color-mix(in srgb, var(--accent) 20%, transparent); }
+:root[data-palette]:not([data-palette="indigo"]) :is(#main:has(#users-list) .team-table .btn-icon, #main:has(#users-list) .more-row .btn-sm,
+  #main:has(#users-list) .list-more .btn-sm, #reg-list .task-table .btn-sm.task-note, #reg-list .task-table .btn-sm.task-revert,
+  #reg-list .task-table .btn-icon, #reg-list .task-table .btn-sm.task-pod) { border-color: color-mix(in srgb, var(--accent) 16%, transparent); }
+:root[data-palette]:not([data-palette="indigo"]) .search-box .search-submit { border-color: color-mix(in srgb, var(--accent) 16%, transparent) !important; }
+:root[data-palette]:not([data-palette="indigo"]) .prep-mark-acc { border-color: color-mix(in srgb, var(--accent) 35%, transparent); }
+:root[data-palette]:not([data-palette="indigo"]) .prep-table tr.prep-nearest-row td { background: color-mix(in srgb, var(--accent) 6%, transparent); }
