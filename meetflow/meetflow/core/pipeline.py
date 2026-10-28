@@ -787,11 +787,16 @@ class MeetingPipeline:
             drafts: list[TaskDraft] = []
             cut = 0
             names = [p.full_name for p in team.people]
+            # общая база компании (28.10.2026): встреча общей тематики — внешние контакты Планёрки по правилу
+            # `vneshnie_kontakty.в_подсказку` и названия проектов компании строкой «для написания»; выключено — пусто
+            from . import obshchaya_baza
+            names += obshchaya_baza.внешние_в_подсказку(self.s, project_id, [source.text, notes_text])
+            проекты_компании = obshchaya_baza.строка_проектов(self.s, project_id)
 
             def extract(first: int, part: list[str], depth: int = 0) -> list:
                 """Ответ оборван потолком 4096 — кусок делится пополам (прогон ERP 03.10.26: на 08.09 обрыв
                 ронял всю встречу). Делить нечего — кусок пропускается с пометкой, встреча не теряется."""
-                sysm, user = self.pb.extract_tasks(first, part, names)
+                sysm, user = self.pb.extract_tasks(first, part, names, проекты_компании)
                 try:
                     return _list(self._call(self.gen, budget, "extract_tasks", sysm, user, meeting_id), "tasks")
                 except AnswerTruncated:
