@@ -594,7 +594,7 @@ def test_папка_приёмник_по_проекту_в_два_шага_с_�
 def test_выключатели_и_сроки(env):
     c, h = env, env.h
     assert c.post("/project-status/autorun", json={"enabled": True}, headers=h()).json() == {"enabled": True}
-    assert c.get("/project-status/autorun", headers=h(project=c.pid2)).json() == {"enabled": False}
+    assert c.get("/project-status/autorun", headers=h(project=c.pid2)).json()["enabled"] is False   # 28.10.2026: + «scope»
     assert c.post("/project-status/conflict-drop-days", json={"days": 0}, headers=h()).status_code == 400
     assert c.post("/project-status/conflict-drop-days", json={"days": 5}, headers=h()).json() == {"days": 5}
     assert c.post("/project-status/service-log-keep", json={"days": 14}, headers=h()).json() == {"days": 14}

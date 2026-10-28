@@ -236,3 +236,18 @@ def test_мониторинг_называет_точку_и_запасные(tm
     c.post("/api/monitoring/models/use", json={"role": "generate", "point": "spare"}, headers=H)
     rows = {r["name"]: r for r in c.get("/api/monitoring/live", headers=H).json()["services"]}
     assert "точка «spare», запасные: main" in rows["Модель"]["detail"]
+
+
+def test_avtozapusk_obshchiy_pri_vseh_proektah_2810(tmp_path):
+    """Решение владелицы 28.10.2026: выключатель автозапуска при «Все проекты» не действовал (отказ «выберите проект») —
+    теперь он общий: действует для всех проектов и для записи, проект которой не определён."""
+    from meetflow.core.intake import автозапуск_включён
+    app, c, H = _app(tmp_path)
+    store = app.state.pipe.s
+    pid = c.post("/api/projects", json={"name": "П"}, headers=H).json()["id"]
+    assert not автозапуск_включён(store, pid) and not автозапуск_включён(store, None)
+    store.set_setting("autorun", True, None)                       # «Все проекты»
+    assert автозапуск_включён(store, pid) and автозапуск_включён(store, None)
+    store.set_setting("autorun", False, None)
+    store.set_setting("autorun", True, pid)                        # только проект
+    assert автозапуск_включён(store, pid) and not автозапуск_включён(store, None)

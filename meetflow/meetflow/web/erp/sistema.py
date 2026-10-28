@@ -24,6 +24,7 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from ...core.store import now
 from .obshchee import Ctx, iso_dt, loads, ru_date
+from ...core.intake import автозапуск_включён  # общий выключатель автозапуска (28.10.2026)
 
 STARTED = datetime.now().strftime("%Y-%m-%dT%H:%M:%S")
 TECH = "technical"
@@ -380,7 +381,7 @@ def mount(r: APIRouter, ctx: Ctx) -> None:
                        "recordings_held": store.q("SELECT COUNT(*) AS n FROM cards WHERE status='open' AND kind IN "
                                                   "('held_recording','waiting_tools')")[0]["n"],
                        "recordings_failed": 0},
-            "autorun": {"enabled": bool(store.get_setting("autorun", pid, False)) if pid else False},
+            "autorun": {"enabled": автозапуск_включён(store, pid or None), "scope": "проект" if pid else "все проекты"},
             "awaiting_total": awaiting()["total"], "under_question": uq, "llm_cost": llm_cost(),
             "runs_14_days": {"days": 14, "protocols_saved": protocols_14, "verification_total": len(verify),
                              "verification_clean": 0, "last_verify_model": verify[-1].get("model") if verify else None,
@@ -456,13 +457,15 @@ def mount(r: APIRouter, ctx: Ctx) -> None:
     # ------------------------------------------------------------------ выключатели и сроки
     @r.get("/project-status/autorun")
     def get_autorun(request: Request):
-        pid = ctx.project(request)
-        return {"enabled": bool(store.get_setting("autorun", pid, False)) if pid else False}
+        # при «Все проекты» — общий выключатель (решение владелицы 28.10.2026): действует для всех проектов и для записи
+        # без проекта; в проекте — его собственный или общий
+        pid = ctx.project(request) or None
+        return {"enabled": автозапуск_включён(store, pid), "scope": "проект" if pid else "все проекты"}
 
     @r.post("/project-status/autorun")
     def set_autorun(body: Toggle, request: Request):
         u = ctx.need_super(request)
-        pid = need_pid(request)
+        pid = ctx.project(request) or None             # «Все проекты» — общий выключатель (28.10.2026), было — отказ
         store.set_setting("autorun", bool(body.enabled), pid, ctx.name(u))
         store.insert("decisions", project_id=pid, what="Автозапуск протокола", decision="включён" if body.enabled else "выключен",
                      why=f"кто: {ctx.name(u)}", at=now())

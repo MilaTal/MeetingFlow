@@ -504,7 +504,8 @@ def mount(r: APIRouter, ctx: Ctx) -> None:
         return out
 
     def autorun_maybe(m: dict) -> tuple[bool, str]:
-        if not store.get_setting("autorun", m["project_id"], False):
+        from ...core.intake import автозапуск_включён
+        if not автозапуск_включён(store, m["project_id"]):
             return False, "автозапуск выключен — протокол собирается кнопкой «Создать протокол»"
         if (m.get("date") or "") > today_iso():
             return False, "встреча ещё не прошла"

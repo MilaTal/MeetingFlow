@@ -100,6 +100,15 @@ def preview_folder(p: Path) -> dict[str, Any]:
             "big": len(take) > BIG_FIRST_PASS, "big_limit": BIG_FIRST_PASS}
 
 
+def автозапуск_включён(store, project_id: int | None) -> bool:
+    """Автозапуск протокола (решение владелицы 28.10.2026): включённый при «Все проекты» действует для всех проектов и для
+    записи, проект которой не определён; включённый в проекте — для этого проекта. Было — только в выбранном проекте,
+    а при «Все проекты» выключатель не действовал."""
+    if bool(store.get_setting("autorun", None, False)):
+        return True
+    return bool(project_id) and bool(store.get_setting("autorun", project_id, False))
+
+
 class IntakeService:
     """Один экземпляр на приложение. Состояние проходов — в настройках проекта."""
 
@@ -235,8 +244,9 @@ class IntakeService:
                 if item.path.exists():  # запись мог уже удалить конвейер после распознавания
                     moved = fi.done(item.path)
                 result["ingested" if st == "ok" else "duplicates"].append(item.path.name)
-                if st == "ok" and res.get("kind") == "transcript" and цель is not None and \
-                        self.s.get_setting("autorun", project_id, False):
+                # запись, проект которой не определён, собирается сразу в проекте папки (решение владелицы 28.10.2026);
+                # карточка выбора проекта остаётся, выбор переносит встречу и пересобирает (`собрать_после_выбора`)
+                if st == "ok" and res.get("kind") == "transcript" and автозапуск_включён(self.s, проект_приёма):
                     self._beat(project_id, "сборка протокола", item.path.name)
                     q = getattr(self.pipe, "queue", None)       # через очередь сборок (стенд 41)
                     if q:
@@ -274,7 +284,7 @@ class IntakeService:
         iv, iv_src = self.interval_info(project_id)
         info = {"folder": path, "interval": iv, "interval_source": iv_src, "worker": self.running,
                 "last_scan": last, "last_useful_scan": self.s.get_setting("watch_last_useful_scan", project_id),
-                "autorun": bool(self.s.get_setting("autorun", project_id, False))}
+                "autorun": автозапуск_включён(self.s, project_id)}
         # «завис» (как в ERP): идущий проход без пульса дольше трёх интервалов и порога шага; между проходами —
         # последний проход старше трёх интервалов. Идущий длинный проход (распознавание, сборка) — не «завис».
         info["stalled"] = False
