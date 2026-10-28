@@ -418,6 +418,9 @@ def справочники_укрупнения(store, project_id: int | None = 
     проекты = [{"id": r["id"], "name": r["name"], "aliases": _варианты(r.get("aliases")), "parent_id": r.get("parent_id"),
                 "is_active": bool(r.get("active", 1))}
                for r in store.q("SELECT * FROM projects WHERE COALESCE(archived, 0) = 0")]
+    # общая база компании (28.10.2026): проекты и площадки, которых нет в своём справочнике, — для проекта общей тематики
+    from . import obshchaya_baza
+    проекты += obshchaya_baza.проекты(store, project_id)
     люди = store.q("SELECT * FROM people WHERE project_id=?", (project_id,)) if project_id else []
     команда = [SimpleNamespace(full_name=p["full_name"], department=p.get("department") or "",
                                is_external=bool(p.get("external")), is_confirmed=bool(p.get("confirmed", 1)))
