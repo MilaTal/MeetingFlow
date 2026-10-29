@@ -42,6 +42,7 @@ from . import asr_journal, plan as plan_mod, voice_step
 from . import petlya_raspoznavaniya as petlya, polnota_rasshifrovki as polnota
 from . import korotkiy_protokol, schet_zadach, tablica_zadach, tekst_po_zapisi
 from . import iskazheniya_nazvaniy, slovar_whisper, ukrupnenie_sborka
+from . import obedinenie as obedinenie_mod     # объединение и мусор (Доработка 1, 29.10.2026)
 from .team_sync import sync_people
 from ..connectors.team_shared import team_shared_state
 from .dates import due_text, lenient_date
@@ -94,6 +95,8 @@ class RunReport:
     tasks_returned: int = 0     # возвращены в работу после снятия прежней пересборкой (26.10.2026, как ERP)
     tasks_by_steps: str = ""    # «задачи по шагам: от модели → после стражей → … » — итог сборки, не документ
     ukrupnenie: str = ""        # «укрупнение задач: …» — итог сборки (как ERP 25–26.10.2026, перенос 27.10.2026)
+    obedinenie: str = ""        # «объединение и мусор: мусор 1; дополнено 2» — итог сборки (Доработка 1, 29.10.2026)
+    obedinenie_log: list = field(default_factory=list)   # решения по пунктам: что, пункт, причина
     participants: str = ""      # «участники кодом: N по голосам» — итог сборки (27.10.2026)
 
 
@@ -940,6 +943,24 @@ class MeetingPipeline:
                                        task_id=t.get("duplicate_of"), description=str(t.get("description"))[:300])
             except Exception as exc:  # noqa: BLE001
                 self.step_failed(project_id, meeting_id, "Укрупнение задач", exc)
+
+            # Объединение и мусор (Доработка 1, близнец `obedinenie`, решение владелицы 29.10.2026; как Планёрка и ERP):
+            # мусор не выводится, короткая формулировка с предметом дополняется по окну записи одним вызовом модели.
+            # Решения — в отчёт прогона (`obedinenie`, `obedinenie_log`): журнал прогона — строка на вызов модели и итог
+            # (тест test_journal_records_every_call). Сбой сборку не роняет и поручений не теряет.
+            def _дополнение(system: str, user: str):
+                # Дополнение уступает протоколу, проверке и закрытиям: если вызовов прогона осталось только на них —
+                # пропускается, короткие задачи остаются как были (тест test_verify_stopped_by_limit_is_reported)
+                if budget.calls + 3 >= budget.limits.max_calls:
+                    raise RuntimeError("предел вызовов прогона — дополнение пропущено")
+                return self._call(self.gen, budget, "obedinenie", system, user, meeting_id)
+            try:
+                об = ukrupnenie_sborka.объединение(self.s, project_id, planned, source.text, _дополнение)
+                planned = об["planned"]
+                rep.obedinenie = obedinenie_mod.строка_итога(об["журнал"])
+                rep.obedinenie_log = об["журнал"]
+            except Exception as exc:  # noqa: BLE001
+                self.step_failed(project_id, meeting_id, "Объединение и мусор", exc)
 
             # строки, похожие на внедрённую инструкцию, не становятся основанием закрытия (01/12)
             inj_lines = {i for i, ln in enumerate(source.lines) if looks_like_injection(ln)}

@@ -131,6 +131,33 @@ def применить(store, project_id: int, meeting_id: int, planned: list, �
     return итог
 
 
+def объединение(store, project_id: int, planned: list, запись: str, модель=None) -> dict:
+    """Объединение и мусор (Доработка 1, близнец `obedinenie`, решение владелицы 29.10.2026; как Планёрка и ERP) — после
+    укрупнения: мусор не выводится, короткая формулировка с предметом дополняется по окну записи одним вызовом модели.
+    planned — [(TaskDraft, GateResult)]; возвращает {"planned", "журнал"}."""
+    from . import obedinenie
+    if not planned or not obedinenie.включено():
+        return {"planned": list(planned), "журнал": []}
+    проект_встречи = (store.get("projects", project_id) or {}).get("name") or ""
+    задачи = []
+    for n, (d, g) in enumerate(planned):
+        кто = g.assignee.label if g.assignee else ""
+        t = {"description": g.description or d.description, "quote": g.quote or d.quote or "", "responsible": кто,
+             "_n": n, "project": проект_встречи}
+        if g.pending:
+            t["нужна_карточка"] = True             # «под вопросом» и с карточкой — не трогаются (`uz.отложена`)
+        задачи.append(t)
+    задачи, журнал = obedinenie.применить(задачи, "задача", запись_как_erp(запись), модель)
+    новые = []
+    for t in задачи:
+        d, g = planned[t["_n"]]
+        if t.get("description_before_expand"):
+            d = replace(d, description=t["description"])
+            g = replace(g, description=t["description"])
+        новые.append((d, g))
+    return {"planned": новые, "журнал": журнал}
+
+
 def записать_историю(store, task_id: int, строка: str) -> None:
     """Строка истории задачи «Объединено из: …» (источник `ukrupnenie_2510`, как ERP)."""
     if not task_id or not строка:
