@@ -955,8 +955,12 @@ class MeetingPipeline:
                     raise RuntimeError("предел вызовов прогона — дополнение пропущено")
                 return self._call(self.gen, budget, "obedinenie", system, user, meeting_id)
             try:
-                об = ukrupnenie_sborka.объединение(self.s, project_id, planned, source.text, _дополнение)
+                об = ukrupnenie_sborka.объединение(self.s, project_id, planned, source.text, _дополнение,
+                                                   meeting_id, meeting.get("date"))
                 planned = об["planned"]
+                for t in об["сведённые"]:      # повтор открытой задачи по правилу повторов реестра (29.10.2026)
+                    self.journal.write(purpose="triage", meeting_id=meeting_id, verdict="сведено с реестром",
+                                       task_id=t.get("duplicate_of"), description=str(t.get("description"))[:300])
                 rep.obedinenie = obedinenie_mod.строка_итога(об["журнал"])
                 rep.obedinenie_log = об["журнал"]
             except Exception as exc:  # noqa: BLE001

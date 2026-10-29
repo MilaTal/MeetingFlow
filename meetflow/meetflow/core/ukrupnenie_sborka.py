@@ -131,13 +131,15 @@ def применить(store, project_id: int, meeting_id: int, planned: list, �
     return итог
 
 
-def объединение(store, project_id: int, planned: list, запись: str, модель=None) -> dict:
+def объединение(store, project_id: int, planned: list, запись: str, модель=None, meeting_id: int | None = None,
+                 дата_встречи: str | None = None) -> dict:
     """Объединение и мусор (Доработка 1, близнец `obedinenie`, решение владелицы 29.10.2026; как Планёрка и ERP) — после
     укрупнения: мусор не выводится, короткая формулировка с предметом дополняется по окну записи одним вызовом модели.
-    planned — [(TaskDraft, GateResult)]; возвращает {"planned", "журнал"}."""
+    planned — [(TaskDraft, GateResult)]; возвращает {"planned", "журнал", "сведённые"} — сведённые с открытой задачей
+    по правилу повторов реестра (29.10.2026)."""
     from . import obedinenie
     if not planned or not obedinenie.включено():
-        return {"planned": list(planned), "журнал": []}
+        return {"planned": list(planned), "журнал": [], "сведённые": []}
     проект_встречи = (store.get("projects", project_id) or {}).get("name") or ""
     задачи = []
     for n, (d, g) in enumerate(planned):
@@ -148,6 +150,19 @@ def объединение(store, project_id: int, planned: list, запись: 
             t["нужна_карточка"] = True             # «под вопросом» и с карточкой — не трогаются (`uz.отложена`)
         задачи.append(t)
     задачи, журнал = obedinenie.применить(задачи, "задача", запись_как_erp(запись), модель)
+    # повтор открытой задачи проекта по правилу повторов реестра (решение владелицы 29.10.2026, ERP и Планёрка): не
+    # заводится заново, сведён с открытой — строкой журнала «сведено с реестром», как у укрупнения
+    открытые = [{"id": r["id"], "description": r["description"] or "", "responsible": r["assignee"] or "",
+                 "project": проект_встречи}
+                for r in store.q("SELECT id, description, assignee, date_set FROM tasks WHERE project_id=? AND "
+                                 "status='active' AND (source_meeting_id IS NULL OR source_meeting_id<>?)",
+                                 (project_id, meeting_id or 0))
+                if not (дата_встречи and r["date_set"] and str(r["date_set"])[:10] > str(дата_встречи)[:10])]
+    сведённые: list[dict] = []
+    if len(задачи) * len(открытые) <= ПРЕДЕЛ_ПАР:
+        задачи, сведённые = obedinenie.повторы_реестра(задачи, открытые)
+        журнал += [{"что": "повтор реестра", "пункт": t.get("description") or "", "причина": f"задача №{t['duplicate_of']}"}
+                   for t in сведённые]
     новые = []
     for t in задачи:
         d, g = planned[t["_n"]]
@@ -155,7 +170,7 @@ def объединение(store, project_id: int, planned: list, запись: 
             d = replace(d, description=t["description"])
             g = replace(g, description=t["description"])
         новые.append((d, g))
-    return {"planned": новые, "журнал": журнал}
+    return {"planned": новые, "журнал": журнал, "сведённые": сведённые}
 
 
 def записать_историю(store, task_id: int, строка: str) -> None:
