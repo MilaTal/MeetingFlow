@@ -245,6 +245,17 @@ class IntakeService:
             if st == "ok" and res.get("kind") == "transcript":
                 проект_приёма, как = self._по_содержанию(mid, цель, чей, item.path.name)
                 чей = {**чей, "how": как}
+                # Решение владелицы 03.11.2026: несколько записей одного дня по одной теме и с теми же участниками —
+                # один протокол. Сводим до автозапуска сборки, чтобы не собрать два протокола.
+                try:
+                    сведено = pz.свести_дубль_дня(self.s, mid)
+                except Exception as exc:  # noqa: BLE001 — сведение не должно ломать приём записи
+                    сведено = None
+                    self.pipe.cards.open(project_id, "technical", "Не удалось свести встречи одного дня",
+                                         {"detail": f"{type(exc).__name__}: {str(exc)[:300]}"}, mid)
+                if сведено and сведено != mid:
+                    result.setdefault("merged", []).append({"from": mid, "to": сведено})
+                    mid = сведено
             if st == "ok":
                 result.setdefault("projects", []).append({"file": item.path.name, "project_id": проект_приёма,
                                                           "how": чей["how"]})

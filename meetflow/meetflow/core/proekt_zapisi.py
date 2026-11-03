@@ -25,6 +25,7 @@
 """
 from __future__ import annotations
 
+import hashlib
 import json
 import re
 from pathlib import Path
@@ -304,3 +305,149 @@ def перенести_встречу(store, meeting_id: int, to_project_id: int
         for c in store.q("SELECT id FROM cards WHERE meeting_id=? AND kind=? AND status='open'", (meeting_id, КАРТОЧКА)):
             store.update("cards", c["id"], status="accepted", resolution=f"проект «{цель['name']}»", resolved_at=now())
     return {"from": было, "to": to_project_id, "tasks": len(задачи)}
+
+
+# --- несколько встреч одного дня: одна тема и одни участники — один протокол (решение владелицы 03.11.2026) ---
+def _норм_имя(значение: str | None) -> str:
+    s = _н(значение)
+    s = re.sub(r"[«»\"'*_.,:;!?()\[\]]+", " ", s)
+    return re.sub(r"\s+", " ", s).strip()
+
+
+def _люди_из_meta(store, meeting_id: int) -> set[str]:
+    люди: set[str] = set()
+    for s in store.q("SELECT meta FROM sources WHERE meeting_id=? AND removed_at IS NULL AND kind='transcript'",
+                     (meeting_id,)):
+        try:
+            meta = json.loads(s["meta"] or "{}")
+        except (TypeError, ValueError):
+            continue
+        voice = meta.get("voice_names") or {}
+        if isinstance(voice, dict):
+            voice = list(voice.values())
+        elif not isinstance(voice, (list, tuple, set)):
+            voice = []
+        for имя in voice:
+            n = _норм_имя(str(имя or ""))
+            if n and not n.startswith("говорящ"):
+                люди.add(n)
+    return люди
+
+
+def _люди_из_протокола(meeting: dict) -> set[str]:
+    md = meeting.get("protocol_md") or ""
+    m = re.search(r"(?im)^\s*#{0,3}\s*Участники\b[^\n]*\n+\s*([^\n#]+)", md)
+    if not m:
+        m = re.search(r"(?im)^\s*#{0,3}\s*Участники\s*:\s*([^\n#]+)", md)
+    if not m:
+        return set()
+    return {_норм_имя(x) for x in re.split(r"[,;]", m.group(1)) if _норм_имя(x)}
+
+
+def участники_встречи(store, meeting_id: int) -> set[str]:
+    """Люди встречи: голоса из расшифровки; если их нет — строка «Участники» готового протокола."""
+    люди = _люди_из_meta(store, meeting_id)
+    if люди:
+        return люди
+    return _люди_из_протокола(store.get("meetings", meeting_id) or {})
+
+
+def _тема_знак(meeting: dict) -> set[str]:
+    topic = (meeting.get("topic") or "").strip()
+    if topic:
+        return _основы(topic)
+    label = (meeting.get("label") or "").strip()
+    label = re.sub(r"(?i)^\s*из\s+папки[- ]приёмника\s*:\s*", "", label)
+    label = re.sub(r"\b\d{1,2}[._-]\d{1,2}[._-]\d{2,4}\b", " ", label)
+    label = re.sub(r"\b\d{1,2}[:.]\d{2}\b", " ", label)
+    label = re.sub(r"(?i)\.(m4a|mp3|wav|ogg|flac|txt|docx?)$", " ", label)
+    return _основы(label)
+
+
+def _та_же_тема(a: dict, b: dict) -> bool:
+    ta, tb = _н((a.get("topic") or "").strip()), _н((b.get("topic") or "").strip())
+    if ta and tb:
+        return ta == tb
+    sa, sb = _тема_знак(a), _тема_знак(b)
+    if not sa or not sb:
+        return False
+    return sa == sb or len(sa & sb) / len(sa | sb) >= 0.8
+
+
+def свести_в_одну(store, src_id: int, dst_id: int, by: str = "система") -> int:
+    """Материалы и карточки src — в dst; src помечается удалённой как сведённая, dst получает историю сведения."""
+    from .store import now
+    src, dst = store.get("meetings", src_id), store.get("meetings", dst_id)
+    if not src or not dst or src_id == dst_id:
+        return dst_id
+    with store.tx():
+        have = {r["digest"] for r in store.q(
+            "SELECT digest FROM sources WHERE meeting_id=? AND removed_at IS NULL AND digest IS NOT NULL", (dst_id,))}
+        moved = same = 0
+        for s in store.q("SELECT id,digest,meta FROM sources WHERE meeting_id=? AND removed_at IS NULL", (src_id,)):
+            if s["digest"] and s["digest"] in have:
+                store.update("sources", s["id"], removed_at=now(), removed_reason="одинаковый материал уже есть")
+                same += 1
+                continue
+            try:
+                meta = json.loads(s["meta"] or "{}")
+            except (TypeError, ValueError):
+                meta = {}
+            meta.update(moved_from_meeting_id=src_id, moved_from_date=(src.get("date") or "")[:10], moved_at=now())
+            store.update("sources", s["id"], meeting_id=dst_id, meta=json.dumps(meta, ensure_ascii=False))
+            moved += 1
+        # Сборка берёт одну расшифровку: несколько записей одной встречи склеиваем в один источник,
+        # иначе «свели» бы встречи, а контекст второй записи в протокол не попал.
+        trs = store.q("SELECT id,name,text FROM sources WHERE meeting_id=? AND removed_at IS NULL "
+                      "AND kind='transcript' ORDER BY id", (dst_id,))
+        if len(trs) > 1:
+            base = trs[0]
+            text = base["text"] or ""
+            for part in trs[1:]:
+                text += f"\n\n=== {part['name']} ===\n\n{part['text'] or ''}"
+            name = " + ".join(s["name"] for s in trs)
+            digest = hashlib.sha256(text.encode("utf-8")).hexdigest()
+            store.update("sources", base["id"], text=text, name=name, digest=digest)
+            for part in trs[1:]:
+                store.update("sources", part["id"], removed_at=now(),
+                             removed_reason=f"вошла в общий источник {base['name']}")
+        store._conn.execute("UPDATE cards SET meeting_id=? WHERE meeting_id=?", (dst_id, src_id))
+        for t in store.q("SELECT id FROM tasks WHERE source_meeting_id=?", (src_id,)):
+            store.update("tasks", t["id"], source_meeting_id=dst_id)
+        for table in ("units", "possible_assignments"):
+            store._conn.execute(f"UPDATE {table} SET meeting_id=? WHERE meeting_id=?", (dst_id, src_id))
+        store._conn.execute("UPDATE build_queue SET status='cancelled' WHERE meeting_id=? AND status='queued'", (src_id,))
+        merged = []
+        try:
+            merged = json.loads(dst.get("merged") or "[]")
+        except (TypeError, ValueError):
+            merged = []
+        merged.append({"from_id": src_id, "from_date": (src.get("date") or "")[:10], "count": moved,
+                       "skipped_same": same, "moved_at": now(), "why": "одна тема и участники"})
+        store.update("meetings", dst_id, merged=json.dumps(merged, ensure_ascii=False))
+        store.update("meetings", src_id, deleted_at=now(),
+                     deleted_info=json.dumps({"merged_into": dst_id, "by": by, "materials": moved},
+                                             ensure_ascii=False))
+    return dst_id
+
+
+def свести_дубль_дня(store, meeting_id: int, by: str = "система") -> int | None:
+    """Если в тот же день в том же проекте есть встреча с той же темой и теми же участниками — свести в неё.
+
+    Срабатывает после распознавания новой записи. Без имён участников не гадает: тогда остаётся отдельная встреча.
+    """
+    m = store.get("meetings", meeting_id)
+    if not m or m.get("deleted_at"):
+        return None
+    люди = участники_встречи(store, meeting_id)
+    if not люди:
+        return None
+    for other in store.q("SELECT * FROM meetings WHERE date=? AND project_id=? AND id<>? AND deleted_at IS NULL "
+                         "ORDER BY id", (m.get("date"), m.get("project_id"), meeting_id)):
+        if other.get("protocol_hand_edited") or not _та_же_тема(m, other):
+            continue
+        старые = участники_встречи(store, other["id"])
+        if старые and старые == люди:
+            return свести_в_одну(store, meeting_id, other["id"], by=by)
+    return None
+

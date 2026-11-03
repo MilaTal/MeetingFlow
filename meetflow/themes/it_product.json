@@ -28,7 +28,7 @@
     "super_admin"
   ],
   "intake": {
-    "duration_min": 10,
+    "duration_min": 3,
     "duration_max": 90
   },
   "design": {
