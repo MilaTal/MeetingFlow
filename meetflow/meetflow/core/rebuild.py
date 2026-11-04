@@ -19,9 +19,12 @@ import re
 
 from datetime import datetime
 
+from . import povtory_reestra
 from .types import TaskStatus
 
 FIELD = "rebuild_missing"
+ВОЗВРАТ_ВЛАДЕЛИЦЫ = "возвращена по слову владелицы"
+ШИРОКАЯ_ЦИТАТА = 40                  # слов: длиннее — цитата может нести несколько разных поручений (04.11.2026)
 # Источники строк истории, которые пишет человек: правка в реестре, своя формулировка, срок, исполнитель, ответ карточкой
 РУЧНЫЕ_ИСТОЧНИКИ = ("operator", "web_form", "member_note", "conflict_resolution", "task_conflict", "conflict")
 ПРИЧИНА = "не вошла в пересборку ({when})"
@@ -83,11 +86,49 @@ def та_же_цитата(a: str | None, b: str | None) -> bool:
     return bool(x) and bool(y) and (x == y or (len(x) >= 20 and x in y) or (len(y) >= 20 and y in x))
 
 
+def заменена(прежняя: dict, другая: dict, цитата_прежней: str | None, цитата_другой: str | None) -> bool:
+    """Задача с той же цитатой заменяет прежнюю, если это та же работа по правилу повторов реестра. «Под вопросом» —
+    замена только при узкой цитате: в ней одно поручение, разные слова о нём. В широкой цитате сомнение оставляет
+    задачу: потерять поручение дороже, чем показать пару, которую сведёт правило повторов или человек."""
+    if not (прежняя.get("responsible") and другая.get("responsible")):   # новая сборка могла не назвать исполнителя
+        прежняя, другая = {**прежняя, "responsible": ""}, {**другая, "responsible": ""}
+    вердикт = povtory_reestra.пара(прежняя, другая)[0]
+    if вердикт == povtory_reestra.ДА:
+        return True
+    return (вердикт == povtory_reestra.ПОД_ВОПРОСОМ
+            and max(len(_слова(цитата_прежней)), len(_слова(цитата_другой))) <= ШИРОКАЯ_ЦИТАТА)
+
+
+def _для_сравнения(r) -> dict:
+    return {"id": r.get("id"), "description": r.get("description") or "", "responsible": r.get("assignee") or "",
+            "subproject": r.get("subproject")}
+
+
 def цитата_занята(store, meeting_id: int, task_id: int, цитата: str | None) -> bool:
-    """Цитату задачи уже несёт другая действующая задача этой встречи — задача заменена, а не потеряна."""
-    return any(та_же_цитата(цитата, r["source_quote"]) for r in store.q(
-        "SELECT source_quote FROM tasks WHERE source_meeting_id=? AND status=? AND id<>?",
-        (meeting_id, TaskStatus.ACTIVE.value, task_id)))
+    """Другая действующая задача этой встречи несёт ту же цитату и ту же работу — задача заменена, а не потеряна.
+    Одной цитаты мало: широкая цитата несёт разные поручения (встреча 15.10, отчёт 9c79eca: задачи 3, 5, 6 сняты из-за
+    задач 7–10 с той же цитатой; решение владелицы 04.11.2026)."""
+    return bool(заменяющие(store, meeting_id, task_id, цитата))
+
+
+def заменяющие(store, meeting_id: int, task_id: int, цитата: str | None) -> list:
+    """Действующие задачи этой встречи, которые заменяют задачу `task_id` (см. `цитата_занята`)."""
+    прежняя = _для_сравнения(store.get("tasks", task_id) or {})
+    return [r for r in store.q("SELECT * FROM tasks WHERE source_meeting_id=? AND status=? AND id<>?",
+                               (meeting_id, TaskStatus.ACTIVE.value, task_id))
+            if та_же_цитата(цитата, r["source_quote"]) and заменена(прежняя, _для_сравнения(r), цитата, r["source_quote"])]
+
+
+def перенести_исполнителя(store, reg, task_id: int, замены: list) -> None:
+    """Новая сборка не назвала исполнителя, а прежняя задача его знала: исполнитель не пропадает вместе со снятой задачей,
+    он ставится в замену, с историей (отчёт 0948fb1: на встрече 28.10 сняты все четыре задачи с исполнителем)."""
+    кто = (store.get("tasks", task_id).get("assignee") or "").strip()
+    if not кто or not замены or any((r["assignee"] or "").strip() for r in замены):
+        return
+    замена = замены[0]
+    store.update("tasks", замена["id"], assignee=кто)
+    reg._history(замена["id"], замена["status"], замена["status"], "meeting",
+                 f"исполнитель перенесён при пересборке со снятой задачи №{task_id}: {кто}")
 
 
 def drop_missing(store, reg, meeting_id: int | None, meeting_date: str | None, kept_ids: set[int], *,
@@ -105,14 +146,19 @@ def drop_missing(store, reg, meeting_id: int | None, meeting_date: str | None, k
                      (meeting_id, TaskStatus.ACTIVE.value)):
         if t["id"] in kept:
             continue
+        if возвращена_владелицей(store, t["id"]):
+            out.setdefault("kept_owner", []).append(dict(t))
+            continue
         цит = store.get("tasks", t["id"]).get("source_quote")
-        if текст_записи and цитата_в_записи(цит, текст_записи) and not цитата_занята(store, meeting_id, t["id"], цит):
+        замены = заменяющие(store, meeting_id, t["id"], цит) if текст_записи and цитата_в_записи(цит, текст_записи) else None
+        if замены == []:
             out.setdefault("kept_quote", []).append(dict(t))
             continue
         edits = правилась_человеком(store, t["id"])
         if edits:
             out["kept"].append((dict(t), edits))
             continue
+        перенести_исполнителя(store, reg, t["id"], замены or [])
         reg.set_status(t["id"], TaskStatus.DROPPED, "rebuild", причина(when), meeting_date=meeting_date)
         out["dropped"].append(dict(t))
     return out
@@ -136,9 +182,16 @@ def снята_пересборкой(store, task_id: int) -> bool:
     return bool(last) and last[0]["source"] == "rebuild" and last[0]["new_status"] == TaskStatus.DROPPED.value
 
 
-def вернуть(store, reg, task_id: int, when: str | None = None) -> bool:
+def возвращена_владелицей(store, task_id: int) -> bool:
+    """Задачу вернула владелица: пересборка её больше не снимает (решение владелицы 04.11.2026)."""
+    return bool(store.q("SELECT 1 FROM task_history WHERE task_id=? AND evidence_quote LIKE ? LIMIT 1",
+                        (task_id, f"%{ВОЗВРАТ_ВЛАДЕЛИЦЫ}%")))
+
+
+def вернуть(store, reg, task_id: int, when: str | None = None, владелица: bool = False) -> bool:
     """Вернуть в работу задачу, снятую прежней пересборкой; номер тот же. Возвращает, вернули ли."""
     if not снята_пересборкой(store, task_id):
         return False
-    reg.set_status(task_id, TaskStatus.ACTIVE, "rebuild", ВОЗВРАТ.format(when=when or когда_сейчас()))
+    текст = ВОЗВРАТ.format(when=when or когда_сейчас())
+    reg.set_status(task_id, TaskStatus.ACTIVE, "rebuild", f"{текст}; {ВОЗВРАТ_ВЛАДЕЛИЦЫ}" if владелица else текст)
     return True
