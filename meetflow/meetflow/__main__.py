@@ -100,10 +100,18 @@ def main(argv: list[str] | None = None) -> int:
         for name in ("Орлова Мария", "Белов Сергей", "Гаврилова Анна"):
             st.insert("people", project_id=pid, full_name=name)
         mid = st.insert("meetings", project_id=pid, date="2026-10-01", label="Демо-встреча")
-        p = MeetingPipeline(th, st, default_registry(), MockLLM(), MockLLM())
-        p.reg.add(pid, "Отправить отчёт по тестам", "Белов Сергей")
-        p.ingest(pid, mid, "Расшифровка 01.10.2026.txt", DEMO_TEXT.encode("utf-8"))
-        print(p.run(pid, mid))
+        # Демо не должно читать настоящую общую базу (находка администратора 05.11.2026): иначе sync_people
+        # заводит в демо-базу настоящих людей из VOICE_BASE_PATH. Боевой serve это не затрагивает.
+        сохранённые = {k: os.environ.pop(k, None) for k in ("VOICE_BASE_PATH", "TEAM_SHARED_PATH")}
+        try:
+            p = MeetingPipeline(th, st, default_registry(), MockLLM(), MockLLM())
+            p.reg.add(pid, "Отправить отчёт по тестам", "Белов Сергей")
+            p.ingest(pid, mid, "Расшифровка 01.10.2026.txt", DEMO_TEXT.encode("utf-8"))
+            print(p.run(pid, mid))
+        finally:
+            for k, v in сохранённые.items():
+                if v is not None:
+                    os.environ[k] = v
     elif a.cmd == "routes":
         import json
         from .connectors.llm_routes import check_all, ensure_file, read, use

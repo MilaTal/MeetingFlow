@@ -135,8 +135,10 @@ function темаВстречиМесто() {
     const выбор = document.getElementById("prep-pick");
     return выбор ? { $бар: плн, id: выбор.value } : null;
   }
-  const erp = document.querySelector(".doc-head.prep-bar");
-  const m = location.hash.match(/^#meetings\/(\d+)\/(?:protocol|planprep)/);
+  // Одна страница встречи (05.11.2026, пакет Б): строка инструментов — #meeting-tools, адрес — любой из трёх
+  // (#meetings/N, /protocol, /planprep). Ищем по id, а не по прежнему `.doc-head.prep-bar`.
+  const erp = document.getElementById("meeting-tools");
+  const m = location.hash.match(/^#meetings\/(\d+)(?:\/(?:protocol|planprep))?(?:[?]|$)/);
   return erp && m ? { $бар: erp, id: m[1] } : null;
 }
 

@@ -30,7 +30,7 @@ def test_task_and_meeting_link_both_ways(tmp_path):
     root = Path(__file__).parents[1] / "meetflow" / "web" / "static"
     reg, meet = (root / "registry.js").read_text(encoding="utf-8"), (root / "meeting.js").read_text(encoding="utf-8")
     assert 'class="reg-meet">встреча ${esc(fmtRuDate(t.source_meeting_date))} · протокол</a>' in reg
-    assert 'кнопка("tasks", ВСТРЕЧА_ЗНАКИ.tasks, "Задачи встречи", мои.length)' in meet
+    assert 'кнопка("tasks", ВСТРЕЧА_ЗНАКИ.tasks, "Задачи встречи", мои.length, true)' in meet
 
 
 def test_pending_change_applied_on_leave_and_close():
@@ -53,9 +53,11 @@ def test_long_lists_limit_7_and_ribbon():
 
 
 def test_actions_next_to_object():
-    """Действие — рядом со своим объектом (13.10.26). С 27.10.2026 строка встречи ERP: «Протокол» и «Встреча» в самой
-    строке, кнопки страницы встречи — сразу за заголовком (`mt-acts`)."""
+    """Действие — рядом со своим объектом (13.10.26). С 05.11.2026 (пакет Б, Б5) строка реестра открывается целиком:
+    отдельных ссылок «Протокол»/«Встреча» нет, дата остаётся ссылкой, «…» — меню строки; инструменты встречи — одной
+    строкой сразу за заголовком (`#meeting-tools`)."""
     root = Path(__file__).parents[1] / "meetflow" / "web" / "static"
     nav, meet = (root / "nav.js").read_text(encoding="utf-8"), (root / "meeting.js").read_text(encoding="utf-8")
-    assert '<span class="proto-acts"><a href="#meetings/${m.id}/protocol">Протокол</a><a href="#meetings/${m.id}">Встреча</a></span>' in nav
-    assert '<div class="mt-title-row"><h1 class="mt-title">' in meet and '<span class="mt-acts">' in meet
+    assert 'proto-acts"><a href="#meetings/${m.id}/protocol">Протокол</a>' not in nav
+    assert '<a class="proto-date" href="#meetings/${m.id}">' in nav and 'proto-more" data-mid=' in nav
+    assert '<div class="mt-title-row"><h1 class="mt-title">' in meet and 'id="meeting-tools"' in meet

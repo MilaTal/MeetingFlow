@@ -1102,7 +1102,12 @@ function fmtRuDate(iso) {
 // четырёхзначный (задача владельца 07.10.26).
 function fmtRuDateTime(iso) {
   if (!iso) return "";
-  const dt = new Date(iso + "Z").toLocaleString("ru-RU", {
+  // 05.11.2026 (проход администратора, находка 2): сервер с этого дня отдаёт время с настоящей зоной (`+03:00`), а старые
+  // записи читаются как местное время. Дописывать «Z» к строке с зоной нельзя — получалось «03:29» вместо «00:29».
+  const s = String(iso).trim();
+  const дата = new Date(/[zZ]$|[+-]\d{2}:?\d{2}$/.test(s) ? s : s.replace(" ", "T"));
+  if (Number.isNaN(дата.getTime())) return "";        // не показываем человеку «Invalid Date»
+  const dt = дата.toLocaleString("ru-RU", {
     timeZone: "Europe/Moscow", day: "2-digit", month: "2-digit", year: "numeric", hour: "2-digit", minute: "2-digit",
   });
   return dt.replace(",", " в");
@@ -2841,10 +2846,13 @@ function daysBetween(iso1, iso2) {
 }
 
 async function renderMeetings(rest) {
-  if (rest[0] && rest[1] === "protocol") return renderMeetingProtocol(rest[0]);
+  // Одна страница встречи (пакет Б, 05.11.2026): прежние адреса /protocol и /planprep открывают её же, но нужной
+  // вкладкой. Основа — страница читателя `renderMeetingReader` (meeting.js).
+  if (rest[0] && rest[1] === "protocol") return renderMeetingReader(rest[0], "protocol");
   // «Единицы» на время тестирования — табло супер-админа, со страницы встречи убраны (владелец 02.10.26)
   if (rest[0] && rest[1] === "units") { location.replace(isSuperAdmin() ? `#units/${rest[0]}` : `#meetings/${rest[0]}`); return; }
-  if (rest[0]) return renderMeetingDetail(rest[0]);
+  if (rest[0] && rest[1] === "planprep") return renderMeetingReader(rest[0], "plan");
+  if (rest[0]) return renderMeetingReader(rest[0]);
 
   // Список встреч рисует nav.js (`renderProtocols`), создание встречи — одна точка, «Подготовка встречи» (`renderPrep`,
   // решение владелицы 21.10.2026). Прежний список с формой создания и строкой «открыть · создать протокол» удалён: его
@@ -2878,6 +2886,8 @@ function wirePasteText(idPrefix, endpoint, onDone) {
       if (result && result.relevance_warnings && result.relevance_warnings.length) {
         toast("Возможно, не тот текст — " + result.relevance_warnings.join(" "), true);
       }
+      // Почему сборка не пошла сама — словами сервера (05.11.2026, находка 4).
+      if (result && result.autorun_note) toast(result.autorun_note);
       onDone();
     } catch (e) { toast(e.message, true); btn.disabled = false; }
   });
@@ -2933,7 +2943,10 @@ function показатьХодСборки(id, { findingsId, btnId, since, queu
 
 function перерисоватьЭкранВстречи(id) {
   const route = (location.hash || "").replace(/^#/, "");
-  return route.startsWith(`meetings/${id}/protocol`) ? renderMeetingProtocol(id) : renderMeetingDetail(id);
+  // Одна страница встречи (05.11.2026): «Проверить сейчас» в карточке хода сборки не должна возвращать прежний экран.
+  if (route.startsWith(`meetings/${id}/protocol`)) return renderMeetingReader(id, "protocol");
+  if (route.startsWith(`meetings/${id}/planprep`)) return renderMeetingReader(id, "plan");
+  return renderMeetingReader(id);
 }
 
 function остановитьСлежение(id) {
@@ -3469,7 +3482,9 @@ async function renderMeetingProtocol(id, verdict, verdictFor) {
     } catch (e) { /* источник перехода недоступен — остаётся возврат к самой встрече */ }
   }
   const hasMin = !!(minutes && minutes.available);
-  const isFuture = new Date(meeting.date) > new Date();
+  // 05.11.2026 (находка 3): дату сравниваем строкой, как сегодняISO(). `new Date("2026-11-05")` — полночь UTC, и
+  // сегодняшняя встреча до 03:00 считалась будущей.
+  const isFuture = String(meeting.date).slice(0, 10) > сегодняISO();
   // Полоса «Источники · + добавить · Пересобрать» прилипает к низу экрана (решение владельца 01.10.26, вариант 3 из трёх
   // подходов лидеров рынка — плавающая полоса, как в Granola и Fathom). Раньше под Протоколом был свёрнутый блок
   // «Заметки этой встречи и пересборка протокола»: «Уже добавлено», загрузка с длинной подписью, «Вставить текст»,
@@ -4081,9 +4096,14 @@ function renderDocHtml(md, опц) {
   // В показе атрибутов нет.
   const ист = !!(опц && опц.источник);
   const атр = (raw, pre) => (ист ? ` data-src="${esc(raw)}" data-pre="${esc(pre || "")}"` : "");
-  // Цикл 2: «### Раздел 2 — …» приходил посреди строки, а «- пункты» — слитно через точку: выносим на отдельные строки
+  // Разметка «#»/«##» в сохранённых документах на стенде видна буквально («# Итоги синка», «## Участники»); убираем её
+  // только на показе, текст в базе не переписываем (05.11.2026, проход администратора, находка 7). Заголовок, идущий в
+  // одной строке с текстом («## Что сделано **Стеллажи:** …»), разделяем на заголовок и абзац — иначе они склеивались.
   md = String(md || "")
-    .replace(/([^\n])[ \t]+(#{2,4}[ \t]+\S)/g, "$1\n\n$2")
+    .replace(/^[ \t]*#{1,6}[ \t]+(.+?)[ \t]+(?=\*\*[^*\n]+?\*\*)/gm, "$1\n\n")
+    .replace(/([^\n])[ \t]+#{1,6}[ \t]+(?=\S)/g, "$1\n\n")
+    .replace(/^[ \t]*#{1,6}[ \t]+/gm, "")
+    // Цикл 2: «### Раздел 2 — …» приходил посреди строки, а «- пункты» — слитно через точку: выносим на отдельные строки
     .replace(/([.;:])[ \t]+-[ \t]+(?=[А-ЯЁA-Z«"])/g, "$1\n- ");
   const lines = String(md || "").split("\n");
   const n = lines.length;
@@ -4271,13 +4291,8 @@ function meetingDocHead({ backHref, backLabel, meeting, active, hasPlan, hasMin,
     <span class="doc-head-spacer"></span>
     ${exportUrl ? `<a class="btn btn-sm" href="${exportUrl}" target="_blank">Скачать .docx</a>` : ""}
     ${editId && editBase && isAdmin() ? полотноПереключатель(editBase, полотноРежим(editBase), "prep-edit-switch") : ""}
-    ${/* у отменённой дату не меняют (сервер — 400): кнопка была обманкой (Д3, проход 3, 21.10.2026) */ ""}
-    ${isAdmin() && !hasMin && meeting.status !== "cancelled" && new Date(meeting.date) >= new Date(new Date().toDateString())
-      ? `<button type="button" class="btn-sm" data-edit-date="${meeting.id}" data-date="${esc(String(meeting.date).slice(0, 10))}">Изменить дату</button>` : ""}
-    ${/* «Удалить встречу» (решение владелицы 23.10.2026, вместо отмены): администратору, у встречи без протокола; что ещё
-          держит встречу (план, материалы, задачи), сервер скажет до окна подтверждения */ ""}
-    ${isAdmin() && !hasMin && meeting.status !== "cancelled"
-      ? `<button type="button" class="btn-sm" data-delete-meeting="${meeting.id}" data-date="${esc(String(meeting.date).slice(0, 10))}">Удалить встречу</button>` : ""}
+    ${/* «Изменить дату» и «Удалить встречу» убраны из шапки 05.11.2026 (пакет Б, Б4): оба действия — в одном меню «⋯»
+          встречи (`менюВстречи`, nav.js). */ ""}
   </div>
   ${isAdmin() ? `<div class="plan-top-note" id="merged-note" data-merged-for="${meeting.id}" hidden></div>` : ""}`;
 }
@@ -4291,20 +4306,42 @@ document.addEventListener("click", async (e) => {
   const btn = e.target.closest("[data-delete-meeting]");
   if (!btn) return;
   const id = btn.dataset.deleteMeeting;
+  // Куда вернуться: from=reg — реестр задач, from=prep — подготовка, иначе страница встречи/реестр — в реестр,
+  // подготовка — в подготовку (Б2/Б4, 05.11.2026).
+  const маршрут = (location.hash || "").replace(/^#/, "").split("?")[0];
+  const откуда = new URLSearchParams((location.hash || "").split("?")[1] || "").get("from");
+  const назад = откуда === "reg" ? "#dashboard" : откуда === "prep" ? "#prep"
+    : /^meetings(\/\d+(\/(protocol|planprep))?)?$/.test(маршрут) ? "#meetings" : "#prep";
   try {
     const проверка = await api(`/meetings/${id}/delete-check`);
     if (!проверка.can_delete && проверка.can_cancel) {
       if (!(await confirmDialog(проверка.cancel_text, "Отменить встречу"))) return;
       await api(`/meetings/${id}/cancel-with-plan`, { method: "POST" });
       toast(`Встреча ${fmtRuDate(btn.dataset.date)} отменена — план сохранён`);
-      location.hash = "#prep";
+      location.hash = назад;
+      return;
+    }
+    // Доработка 2 (28.10.2026): встречу с протоколом и задачами тоже можно удалить — задачи снимаются, отмена сразу.
+    // Пункт «Удалить» в меню «⋯» пользуется этим же обработчиком (Б4, 05.11.2026).
+    if (!проверка.can_delete && проверка.can_delete_with_tasks) {
+      if (!(await confirmDialog(проверка.with_tasks_text, "Удалить"))) return;
+      await api(`/meetings/${id}?with_tasks=true`, { method: "DELETE" });
+      await загрузитьПроекты();
+      toast(`Встреча ${fmtRuDate(btn.dataset.date)} удалена`);
+      location.hash = назад;
+      уведомлениеСОтменой(`Встреча ${fmtRuDate(btn.dataset.date)} удалена`, async () => {
+        await api(`/meetings/${id}/restore`, { method: "POST" });
+        await загрузитьПроекты();
+        toast("Удаление отменено");
+        render();
+      });
       return;
     }
     if (!проверка.can_delete) { toast(проверка.detail, true); return; }
     if (!(await confirmDialog(`Удалить встречу ${fmtRuDate(btn.dataset.date)}? Это нельзя отменить`, "Удалить"))) return;
     await api(`/meetings/${id}`, { method: "DELETE" });
     toast(`Встреча ${fmtRuDate(btn.dataset.date)} удалена`);
-    location.hash = "#prep";
+    location.hash = назад;
   } catch (err) { toast(err.message, true); }
 });
 
@@ -4458,6 +4495,7 @@ document.addEventListener("click", async (e) => {
   const head = e.target.closest(".rn-head");
   if (head) {
     const box = head.closest(".doc-with-notes");
+    if (!box) return;                         // список в правой панели встречи — сворачивает сама панель
     const collapsed = box.classList.toggle("rn-collapsed");
     head.setAttribute("aria-expanded", String(!collapsed));
     try { localStorage.setItem("reviewNotesCollapsed", collapsed ? "1" : "0"); } catch (err) { /* не критично */ }
@@ -4470,15 +4508,16 @@ document.addEventListener("click", async (e) => {
     const opening = more.hidden;
     li.closest(".review-notes").querySelectorAll(".rn-more").forEach(m => { m.hidden = true; });
     li.closest(".review-notes").querySelectorAll(".rn-item").forEach(x => x.classList.remove("rn-active"));
-    const docEl = li.closest(".doc-with-notes").querySelector(".doc-content");
+    // В правой панели встречи документа рядом нет — подробности раскрываем без подсветки (05.11.2026, Б1).
+    const docEl = li.closest(".doc-with-notes")?.querySelector(".doc-content");
     if (opening) {
       more.hidden = false;
       li.classList.add("rn-active");
-      const found = highlightQuote(docEl, li.dataset.quote);
-      if (!found && li.dataset.quote && !more.querySelector(".rn-gone")) {
+      const found = docEl ? highlightQuote(docEl, li.dataset.quote) : false;
+      if (!found && docEl && li.dataset.quote && !more.querySelector(".rn-gone")) {
         more.insertAdjacentHTML("beforeend", `<div class="rn-gone">Фрагмента в тексте уже нет.</div>`);
       }
-    } else {
+    } else if (docEl) {
       highlightQuote(docEl, "");
     }
     return;
@@ -4545,7 +4584,8 @@ function открытьТочечнуюПравку(blockId) {
 // «Поправить» у замечания про текст: режим правки на полотне, поле — у абзаца с фрагментом замечания
 function openFixForNote(li) {
   const blockId = (li.closest(".card-output")?.querySelector(".doc-content[id]")?.id || "").replace(/-doc$/, "");
-  const д = _полотнаЭкрана.get(blockId);
+  // Замечания в правой панели встречи (05.11.2026): у панели нет карточки документа — берём документ страницы.
+  const д = _полотнаЭкрана.get(blockId) || _полотнаЭкрана.get("mt-doc-text");
   if (!д) { toast("Правка этого документа недоступна", true); return; }
   try { sessionStorage.setItem("polotnoNote", JSON.stringify({ base: д.base, quote: li.dataset.quote || "", run: li.dataset.run, idx: li.dataset.idx })); }
   catch (e) { /* без памяти вкладки — без поля у абзаца */ }
@@ -4687,6 +4727,7 @@ async function uploadFile(url, fileInputId, extraFields, successMsg, after, with
   let noRecognition = false;
   const errors = [];
   const relevanceWarnings = [];
+  const autorunNotes = [];      // «автозапуск выключен — собирайте кнопкой» и подобное (находка 4, 05.11.2026)
   // Файлы, которые приняты как МАТЕРИАЛЫ встречи (таблицы, презентации, pdf, картинки): сервер кладёт их
   // материалом, потому что текстом они не бывают, — человек должен увидеть, что файл не потерялся, и где
   // он теперь лежит (замечание владельца 05.10.26 про .xlsx).
@@ -4709,6 +4750,7 @@ async function uploadFile(url, fileInputId, extraFields, successMsg, after, with
         if (j.material && j.note) materialNotes.push(j.note);
         if (j.relevance_warnings && j.relevance_warnings.length) relevanceWarnings.push(`${file.name}: ${j.relevance_warnings.join(" ")}`);
         if (j.autorun) autorunStarted = true;
+        else if (j.autorun_note) autorunNotes.push(j.autorun_note);
         if (j.queued) recordingsQueued++;
         if (j.queued && j.recognition_available === false) noRecognition = true;
         okCount++;
@@ -4723,6 +4765,9 @@ async function uploadFile(url, fileInputId, extraFields, successMsg, after, with
   // Автозапуск (решение 30.09.26): оператор должен узнать, что протокол уже собирается, не
   // догадываться по тишине — тот же урок, что у карточки записи вне длительности.
   if (autorunStarted) toast("Протокол собирается автоматически — откройте встречу через минуту-другую");
+  // Сервер объясняет, почему автозапуска не будет (выключен, встреча ещё не прошла, протокол уже есть) — показываем это
+  // после добавления, иначе экран молчит, а прежний текст «соберётся сам» обещает несбывшееся (находка 4).
+  if (autorunNotes.length) toast(autorunNotes.join(" "));
   // Постановка записи в очередь (30.09.26, по находке Планёрки «05», часть п.6) — тот же принцип.
   if (recordingsQueued && noRecognition) {
     toast("Запись принята. Распознать её на этом сервере сейчас нечем — администратор уведомлён; " +
@@ -5557,7 +5602,7 @@ function строкаПересчёта(st) {
 
 function времяМск(iso) {
   const полное = fmtRuDateTime(iso);                       // «19.10.2026 в 22:29»
-  const сегодня = fmtRuDateTime(new Date().toISOString().slice(0, 19)).split(" в ")[0];
+  const сегодня = fmtRuDateTime(new Date().toISOString()).split(" в ")[0];
   const [день, время] = полное.split(" в ");
   return день === сегодня ? время : `${день} ${время}`;
 }
@@ -5926,7 +5971,11 @@ function fmtBytes(n) {
 // было "ru-RU" без timeZone — работало верно только пока у смотрящего тоже Москва на часах.
 function fmtDate(iso) {
   if (!iso) return "—";
-  return new Date(iso + "Z").toLocaleString("ru-RU", { timeZone: "Europe/Moscow" });
+  // Та же зона, что у fmtRuDateTime (05.11.2026): строка уже с зоной — не дописываем «Z».
+  const s = String(iso).trim();
+  const дата = new Date(/[zZ]$|[+-]\d{2}:?\d{2}$/.test(s) ? s : s.replace(" ", "T"));
+  if (Number.isNaN(дата.getTime())) return "—";
+  return дата.toLocaleString("ru-RU", { timeZone: "Europe/Moscow" });
 }
 
 let _monitoringCache = null;

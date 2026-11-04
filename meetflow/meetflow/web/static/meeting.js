@@ -47,7 +47,375 @@ function панельДоговорённостейВстречи(записи, 
     <a href="#agreements">Реестр договорённостей</a>`;
 }
 
-async function renderMeetingReader(id) {
+// ---- Одна страница встречи (пакет Б, 05.11.2026) ---------------------------------------------------------------
+// #meetings/N — вкладка «Протокол», если он есть, иначе «План»; #meetings/N/protocol и #meetings/N/planprep —
+// адреса тех же вкладок. Основа — прежняя страница читателя; сборка, материалы, замечания и действия встречи
+// переехали в одну строку инструментов и одну правую панель. Цвета и вид — прежние классы (.mt-*, .src-*, .doc-*).
+let _открытаяПанельВстречи = "";
+let _страницаВстречиId = "";
+
+function вёлВстречиТекст(m) {
+  const текст = m.leader_user_id
+    ? (allUsers.find(u => u.id === m.leader_user_id)?.full_name || "")
+    : (m.leader_speaker || "");
+  return /^говорящий\s*\d*$/i.test(текст.trim()) ? "" : текст;
+}
+
+function панельМатериаловHtml({ id, tab, источники, материалы, встреча, admin }) {
+  const вид = src => src.kind === "recording" ? "запись" : src.kind === "transcript" ? "расшифровка"
+    : src.kind === "protocol" ? "заметки" : src.kind === "notes" ? "заметки секретаря" : fileTag(src.original_filename);
+  const источникиHtml = (источники || []).map(src => sourceRow(вид(src), esc(src.original_filename),
+    src.status ? esc(src.status) : "",
+    `<span class="src-icons">${src.local_transcript ? `<a class="btn-icon src-download" href="/meetings/${id}/sources/${src.id}/export" download title="Выгрузить расшифровку в Word" aria-label="Выгрузить расшифровку в Word">${ICON_DOWNLOAD}</a>` : ""}${admin ? `<button class="btn-icon src-delete delete-source-btn" data-id="${src.id}" title="Удалить файл" aria-label="Удалить файл">${ICON_TRASH}</button>` : ""}</span>`)).join("")
+    || `<div class="src-empty">Пока нет.</div>`;
+  const материалыHtml = (материалы || []).map(m => sourceRow("материал", esc(m.original_filename),
+    [m.description ? esc(m.description) : "", m.added_at ? `добавлен ${esc(fmtRuDateTime(m.added_at))}` : ""].filter(Boolean).join(" · "),
+    // удаляет автор или администратор (как в прежней панели плана)
+    (admin || (me && m.uploaded_by_user_id === me.id))
+      ? `<button class="btn-icon src-delete delete-material-btn" data-id="${m.id}" title="Удалить материал" aria-label="Удалить материал">${ICON_TRASH}</button>` : "")).join("")
+    || `<div class="src-empty">Пока нет.</div>`;
+  const вёл = вёлВстречиТекст(встреча);
+  const цель = tab === "plan" ? "к плану" : "к протоколу";
+  return `<h2>Материалы встречи ${esc(fmtRuDate(встреча.date))}</h2>
+    <div class="hstack" style="margin:0 0 8px">
+      <label class="btn btn-sm">+ Добавить материал <span class="page-sub">${цель}</span><input type="file" id="meeting-material-file" multiple hidden></label>
+      ${tab === "protocol" ? `<button type="button" class="link" id="meeting-paste-open">Вставить текст</button>` : ""}
+    </div>
+    <div class="page-sub">Файл можно перетащить на страницу.</div>
+    <div id="meeting-material-progress" class="src-hint"></div>
+    ${tab === "plan" ? `<input type="text" id="meeting-material-desc" class="src-desc" placeholder="Описание для следующего файла — если нужно">` : ""}
+    <div id="meeting-paste-box" class="src-paste" hidden>
+      <textarea id="meeting-paste-text" rows="6" placeholder="Вставьте заметки или расшифровку встречи"></textarea>
+      <div class="hstack"><button type="button" class="btn-sm" id="meeting-paste-add">Добавить текст</button></div>
+    </div>
+    <div class="reg-sub" style="margin-top:12px">К протоколу · ${(источники || []).length}</div>
+    ${источникиHtml}
+    <div class="reg-sub" style="margin-top:12px">К плану · ${(материалы || []).length}</div>
+    ${материалыHtml}
+    ${(встреча.project_label || вёл) ? `<div class="reg-sub" style="margin-top:12px">${встреча.project_label ? `Проект: ${esc(встреча.project_label)}` : ""}${встреча.project_label && вёл ? " · " : ""}${вёл ? `Вёл встречу: ${esc(вёл)}` : ""}</div>` : ""}`;
+}
+
+function подключитьМатериалы(id, tab) {
+  const file = document.getElementById("meeting-material-file");
+  file?.addEventListener("change", async (e) => {
+    if (!e.target.files.length) return;
+    const progress = document.getElementById("meeting-material-progress");
+    if (progress) progress.textContent = "Загружаю: " + Array.from(e.target.files).map(f => f.name).join(", ") + "…";
+    const url = tab === "plan" ? `/meetings/${id}/materials` : `/meetings/${id}/sources`;
+    const extra = tab === "plan" ? { description: document.getElementById("meeting-material-desc")?.value || "" } : {};
+    await uploadFile(url, "meeting-material-file", extra,
+      tab === "plan" ? "Материал добавлен" : "Файлы добавлены",
+      () => renderMeetingReader(id, tab), true,
+      tab === "plan" ? { progressId: "meeting-material-progress" }
+        : { mediaAsRecording: true, progressId: "meeting-material-progress" });
+  });
+  document.getElementById("meeting-paste-open")?.addEventListener("click", () => {
+    const box = document.getElementById("meeting-paste-box");
+    box.hidden = !box.hidden;
+    if (!box.hidden) document.getElementById("meeting-paste-text").focus();
+  });
+  if (tab === "protocol") wirePasteText("meeting-paste", `/meetings/${id}/sources/text`, () => renderMeetingReader(id, tab));
+  document.querySelectorAll(".delete-source-btn").forEach(btn => btn.addEventListener("click", async () => {
+    if (!(await confirmDialog("Удалить этот файл с заметками? Восстановить его нельзя.", "Удалить"))) return;
+    try {
+      await api(`/meetings/${id}/sources/${btn.dataset.id}`, { method: "DELETE" });
+      toast("Файл удалён");
+      renderMeetingReader(id, tab);
+    } catch (e) { toast(e.message, true); }
+  }));
+  document.querySelectorAll(".delete-material-btn").forEach(btn => btn.addEventListener("click", async () => {
+    if (!(await confirmDialog("Удалить этот материал? Восстановить его нельзя.", "Удалить"))) return;
+    try {
+      await api(`/meetings/${id}/materials/${btn.dataset.id}`, { method: "DELETE" });
+      toast("Материал удалён");
+      renderMeetingReader(id, tab);
+    } catch (e) { toast(e.message, true); }
+  }));
+}
+
+function панельЗамечанийHtml(протокол) {
+  const дата = esc(fmtRuDate(протокол.date || ""));
+  const notes = протокол.minor_findings || [];
+  if (!notes.length) return `<h2>Замечания встречи ${дата}</h2><div class="reg-sub">Замечаний нет.</div>`;
+  // Тот же список и те же действия, что у панели замечаний документа (reviewNotesLayout): берём её разметку, не
+  // переписывая правила показа. Заголовок «Свернуть» здесь не нужен — сворачивает вся панель.
+  const holder = document.createElement("div");
+  holder.innerHTML = reviewNotesLayout({ content_md: протокол.content_md || "", minor_findings: notes }, "");
+  const body = holder.querySelector(".review-notes .rn-body");
+  return `<h2>Замечания встречи ${дата}</h2>${body ? body.innerHTML : ""}`;
+}
+
+async function renderMeetingReader(id, запрошеннаяВкладка) {
+  const откуда = new URLSearchParams(location.hash.split("?")[1] || "").get("from");
+  if (_страницаВстречиId !== String(id)) { _открытаяПанельВстречи = ""; _страницаВстречиId = String(id); }
+  const [встреча, протокол, план, источники, материалы, встречи, задачи] = await Promise.all([
+    api(`/meetings/${id}`), api(`/meetings/${id}/minutes`), api(`/meetings/${id}/plan`),
+    api(`/meetings/${id}/sources`).catch(() => []), api(`/meetings/${id}/materials`).catch(() => []),
+    api("/meetings"), api(`/tasks?meeting_id=${id}`),
+  ]);
+  const генерация = canPrepare() ? await api(`/meetings/${id}/generation`).catch(() => ({})) : {};
+  const ответДоговорённостей = протокол.available
+    ? await api(`/agreements?meeting_id=${id}`).catch(() => ({ items: [], mode: "shadow" })) : null;
+  const договорённости = ответДоговорённостей && (isAdmin() || ответДоговорённостей.mode === "on")
+    ? (ответДоговорённостей.items || []) : null;
+  const hasMin = !!протокол.available;
+  const hasPlan = !!план.available;
+  const сегодня = сегодняISO();
+  const дата = String(встреча.date).slice(0, 10);
+  const будущая = дата > сегодня;
+  const прошла = дата < сегодня;
+  const отменена = встреча.status === "cancelled";
+  const админ = isAdmin();
+  const готовит = canPrepare();
+  // Вкладки: протокол — только если он есть; план — если он есть или встреча ещё не прошла (её можно собрать).
+  // У прошедшей встречи вкладки без документа нет (Б1).
+  // Сегодня и впереди вкладка «Протокол» доступна и без документа: после сегодняшней встречи источник и сборку
+  // добавляют отсюда. У прошедшей встречи вкладки без документа нет (Б1).
+  const показПротокола = hasMin || !прошла;
+  const показПлана = hasPlan || !прошла;      // у будущей и сегодняшней план можно собрать, даже если плана ещё нет
+  let tab = запрошеннаяВкладка === "protocol" || запрошеннаяВкладка === "plan" ? запрошеннаяВкладка : (hasMin ? "protocol" : "plan");
+  if (tab === "protocol" && !показПротокола && показПлана) tab = "plan";
+  if (tab === "plan" && !показПлана && показПротокола) tab = "protocol";
+  const документ = tab === "protocol" ? (hasMin ? протокол : null) : (hasPlan ? план : null);
+  const заголовок = tab === "protocol" && hasMin ? `Протокол встречи ${fmtRuDate(встреча.date)}`
+    : tab === "plan" && hasPlan ? `План встречи ${fmtRuDate(встреча.date)}`
+    : `Встреча ${fmtRuDate(встреча.date)}`;
+  const мои = задачи.filter(t => t.source_meeting_id === Number(id));
+  const следующая = встречи.filter(m => m.status !== "cancelled" && String(m.date).slice(0, 10) > дата)
+    .sort((a, b) => a.date.localeCompare(b.date))[0] || null;
+  const состояние = отменена ? "встреча отменена" : встреча.building ? "идёт сборка"
+    : встреча.draft_pending ? "черновик ждёт решения" : hasMin ? "протокол готов"
+    : (встреча.состояние_протокола || "протокола нет");
+  let назад = откуда === "reg" ? `<a href="#dashboard" class="mt-back">← Реестр задач</a>`
+    : откуда === "prep" ? `<a href="#prep" class="mt-back">← Подготовка встречи</a>`
+    : `<a href="#meetings" class="mt-back">← Реестр встреч</a>`;
+  // Старый ?from=<номер встречи> (ссылки «план следующей», материалы к плану) — возврат на ту встречу, как прежде.
+  if (/^\d+$/.test(откуда || "")) {
+    let источник = null;
+    try { источник = await api(`/meetings/${откуда}`); } catch (e) { /* встреча могла уйти — остаётся реестр */ }
+    if (источник) назад = `<a href="#meetings/${откуда}" class="mt-back">← План ${esc(fmtRuDate(источник.date))}</a>`;
+  }
+  // Число у кнопки: у «Материалов» ноль не пишем (А6), у задач и договорённостей ноль значим — «как сейчас».
+  const кнопка = (k, знак, текст, n, ноль = false) => `<button type="button" class="mt-btn" data-drawer="${k}" aria-expanded="false">${знак}${esc(текст)}${n !== undefined && (n || ноль) ? ` <span class="n">${n}</span>` : ""}</button>`;
+  const замечания = hasMin ? (протокол.minor_findings || []).filter(n => !n.dismissed).length : 0;
+  const всего = (источники || []).length + (материалы || []).length;
+  const подписьПротокола = hasMin ? "Пересобрать протокол" : "Сформировать протокол";
+  const подписьПлана = hasPlan ? "Переформировать план встречи" : "Сформировать план встречи";
+  const подписьГлавной = tab === "protocol" ? подписьПротокола : подписьПлана;
+  const главная = tab === "protocol"
+    ? (!будущая && !отменена && готовит ? `<button type="button" class="btn-primary" id="reader-main-btn"${генерация.running || генерация.queued ? " disabled" : ""}>${подписьГлавной}</button>` : "")
+    : (готовит && !отменена ? `<button type="button" class="btn-primary" id="reader-main-btn"${генерация.running || генерация.queued ? " disabled" : ""}>${подписьГлавной}</button>` : "");
+  const экспорт = документ ? (tab === "protocol" ? `/meetings/${id}/minutes/export` : `/meetings/${id}/plan/export`) : "";
+  const основаПолотна = документ ? (tab === "protocol" ? `/meetings/${id}/minutes` : `/meetings/${id}/plan`) : "";
+  const рубежАрхива = new Date(); рубежАрхива.setDate(рубежАрхива.getDate() - ARCHIVE_CUTOFF_DAYS);
+  const правкаДоступна = админ && !!основаПолотна && дата >= датаISO(рубежАрхива);
+  const режимПолотна = правкаДоступна ? полотноРежим(основаПолотна) : "view";
+  const новее = tab === "plan" && hasPlan ? Number(план.newer_materials || 0) : 0;
+  const плашкаНовее = !новее ? ""
+    : готовит && !отменена && !генерация.running
+      ? `<button type="button" class="link" id="reader-plan-newer">Есть материалы новее плана (${новее}) — переформировать?</button>`
+      : `<span class="page-sub">Есть материалы новее плана (${новее})</span>`;
+  const подпись = админ && документ
+    ? (tab === "protocol"
+      ? `собран ${esc(fmtRuDateTime(протокол.generated_at))}${протокол.build_note ? ` · ${esc(протокол.build_note)}` : ""}`
+      : `план собран ${esc(fmtRuDateTime(план.generated_at))}`)
+    : "";
+  // «Протокол соберётся сам» — только если сервер подтвердил автозапуск (находка 4). Старый сервер поля не отдаёт —
+  // тогда нейтрально: «сам или по кнопке», а не ложное «автозапуск выключен».
+  const автозапуск = typeof встреча.autorun === "boolean" ? встреча.autorun : null;
+  const какСоберётся = автозапуск === true ? "протокол соберётся сам."
+    : автозапуск === false ? "затем нажмите «Сформировать протокол»: автозапуск выключен."
+    : "протокол соберётся сам или по кнопке «Сформировать протокол».";
+  const пустойТекст = tab === "protocol"
+    ? (отменена ? "Встреча отменена — протокола нет."
+      : будущая ? "Встреча ещё не прошла. После неё — протокол."
+      : !готовит ? "Протокола этой встречи пока нет."
+      : !(источники || []).length ? `Протокола пока нет. Добавьте материал в «Материалах» — ${какСоберётся}`
+      : автозапуск === true ? "Протокола пока нет. Материалы уже приложены — протокол соберётся сам."
+      : автозапуск === false ? "Протокола пока нет. Материалы приложены — нажмите «Сформировать протокол»: автозапуск выключен."
+      : "Протокола пока нет. Материалы приложены — протокол соберётся сам или по кнопке «Сформировать протокол».")
+    : (отменена ? "Встреча отменена — плана и материалов у неё нет."
+      : готовит ? "Плана пока нет. Нажмите «Сформировать план встречи» вверху."
+      : "Плана пока нет.");
+  const баннерЧерновика = встреча.draft_pending && админ
+    ? `<div class="card" id="reader-draft-banner"><div><b>Черновик ждёт решения.</b></div>
+        <div class="page-sub" style="margin:6px 0">Сохранить его можно здесь — это одна точка решения; в пути встречи тот же шаг.</div>
+        <button type="button" class="btn-sm btn-primary" id="reader-accept-draft">Сохранить протокол с замечаниями</button></div>` : "";
+
+  $main.innerHTML = `
+    <div class="mt-bar">
+      ${назад}
+      ${админ ? `<span class="mt-state${встреча.draft_pending ? " mt-state-acc" : ""}">${esc(состояние)}</span>` : ""}
+    </div>
+    <div class="mt-title-row"><h1 class="mt-title">${esc(заголовок)}</h1></div>
+    ${подпись ? `<div class="mt-sub">${esc(подпись)}</div>` : ""}
+    <div class="doc-head prep-bar" id="meeting-tools">
+      ${показПротокола ? `<a class="doc-tab${tab === "protocol" ? " doc-tab-on" : ""}" href="#meetings/${id}/protocol${откуда ? `?from=${esc(откуда)}` : ""}">Протокол</a>` : ""}
+      ${показПлана ? `<a class="doc-tab${tab === "plan" ? " doc-tab-on" : ""}" href="#meetings/${id}/planprep${откуда ? `?from=${esc(откуда)}` : ""}">План</a>` : ""}
+      ${главная}
+      ${кнопка("materials", ВСТРЕЧА_ЗНАКИ.notes, "Материалы", всего)}
+      ${кнопка("tasks", ВСТРЕЧА_ЗНАКИ.tasks, "Задачи встречи", мои.length, true)}
+      ${договорённости ? кнопка("agreements", ВСТРЕЧА_ЗНАКИ.agreements, "Договорённости встречи", договорённости.length, true) : ""}
+      ${кнопка("plan", ВСТРЕЧА_ЗНАКИ.plan, "План следующей")}
+      ${админ && hasMin ? `<button type="button" class="mt-btn" data-drawer="notes" aria-expanded="false">${ВСТРЕЧА_ЗНАКИ.notes}Замечания${замечания ? ` <span class="n">${замечания}</span>` : ""}</button>` : ""}
+      ${документ ? `<a class="mt-btn" href="${экспорт}" target="_blank">${ВСТРЕЧА_ЗНАКИ.docx}Скачать .docx</a>` : ""}
+      ${правкаДоступна ? полотноПереключатель(основаПолотна, режимПолотна, "reader-edit") : ""}
+      ${плашкаНовее}
+      ${админ ? `<span class="reg-menu-wrap"><button type="button" class="mt-btn" id="meeting-more" aria-label="Ещё" aria-haspopup="menu">⋯</button></span>` : ""}
+    </div>
+    <div class="mt-layout">
+      <article class="mt-doc">
+        ${баннерЧерновика}
+        <div class="stack">
+          <div id="verify-findings-minutes"></div>
+          <div id="verify-findings-plan"></div>
+          ${документ ? `<div class="mt-text doc-render doc-content" id="mt-doc-text">${renderDocHtml(документ.content_md)}</div>`
+            : `<div class="card empty-state">${esc(пустойТекст)}</div>`}
+        </div>
+        ${админ && hasMin ? `<div id="post-save-check" hidden></div>` : ""}
+      </article>
+      <aside class="mt-drawer" id="mt-drawer" hidden aria-label="Панель встречи"></aside>
+    </div>`;
+
+  const спрятатьПервуюСтроку = (док) => {
+    const перваяСтрока = док?.firstElementChild?.classList.contains("doc-protocol") ? док.firstElementChild.firstElementChild : док?.firstElementChild;
+    if (перваяСтрока && /^(Протокол|План).{0,40}\d{2}\.\d{2}\.\d{2,4}\s*$/.test(перваяСтрока.textContent.trim())) перваяСтрока.hidden = true;
+  };
+  спрятатьПервуюСтроку($main.querySelector(".mt-text"));
+  // «Поправить» у замечания (панель справа) правит документ этой страницы (решение владелицы 24.10.2026).
+  if (документ) _полотнаЭкрана.set("mt-doc-text", { base: основаПолотна, перерисовать: () => renderMeetingReader(id, tab) });
+  const $d = document.getElementById("mt-drawer");
+  const открыть = async (k, кнопка) => {
+    document.querySelectorAll(".mt-btn[data-drawer]").forEach(b => b.setAttribute("aria-expanded", "false"));
+    if ($d.dataset.k === k && !$d.hidden) {
+      $d.hidden = true; $d.dataset.k = ""; _открытаяПанельВстречи = ""; return;
+    }
+    $d.dataset.k = k;
+    кнопка?.setAttribute("aria-expanded", "true");
+    let тело = "";
+    if (k === "tasks") {
+      тело = `<h2>Задачи встречи ${esc(fmtRuDate(встреча.date))}</h2>${мои.length ? `<div data-list="meeting-tasks" data-list-item=".tl-item">${мои.map((t, i) =>
+        пунктЗадачи(t, i, "открыть в реестре")).join("")}</div><button type="button" class="link" id="mt-all-tasks">Все задачи встречи в реестре</button>`
+        : '<div class="reg-sub">Задач с этой встречи нет.</div>'}`;
+    } else if (k === "agreements") {
+      тело = панельДоговорённостейВстречи(договорённости || [], fmtRuDate(встреча.date));
+    } else if (k === "plan") {
+      if (!следующая) тело = `<h2>План следующей встречи</h2><div class="reg-sub">Следующая встреча ещё не заведена.</div>`;
+      else {
+        const планСледующей = await api(`/meetings/${следующая.id}/plan`);
+        тело = `<h2>План встречи ${esc(fmtRuDate(следующая.date))}</h2>
+          <a class="mt-plan-link" href="#meetings/${следующая.id}">встреча ${esc(fmtRuDate(следующая.date))}</a>${планСледующей.available
+          ? `<div class="doc-render mt-plan doc-content">${renderDocHtml(планСледующей.content_md)}</div>` : `<div class="reg-sub">${esc(планСледующей.message || "Плана пока нет")}</div>`}`;
+      }
+    } else if (k === "materials") {
+      _открытаяПанельВстречи = "materials";
+      тело = панельМатериаловHtml({ id, tab, источники, материалы, встреча, admin: админ });
+    } else if (k === "notes") {
+      тело = панельЗамечанийHtml({ ...протокол, date: встреча.date });
+    }
+    $d.innerHTML = `<div class="mt-drawer-head"><button type="button" class="mt-close" id="mt-close" aria-expanded="true" aria-controls="mt-drawer" title="Свернуть панель (Esc)">Свернуть ▾</button></div>${тело}`;
+    const заголовокПанели = $d.querySelector(":scope > h2");
+    if (заголовокПанели) $d.querySelector(".mt-drawer-head").prepend(заголовокПанели);
+    $d.hidden = false;
+    const ряд = $main.querySelector(".mt-title-row"), слой = $main.querySelector(".mt-layout");
+    $d.style.top = k === "tasks" && ряд && слой && getComputedStyle($d).position === "absolute"
+      ? `${Math.round(ряд.getBoundingClientRect().bottom - слой.getBoundingClientRect().top + 8)}px` : "";
+    if (k === "materials") подключитьМатериалы(id, tab);
+    document.getElementById("mt-close").addEventListener("click", () => {
+      $d.hidden = true; $d.dataset.k = ""; _открытаяПанельВстречи = "";
+      кнопка?.setAttribute("aria-expanded", "false");
+    });
+    document.getElementById("mt-all-tasks")?.addEventListener("click", () => реестрПоВстрече(id, встреча.date));
+  };
+  document.querySelectorAll(".mt-btn[data-drawer]").forEach(b => b.addEventListener("click", () => открыть(b.dataset.drawer, b)));
+  // «⋯» — одно меню со встречей (Б4): те же пункты, что в реестре и подготовке.
+  document.getElementById("meeting-more")?.addEventListener("click", () => менюВстречи(document.getElementById("meeting-more"), встреча,
+    { все: встречи, перерисовать: () => renderMeetingReader(id, tab) }));
+  const наEsc = ev => {
+    if (ev.key !== "Escape") return;
+    if (!document.getElementById("mt-drawer")) { document.removeEventListener("keydown", наEsc); return; }
+    $d.hidden = true; $d.dataset.k = ""; _открытаяПанельВстречи = "";
+  };
+  if (renderMeetingReader._наEsc) document.removeEventListener("keydown", renderMeetingReader._наEsc);
+  renderMeetingReader._наEsc = наEsc;
+  document.addEventListener("keydown", наEsc);
+  if (готовит) путьТочками(id);
+  if (админ && hasMin) загрузитьПроверкуПослеСохранения(id, { blockId: "minutes-block", canEdit: false });
+  полотноПодключитьПереключатель($main, () => renderMeetingReader(id, tab));
+  if (режимПолотна === "edit" && документ) {
+    const перерисовать = () => renderMeetingReader(id, tab);
+    let заметка = null;
+    try { заметка = JSON.parse(sessionStorage.getItem("polotnoNote") || "null"); sessionStorage.removeItem("polotnoNote"); }
+    catch (e) { заметка = null; }
+    if (заметка && заметка.base !== основаПолотна) заметка = null;
+    await полотноВключить(document.getElementById("mt-doc-text"), { base: основаПолотна,
+      md: документ.content_md, перерисовать, встреча: id, заметка, после: спрятатьПервуюСтроку });
+  }
+  // Ход сборки, начатой раньше и пережившей переход: тот же экран показывает её и после возврата.
+  const видСборки = генерация.kind || (tab === "plan" ? "plan" : "minutes");
+  if (генерация.running || генерация.queued) {
+    const дляПротокола = видСборки !== "plan";
+    показатьХодСборки(id, { findingsId: дляПротокола ? "verify-findings-minutes" : "verify-findings-plan",
+      btnId: (дляПротокола ? "protocol" : "plan") === tab ? "reader-main-btn" : "__нет_кнопки__",
+      since: генерация.since, queued: генерация.queued && !генерация.running, lines: генерация.queue_lines });
+    начатьСлежениеЗаСборкой(id, () => renderMeetingReader(id, дляПротокола ? "protocol" : "plan"));
+  }
+  // Черновик — одна точка решения: баннер над документом; тот же шаг есть в карточке пути.
+  document.getElementById("reader-accept-draft")?.addEventListener("click", async () => {
+    if (!(await confirmDialog("Сохранить протокол как есть, с замечаниями проверки? Задачи и статусы из него применятся.", "Сохранить"))) return;
+    try {
+      await api(`/meetings/${id}/accept-draft`, { method: "POST" });
+      toast("Протокол сохранён с замечаниями");
+      renderMeetingReader(id, tab);
+    } catch (e) { toast(e.message, true); }
+  });
+  // Главная кнопка: одно подтверждение о платном вызове, с источниками и предупреждением о другой встрече того же дня
+  // (05.11.2026, находка 1). Второго окна нет — прежняя кнопка скрытой полосы не нажимается.
+  document.getElementById("reader-main-btn")?.addEventListener("click", async () => {
+    const другаяНаДату = встречи.find(x => x.id !== встреча.id && x.date === дата && x.status !== "cancelled");
+    if (tab === "protocol") {
+      if (hasMin && протокол.hand_edited) { toast(ПЕРЕСБОРКА_ЗАПРЕЩЕНА, true); return; }
+      const живые = (источники || []).filter(s => !s.removed_at);
+      if (!живые.length) {
+        toast("Собирать протокол не из чего: к встрече не приложены ни расшифровка, ни запись, ни заметки. Добавьте файл в «Материалах».", true);
+        return;
+      }
+      const имена = живые.map(s => s.original_filename || "вставленный текст").join("\n  • ");
+      const предупреждение = другаяНаДату
+        ? `\n\nНа эту дату есть ещё встреча ${fmtRuDate(другаяНаДату.date)}${cleanLabel(другаяНаДату.label) ? ` «${cleanLabel(другаяНаДату.label)}»` : ""} — записи другой встречи того же дня по содержанию не отличить. Проверьте источники.`
+        : "\n\nПроверьте, что это записи именно этой встречи.";
+      const вопрос = `${подписьПротокола} — встреча ${fmtRuDate(встреча.date)}?\n  • ${имена}${предупреждение}\n\nЭто платный вызов модели, 1–5 минут.`;
+      if (!(await confirmDialog(вопрос, "Собрать"))) return;
+      runMeetingGeneration({ id, btnId: "reader-main-btn",
+        endpoint: `/meetings/${id}/prepare-minutes?confirm=1${hasMin ? "&rebuild=true" : ""}`,
+        findingsId: "verify-findings-minutes", idleLabel: подписьПротокола, okToast: "Протокол сохранён",
+        partialToast: `Протокол сохранён, но Дорожная карта/Сводка не обновились — ${conflictsRef()}`,
+        rerender: () => renderMeetingReader(id, "protocol") });
+    } else {
+      const имена = (материалы || []).map(m => m.original_filename).filter(Boolean).join("\n  • ");
+      const предупреждение = другаяНаДату
+        ? `\n\nНа эту дату есть ещё встреча ${fmtRuDate(другаяНаДату.date)}${cleanLabel(другаяНаДату.label) ? ` «${cleanLabel(другаяНаДату.label)}»` : ""} — её материалы сюда не попадут.`
+        : "";
+      const вопрос = `${подписьПлана} — встреча ${fmtRuDate(встреча.date)}?${имена ? `\n  • ${имена}` : ""}${предупреждение}\n\nЭто платный вызов модели, 1–5 минут. План сохраняется сразу, прежняя версия не удаляется — остаётся в базе.${hasPlan && план.hand_edited ? ПРЕДУПРЕЖДЕНИЕ_РУЧНЫХ_ПРАВОК : ""}`;
+      if (!(await confirmDialog(вопрос, "Собрать"))) return;
+      runMeetingGeneration({ id, btnId: "reader-main-btn", endpoint: `/meetings/${id}/prepare-plan?confirm=1`,
+        findingsId: "verify-findings-plan", idleLabel: подписьПлана, okToast: "План сохранён",
+        partialToast: `План сохранён, но Дорожная карта/Сводка не обновились — ${conflictsRef()}`,
+        rerender: () => renderMeetingReader(id, "plan") });
+    }
+  });
+  document.getElementById("reader-plan-newer")?.addEventListener("click", () => {
+    if (document.getElementById("reader-main-btn")?.disabled) { toast("Сейчас идёт сборка — новые материалы войдут в следующую; переформировать можно после неё"); return; }
+    document.getElementById("reader-main-btn")?.click();
+  });
+  // Панель, открытая до перерисовки (например, «Материалы» после загрузки), остаётся открытой.
+  if (_открытаяПанельВстречи) {
+    const b = document.querySelector(`.mt-btn[data-drawer="${_открытаяПанельВстречи}"]`);
+    if (b) открыть(_открытаяПанельВстречи, b);
+  }
+}
+
+async function renderMeetingReaderLegacy(id) {
   const откуда = new URLSearchParams(location.hash.split("?")[1] || "").get("from");
   const [встреча, протокол, встречи, задачи] = await Promise.all([
     // задачи своей встречи, а не весь реестр (скорость страниц, 18.10.2026)
@@ -266,12 +634,14 @@ async function renderMeetingReader(id) {
 // поверх документа (документ не сдвигается). Карточка — вне строки инструментов: у строки своя прокрутка вбок, и карточку
 // внутри неё обрезало бы. Закрывается Esc, щелчком мимо и повторным щелчком; при смене экрана снимается.
 async function путьТочками(id) {
-  if (!isAdmin()) return;
+  // Путь — всем, кто готовит встречу (05.11.2026, Б1): на одной странице его видят и участники; сервер отдаёт /path
+  // вошедшему. Метка состояния в строке остаётся только администратору, поэтому путь вставляем и без неё.
+  if (!canPrepare()) return;
   let p;
   try { p = await api(`/meetings/${id}/path`); } catch (e) { return; }
   const $bar = $main.querySelector(".mt-bar");
   const $state = $bar?.querySelector(".mt-state");
-  if (!$state || $bar.querySelector(".mt-path")) return;
+  if (!$bar || $bar.querySelector(".mt-path")) return;
   const сбой = p.steps.find(ш => ш.state === "сбой");
   const текущий = p.steps.find(ш => ш.k === p.current);
   const подпись = (сбой || текущий || p.steps[p.steps.length - 1]).title;
@@ -280,8 +650,10 @@ async function путьТочками(id) {
     const вид = ш.state === "сбой" ? "fail" : пропущен ? "skip" : ш.state === "готово" ? "done" : ш.k === p.current ? "now" : "todo";
     return `<span class="mp-dot mp-${вид}"></span>`;
   }).join("");
-  $state.insertAdjacentHTML("afterend", `<button type="button" class="mt-path${сбой ? " mt-path-fail" : ""}" aria-expanded="false"
-    aria-haspopup="dialog" aria-label="Путь встречи: ${esc(подпись)}"><span class="mp-line" aria-hidden="true">${точки}</span><span class="mp-label">${esc(подпись)}</span></button>`);
+  const путьHtmlКнопки = `<button type="button" class="mt-path${сбой ? " mt-path-fail" : ""}" aria-expanded="false"
+    aria-haspopup="dialog" aria-label="Путь встречи: ${esc(подпись)}"><span class="mp-line" aria-hidden="true">${точки}</span><span class="mp-label">${esc(подпись)}</span></button>`;
+  if ($state) $state.insertAdjacentHTML("afterend", путьHtmlКнопки);
+  else $bar.insertAdjacentHTML("beforeend", путьHtmlКнопки);
   const $btn = $bar.querySelector(".mt-path");
   let $card = null;
   const поставить = () => {
@@ -331,8 +703,9 @@ async function путьТочками(id) {
 // подготовка встречи (прежние экраны: сборка, приёмка, источники, точечная правка).
 routes.meetings = (rest) => {
   if (!rest || !rest[0]) return renderProtocols();
-  if (rest[1] === "protocol") return _экранВстреч(rest);
-  if (rest[1] === "planprep") return _экранВстреч([rest[0]]);
+  // Прежние адреса открывают ту же одну страницу нужной вкладкой (пакет Б, Б1).
+  if (rest[1] === "protocol") return renderMeetingReader(rest[0], "protocol");
+  if (rest[1] === "planprep") return renderMeetingReader(rest[0], "plan");
   return renderMeetingReader(rest[0]);
 };
 

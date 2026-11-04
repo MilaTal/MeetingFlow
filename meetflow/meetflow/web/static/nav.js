@@ -97,12 +97,11 @@ async function renderProtocols() {
     return `<li><div class="proto-row" data-href="#meetings/${m.id}">
         <span class="proto-month">${esc(месяцЯчейка)}</span>
         <a class="proto-date" href="#meetings/${m.id}">${esc(fmtRuDate(m.date))}</a>
-        <span class="proto-acts"><a href="#meetings/${m.id}/protocol">Протокол</a><a href="#meetings/${m.id}">Встреча</a></span>
         ${название ? `<span class="proto-label">${esc(название)}</span>` : ""}
         ${(!выбранныйПроект() && m.project_label) || m.subproject ? `<span class="proto-label"${m.project_how ? ` title="${esc(m.project_how)}"` : ""}>${esc(выбранныйПроект() ? m.subproject : m.project_label)}</span>` : ""}
         <span class="proto-state${с.акцент ? " proto-state-acc" : ""}">${НАВ_ЗНАКИ[с.знак] || ""}${esc(с.текст)}</span>
         ${m.предложена_пересборка && isAdmin() ? `<a class="proto-state proto-state-acc" href="#razbor" title="Пришёл источник, добавляющий новое. Протокол правили вручную, встреча старше пяти рабочих дней или автопересборок уже две — сами не пересобираем. Решение — в «Разборе»">есть новые материалы — пересобрать?</a>` : ""}
-        <span class="proto-tasks">задач ${m.tasks_count || 0}${isAdmin() ? `<button type="button" class="pl-more proto-more" data-mid="${m.id}" aria-label="Действия со встречей ${esc(fmtRuDate(m.date))}" aria-haspopup="menu"${m.project_how ? ` title="${esc(m.project_how)}"` : ""}>…</button>` : ""}</span></div></li>`;
+        <span class="proto-tasks">задач ${m.tasks_count || 0}${isAdmin() ? `<span class="reg-menu-wrap"><button type="button" class="pl-more proto-more" data-mid="${m.id}" aria-label="Действия со встречей ${esc(fmtRuDate(m.date))}" aria-haspopup="menu"${m.project_how ? ` title="${esc(m.project_how)}"` : ""}>…</button></span>` : ""}</span></div></li>`;
   };
   const список = (строки, ключ) => { месяцПрежний = ""; return `<div class="card reg-card feed-list"><ul class="proto-feed" data-list="${ключ}">${строки.map(строка).join("")}</ul></div>`; };
   const заСрок = НЕДЕЛЬ_ДО_АРХИВА === 1 ? "за последнюю неделю" : `за последние ${НЕДЕЛЬ_ДО_АРХИВА} ${недельВин(НЕДЕЛЬ_ДО_АРХИВА)}`;
@@ -121,7 +120,7 @@ async function renderProtocols() {
   }));
   $l.querySelectorAll(".proto-more").forEach(b => b.addEventListener("click", (e) => {
     e.stopPropagation();
-    менюВстречи(b, встречи.find(m => m.id === Number(b.dataset.mid)));
+    менюВстречи(b, встречи.find(m => m.id === Number(b.dataset.mid)), { все: встречи, перерисовать: renderProtocols });
   }));
 }
 
@@ -129,48 +128,113 @@ async function renderProtocols() {
 // встречи», удалить. Перенос — вместе с задачами, протокол пересобирается в новом проекте из готовой расшифровки
 // (запись повторно не распознаётся). Удаление встречи с задачами снимает их с причиной «встреча удалена»; сразу после
 // удаления — «Отменить» в уведомлении. Администратору; сервер проверяет права сам.
-function менюВстречи($кнопка, m) {
+// Одно меню «⋯» со встречей — одно и то же в строке реестра, в таблице подготовки и на странице встречи (пакет Б, Б4,
+// 05.11.2026): переименовать, изменить дату, переместить в проект, подпроект, кто вёл, свести с другой (только у дубля),
+// удалить. Пункты показываются по роли и состоянию; сервер проверяет права сам.
+// `опции.все` — список встреч проекта (для поиска дубля на дату и выбора, с кем свести), `опции.перерисовать` — чем
+// обновить экран после действия (реестр, подготовка или страница встречи).
+function менюВстречи($кнопка, m, опции = {}) {
   document.querySelectorAll(".pl-menu").forEach(x => x.remove());
-  if (!m) return;
+  if (!m || !isAdmin()) return;
+  const все = опции.все || [];
+  const перерисовать = опции.перерисовать || renderProtocols;
+  const отменена = m.status === "cancelled";
+  const авто = x => x.label === "дата ориентировочная";
+  const отдельная = x => !авто(x) && (!!cleanLabel(x.label) || !!x.second_same_day);
+  const живыеНаДату = все.filter(x => x.date === m.date && x.status !== "cancelled");
+  const дубль = живыеНаДату.length > 1 && !отдельная(m);
+  const пункты = [];
+  пункты.push('<button type="button" role="menuitem" data-act="rename">Переименовать</button>');
+  // Дату меняют, только пока у встречи нет протокола: сервер отказывает, если уже есть протокол или источники.
+  if (!m.has_minutes && !отменена)
+    пункты.push(`<button type="button" role="menuitem" data-edit-date="${m.id}" data-date="${esc(String(m.date).slice(0, 10))}">Изменить дату</button>`);
+  пункты.push('<button type="button" role="menuitem" data-act="move">Переместить в проект…</button>');
+  if (!отменена) пункты.push('<button type="button" role="menuitem" data-act="subproject">Подпроект…</button>');
+  пункты.push('<button type="button" role="menuitem" data-act="leader">Кто вёл</button>');
+  if (дубль) пункты.push('<button type="button" role="menuitem" data-act="merge">Свести с другой…</button>');
+  if (!отменена) пункты.push(`<button type="button" role="menuitem" data-delete-meeting="${m.id}" data-date="${esc(String(m.date).slice(0, 10))}">Удалить</button>`);
   const $m = document.createElement("div");
   $m.className = "pl-menu reg-menu"; $m.setAttribute("role", "menu");
-  $m.innerHTML = `<button type="button" role="menuitem" data-act="rename">Переименовать</button>
-    <button type="button" role="menuitem" data-act="move">Переместить в проект…</button>
-    <button type="button" role="menuitem" data-act="delete">Удалить</button>`;
+  $m.innerHTML = пункты.join("");
   $кнопка.parentElement.appendChild($m);
   const закрыть = (e) => { if (!e || !$m.contains(e.target)) { $m.remove(); document.removeEventListener("click", закрыть); } };
   setTimeout(() => document.addEventListener("click", закрыть), 0);
-  $m.querySelector('[data-act="rename"]').addEventListener("click", () => {
+  $m.querySelector('[data-act="rename"]')?.addEventListener("click", () => {
     закрыть();
     openModal("Переименовать встречу", `<label class="field-label" for="mt-label">Название встречи ${esc(fmtRuDate(m.date))}</label>
       <input id="mt-label" maxlength="200" value="${esc(cleanLabel(m.label) || "")}" placeholder="без названия — по дате">`,
     async (ov) => {
       await api(`/meetings/${m.id}/label`, { method: "PATCH", json: { label: ov.querySelector("#mt-label").value } });
-      toast("Встреча переименована"); renderProtocols();
+      toast("Встреча переименована"); перерисовать();
     });
   });
-  $m.querySelector('[data-act="move"]').addEventListener("click", () => { закрыть(); перенестиВстречу(m); });
-  $m.querySelector('[data-act="delete"]').addEventListener("click", async () => {
-    закрыть();
-    let ch;
-    try { ch = await api(`/meetings/${m.id}/delete-check`); } catch (err) { toast(err.message, true); return; }
-    const текст = ch.can_delete ? `Удалить встречу ${fmtRuDate(m.date)}? В ней ничего нет.` : ch.with_tasks_text;
-    if (!(await confirmDialog(текст, "Удалить"))) return;
-    try {
-      await api(`/meetings/${m.id}${ch.can_delete ? "" : "?with_tasks=true"}`, { method: "DELETE" });
-      await загрузитьПроекты();          // число встреч у проекта в блоке «Проекты» (отчёт ЛМ 83714c5, 29.10.2026)
-      renderProtocols();
-      if (!ch.can_delete) уведомлениеСОтменой(`Встреча ${fmtRuDate(m.date)} удалена`, async () => {
-        await api(`/meetings/${m.id}/restore`, { method: "POST" });
-        await загрузитьПроекты();
-        toast("Удаление отменено"); renderProtocols();
-      });
-      else toast("Встреча удалена");
-    } catch (err) { toast(err.message, true); }
+  $m.querySelector('[data-act="move"]')?.addEventListener("click", () => { закрыть(); перенестиВстречу(m, перерисовать); });
+  $m.querySelector('[data-act="subproject"]')?.addEventListener("click", () => { закрыть(); подпроектВстречи(m, перерисовать); });
+  $m.querySelector('[data-act="leader"]')?.addEventListener("click", () => { закрыть(); ктоВёлВстречи(m, перерисовать); });
+  $m.querySelector('[data-act="merge"]')?.addEventListener("click", () => { закрыть(); свестиВстречу(m, живыеНаДату, перерисовать); });
+  // «Изменить дату» и «Удалить» живут общими обработчиками (data-edit-date / data-delete-meeting, app.js) — меню только
+  // даёт им место; старое отдельное действие не дублируется.
+}
+
+// Подпроект встречи (был выпадающим списком в панели «Ещё»): администратор относит встречу к подпроекту её проекта.
+async function подпроектВстречи(m, перерисовать) {
+  let сп;
+  try { сп = await api(`/meetings/${m.id}/subprojects`); } catch (e) { toast(e.message, true); return; }
+  if (!(сп.items || []).length) {
+    toast(`У проекта «${сп.project}» нет подпроектов — заведите их в «Параметры системы → Проекты»`, true);
+    return;
+  }
+  const ov = openModal("Подпроект встречи", `
+    <div class="field"><label for="mt-subproject-select">Подпроект</label>
+      <select id="mt-subproject-select"><option value="">весь проект ${esc(сп.project)}</option>${сп.items.map(x =>
+        `<option value="${esc(x.name)}"${x.name === сп.current ? " selected" : ""}>${esc(x.name)}</option>`).join("")}</select></div>
+    <div class="page-sub">Задачи, уже поставленные на встрече, остаются где были; новые — в подпроект встречи.</div>`,
+  async (o) => {
+    const r = await api(`/meetings/${m.id}/subproject`, { method: "PATCH", json: { subproject: o.querySelector("#mt-subproject-select").value } });
+    toast(`Встреча отнесена: ${r.project_label}`); перерисовать();
   });
+  ov.querySelector("#mt-subproject-select")?.focus();
+}
+
+// «Кто вёл» (был выбором в шапке): администратор указывает ведущего вручную или возвращает определение по записи.
+function ктоВёлВстречи(m, перерисовать) {
+  const люди = (typeof allUsers !== "undefined" ? allUsers : []).filter(u => u.is_active && u.is_confirmed !== false);
+  const ov = openModal("Кто вёл встречу", `
+    <div class="field"><label for="mt-leader-select">Ведущий</label>
+      <select id="mt-leader-select"><option value="">определить по записи</option>${люди.map(u =>
+        `<option value="${u.id}"${u.id === m.leader_user_id ? " selected" : ""}>${esc(u.full_name)}</option>`).join("")}</select></div>
+    <div class="page-sub">Ручной выбор сильнее определения по записи; на задачи он не влияет.</div>`,
+  async (o) => {
+    const v = o.querySelector("#mt-leader-select").value;
+    await api(`/meetings/${m.id}/leader`, { method: "PATCH", json: { user_id: v ? Number(v) : null } });
+    toast(v ? "Ведущий указан вручную" : "Ведущий снова определяется по записи"); перерисовать();
+  });
+  ov.querySelector("#mt-leader-select")?.focus();
+}
+
+// «Свести с другой» — только у дубля на дату: материалы переносятся в выбранную встречу, опустевшая удаляется или
+// отменяется (если у неё есть план). Ошибочную сводку возвращают «Вернуть на новую дату» у получателя.
+function свестиВстречу(m, живыеНаДату, перерисовать) {
+  const другие = живыеНаДату.filter(x => x.id !== m.id);
+  if (!другие.length) { toast("На эту дату других встреч нет", true); return; }
+  const ov = openModal("Свести с другой встречей", `
+    <div class="field"><label for="mt-merge-to">Перенести материалы из встречи ${esc(fmtRuDate(m.date))} №${m.id} в:</label>
+      <select id="mt-merge-to">${другие.map(x => `<option value="${x.id}">${esc(fmtRuDate(x.date))} №${x.id}${cleanLabel(x.label) ? ` — ${esc(cleanLabel(x.label))}` : ""}${x.has_plan ? " · план собран" : ""}</option>`).join("")}</select></div>
+    <div class="page-sub">Опустевшая встреча удалится; если у неё собран план — отменится, план сохранится. Вернуть материалы можно будет на новую дату.</div>`,
+  async (o) => {
+    const to = Number(o.querySelector("#mt-merge-to").value);
+    const итог = await api(`/meetings/${m.id}/merge`, { method: "POST", json: { to } });
+    const одинаковых = итог.skipped_same ? `, одинаковых не задвоено: ${итог.skipped_same}` : "";
+    toast(итог.deleted ? `Встреча №${m.id} сведена в №${to} и удалена. Перенесено материалов: ${итог.moved}${одинаковых}`
+      : итог.cancelled ? `Встреча №${m.id} сведена в №${to} и отменена — план сохранён. Перенесено материалов: ${итог.moved}${одинаковых}`
+      : `Материалы перенесены в №${to}: ${итог.moved}. ${итог.detail || ""}`, !итог.deleted && !итог.cancelled);
+    перерисовать();
+  });
+  ov.querySelector("#mt-merge-to")?.focus();
 }
 // Окно выбора проекта: «Общие встречи» первой строкой, поиск по названию — как «Move chat» у Claude и «Move» у Fireflies
-function перенестиВстречу(m) {
+function перенестиВстречу(m, перерисовать) {
+  const после = перерисовать || renderProtocols;
   const куда = _проекты.filter(п => п.id !== m.project_id);
   const ov = openModal(`Переместить встречу ${fmtRuDate(m.date)}`, `
     <input id="mv-find" class="pl-input" placeholder="Найти проект" autocomplete="off" aria-label="Найти проект">
@@ -186,7 +250,7 @@ function перенестиВстречу(m) {
     // число встреч у проектов в блоке «Проекты» после переноса — иначе окно удаления проекта до Ctrl+F5 писало
     // «Встреч в нём нет» (отчёт ЛМ 83714c5, шаг 4, 29.10.2026)
     await загрузитьПроекты();
-    renderProtocols();
+    после();
   });
   ov.querySelector("#mv-find").addEventListener("input", (e) => {
     const q = e.target.value.trim().toLowerCase().replace(/ё/g, "е");
@@ -313,6 +377,9 @@ async function renderPrep() {
   const $b = document.getElementById("prep-body");
   if (!$b) return;
   const сегодня = датаISO(new Date());
+  // «Подготовка встречи» — только будущее и сегодня (пакет Б, Б3, 05.11.2026): прошлое и архив живут в «Реестре встреч».
+  // Сравниваем даты строкой, как сегодняISO(): сегодняшняя встреча до 03:00 не должна считаться прошедшей.
+  const встречиПодготовки = встречи.filter(m => String(m.date).slice(0, 10) >= сегодня);
   const авто = m => m.label === "дата ориентировочная";
   // Д13 (проходы 1 и 3, 21.10.2026): вторая встреча в тот же день заводится только галочкой — она не дубль, и «Свести в одну»
   // ей не предлагается. Дубль — две и больше встреч на дату без своего названия (№26 «дата ориентировочная» и №27 без
@@ -328,9 +395,7 @@ async function renderPrep() {
     const безНазвания = (дата) => (наДату[дата] || []).filter(m => !отдельная(m));
     return { живые, наДату, безНазвания, дубль: (дата) => безНазвания(дата).length > 1, ближайшая: ближайшаяВстреча(все, сегодня) };
   };
-  const { живые, наДату, безНазвания, дубль: дубльДаты, ближайшая } = разобрать(встречи);
-  // Какую из дублей на дату оставить: с планом (меньший номер), иначе меньший номер — как у папки-приёмника (О10)
-  const остаётся = (дата) => { const те = безНазвания(дата).slice().sort((a, b) => a.id - b.id); return те.find(m => m.has_plan) || те[0]; };
+  const { живые, наДату, безНазвания, дубль: дубльДаты, ближайшая } = разобрать(встречиПодготовки);
   const предложено = предложеннаяДата(живые, сегодня);
   const карточкаHtml = (все) => {
     const р = разобрать(все), б = р.ближайшая, шаг = предложеннаяДата(р.живые, сегодня);
@@ -340,9 +405,9 @@ async function renderPrep() {
           <div class="prep-nearest-title">Ближайшая встреча: ${esc(fmtRuDate(б.date))}, ${esc(деньНедели(б.date))}${своёНазвание(б) ? ` — ${esc(cleanLabel(б.label))}` : ""}</div>
           <div class="prep-nearest-sub">${б.building ? "идёт сборка · " : ""}${б.has_plan ? `план собран ${esc(fmtRuDateTime(б.plan_generated_at))}` : "плана пока нет"}${б.materials_count ? ` · материалов ${б.materials_count}` : ""}${авто(б)
             ? ` · дата предложена системой${админ ? ` · <button type="button" class="link" id="prep-change-date" data-edit-date="${б.id}" data-date="${esc(б.date)}">изменить дату</button>` : ""}` : ""}${р.дубль(б.date)
-            ? ` · <span class="prep-mark prep-mark-acc">${админ ? "на эту дату две встречи — сведите их в одну в таблице ниже" : "на эту дату две встречи — свести их в одну может администратор"}</span>` : ""}</div>
+            ? ` · <span class="prep-mark prep-mark-acc">${админ ? "на эту дату две встречи — сведите их через «⋯» в таблице ниже" : "на эту дату две встречи — свести их в одну может администратор"}</span>` : ""}</div>
         </div>
-        <a class="btn btn-primary" id="prep-open-plan" href="#meetings/${б.id}/planprep">Открыть план встречи</a>
+        <a class="btn btn-primary" id="prep-open-plan" href="#meetings/${б.id}/planprep?from=prep">Открыть план встречи</a>
       </div>`
     : `<div class="card prep-nearest" id="prep-nearest">
         <div class="prep-nearest-text">
@@ -352,7 +417,7 @@ async function renderPrep() {
         <button type="button" class="btn-primary" id="prep-create" data-date="${шаг}">Создать встречу ${esc(fmtRuDate(шаг))}</button>
       </div>`;
   };
-  const карточка = карточкаHtml(встречи);
+  const карточка = карточкаHtml(встречиПодготовки);
   const форма = `<button type="button" class="link" id="prep-other-date" aria-expanded="false" aria-controls="prep-new-form">Другая дата…</button>
     <form class="card prep-new" id="prep-new-form" autocomplete="off" hidden>
       <input type="date" id="prep-new-date" aria-label="Дата встречи" min="2020-01-01" max="2099-12-31">
@@ -361,10 +426,8 @@ async function renderPrep() {
       <button type="submit" class="btn-primary btn-sm" id="prep-new-btn">Создать встречу</button>
       <div class="prep-date-warn" id="prep-date-warn" role="status" hidden></div>
     </form>`;
-  const рубеж = new Date(); рубеж.setDate(рубеж.getDate() - НЕДЕЛЬ_ДО_АРХИВА * 7);
-  const рубежISO = датаISO(рубеж);
-  const по_дате = встречи.slice().sort((a, b) => b.date.localeCompare(a.date) || b.id - a.id);
-  const свежие = по_дате.filter(m => m.date >= рубежISO), архив = по_дате.filter(m => m.date < рубежISO);
+  // Только будущее и сегодня (Б3). Прошлое и архив — в «Реестре встреч».
+  const по_дате = встречиПодготовки.slice().sort((a, b) => b.date.localeCompare(a.date) || b.id - a.id);
   const строка = m => {
     const отменена = m.status === "cancelled";
     const будущая = m.date > сегодня;
@@ -379,18 +442,15 @@ async function renderPrep() {
       дубль ? '<span class="prep-mark prep-mark-acc">две встречи на дату</span>' : двеНаДату ? '<span class="prep-mark">две встречи на дату</span>' : "",
       отменена ? '<span class="prep-mark">отменена</span>' : ""].join("");
     const план = отменена ? '<span class="prep-muted">—</span>'
-      : `<a href="#meetings/${m.id}/planprep">${m.has_plan ? `план собран ${esc(fmtRuDate(String(m.plan_generated_at || "").slice(0, 10)))}` : "сформировать план"}</a>`;
+      : `<a href="#meetings/${m.id}/planprep?from=prep">${m.has_plan ? `план собран ${esc(fmtRuDate(String(m.plan_generated_at || "").slice(0, 10)))}` : "сформировать план"}</a>`;
     const протокол = отменена ? '<span class="prep-muted">—</span>'
-      : m.has_minutes ? `<a href="#meetings/${m.id}/protocol">протокол готов</a>`
+      : m.has_minutes ? `<a href="#meetings/${m.id}/protocol?from=prep">протокол готов</a>`
       : будущая ? '<span class="prep-muted">встреча ещё не прошла</span>'
-      : `<a href="#meetings/${m.id}/protocol">${esc(m.состояние_протокола || "собрать протокол")}</a>`;
-    const оставить = дубль ? остаётся(m.date) : null;
-    // «Свести в одну» — администраторам (решение владелицы 21.10.2026; сервер — require_admin). «Вернуть» у отменённой
-    // (Д3, 21.10.2026) убрано 23.10.2026: отмены больше нет, ошибочная сводка возвращается «Вернуть на новую дату» у
-    // встречи-получателя (решение владелицы)
-    const действие = !админ || отменена ? ""
-      : дубль && оставить && оставить.id !== m.id
-        ? `<button type="button" class="btn-sm" data-merge="${m.id}" data-keep="${оставить.id}" data-has-plan="${m.has_plan ? 1 : ""}" title="Оставить №${оставить.id}, перенести материалы из №${m.id}, опустевшую №${m.id} ${m.has_plan ? "отменить (у неё собран план)" : "удалить"}">Свести в одну</button>` : "";
+      : `<a href="#meetings/${m.id}/protocol?from=prep">${esc(m.состояние_протокола || "собрать протокол")}</a>`;
+    // «Свести в одну» отдельной кнопкой убрана (Б4): у дубля — то же меню «⋯», что в строке реестра; «Свести с другой»
+    // появится в нём только у дубля.
+    const действие = !админ ? ""
+      : `<span class="reg-menu-wrap"><button type="button" class="pl-more prep-more" data-mid="${m.id}" aria-label="Действия со встречей ${esc(fmtRuDate(m.date))}" aria-haspopup="menu">…</button></span>`;
     // Д8 (проходы 1 и 3): отдельной колонки «Название» нет — название в ячейке даты, ячейка переносится; кнопки не уходят
     // за правый край при ширине до 1440 px
     return `<tr data-meeting-id="${m.id}" class="${[отменена ? "prep-cancelled" : "", ближняя ? "prep-nearest-row" : ""].filter(Boolean).join(" ")}">
@@ -402,13 +462,12 @@ async function renderPrep() {
       <thead><tr><th>Дата</th><th>План встречи</th><th>Протокол</th><th></th></tr></thead>
       <tbody>${строки.map(строка).join("")}</tbody></table></div></div>`;
   $b.innerHTML = `${карточка}${форма}
-    ${свежие.length ? `<h2 class="feed-section">Будущие и последние встречи <span class="cnt">${свежие.length}</span> <span class="feed-h-note">за последние ${НЕДЕЛЬ_ДО_АРХИВА} ${недельВин(НЕДЕЛЬ_ДО_АРХИВА)}</span></h2>${таблица(свежие)}` : ""}
-    ${архив.length ? `<details class="feed-archive"${свежие.length ? "" : " open"}><summary class="feed-section">Архив — встречи старше ${НЕДЕЛЬ_ДО_АРХИВА} ${недельРод(НЕДЕЛЬ_ДО_АРХИВА)} <span class="cnt">${архив.length}</span></summary>${таблица(архив)}</details>` : ""}
+    ${по_дате.length ? `<h2 class="feed-section">Будущие и сегодняшние встречи <span class="cnt">${по_дате.length}</span></h2>${таблица(по_дате)}` : ""}
     ${создатьПроектHtml()}`;
   подключитьСозданиеПроекта();                     // «Создать проект» — в конце страницы (решение владелицы 28.10.2026)
 
   // --- создание: одна точка, предупреждение до отправки, ключ повтора
-  const перейтиВПлан = (mid) => { location.hash = `#meetings/${mid}/planprep`; };
+  const перейтиВПлан = (mid) => { location.hash = `#meetings/${mid}/planprep?from=prep`; };
   const открытьЕё = async (занятая) => {
     // «Открыть её» на дату автоматической встречи снимает «дата ориентировочная» (О3): дату подтвердил человек
     if (занятая && занятая.auto) { try { await api(`/meetings/${занятая.id}/confirm-date`, { method: "POST" }); } catch (e) { /* открыть и так */ } }
@@ -446,7 +505,7 @@ async function renderPrep() {
   // перечитывается с сервера и называет встречу, занявшую дату. Кнопка карточки — через общий обработчик: карточка новая.
   const обновитьКарточку = async () => {
     try {
-      const свежие = await api("/meetings");
+      const свежие = (await api("/meetings")).filter(m => String(m.date).slice(0, 10) >= сегодня);
       document.getElementById("prep-nearest")?.replaceWith(Object.assign(document.createElement("div"), { innerHTML: карточкаHtml(свежие) }).firstElementChild);
     } catch (e) { /* без связи — карточка прежняя, предупреждение у формы уже есть */ }
   };
@@ -454,6 +513,11 @@ async function renderPrep() {
     const к = ev.target.closest("#prep-create");
     if (к) создать({ date: к.dataset.date, кнопка: к });
   });
+  // «⋯» у строки подготовки — то же меню, что в реестре и на странице встречи (Б4): у дубля в нём «Свести с другой».
+  $b.querySelectorAll(".prep-more").forEach(b => b.addEventListener("click", (e) => {
+    e.stopPropagation();
+    менюВстречи(b, встречи.find(m => m.id === Number(b.dataset.mid)), { все: встречи, перерисовать: renderPrep });
+  }));
   document.getElementById("prep-other-date").addEventListener("click", (ev) => {
     const форма = document.getElementById("prep-new-form");
     форма.hidden = !форма.hidden;
@@ -498,23 +562,7 @@ async function renderPrep() {
     создать({ date: $дата.value, label: $название.value.trim(), second_same_day: $вторая.checked, кнопка: $кнопка });
   });
 
-  // --- «Свести в одну» (О9; решение владелицы 23.10.2026): материалы переезжают, одинаковые не задваиваются, опустевшая
-  // встреча удаляется — отменённой больше не остаётся. Ошибочную сводку возвращают «Вернуть на новую дату» у получателя.
-  $b.querySelectorAll("[data-merge]").forEach(btn => btn.addEventListener("click", async () => {
-    const из = btn.dataset.merge, оставить = btn.dataset.keep;
-    // у опустевшей с планом встречи — отмена вместо удаления (решение владелицы 23.10.2026): план сохраняется
-    const судьба = btn.dataset.hasPlan ? "у неё собран план — она отменится, план сохранится, встреча уйдёт из списков" : "удалится";
-    if (!(await confirmDialog(`Свести встречу №${из} в №${оставить}? Материалы перенесутся в №${оставить}, опустевшая встреча №${из} ${судьба}. Вернуть материалы можно будет на новую дату.`, "Свести в одну"))) return;
-    btn.disabled = true;
-    try {
-      const итог = await api(`/meetings/${из}/merge`, { method: "POST", json: { to: Number(оставить) } });
-      const одинаковых = итог.skipped_same ? `, одинаковых не задвоено: ${итог.skipped_same}` : "";
-      toast(итог.deleted ? `Встреча №${из} сведена в №${оставить} и удалена. Перенесено материалов: ${итог.moved}${одинаковых}`
-        : итог.cancelled ? `Встреча №${из} сведена в №${оставить} и отменена — план сохранён. Перенесено материалов: ${итог.moved}${одинаковых}`
-        : `Материалы перенесены в №${оставить}: ${итог.moved}. ${итог.detail || ""}`, !итог.deleted && !итог.cancelled);
-      render();
-    } catch (e) { btn.disabled = false; toast(e.message, true); }
-  }));
+  // «Свести с другой» переехала в меню «⋯» строки (Б4) — отдельной кнопки «Свести в одну» здесь больше нет.
 }
 routes.prep = renderPrep;
 
@@ -624,8 +672,13 @@ routes.awaiting = () => { location.replace("#system/awaiting"); };
 // Пункт меню «Система» подсвечен на всех своих вкладках (зовёт render() в app.js)
 function навАктивный(маршрут) {
   if (СИСТЕМА_МАРШРУТЫ.has(маршрут)) return "system";
-  const [, , вид] = currentRouteParts();
-  if (маршрут === "meetings" && (вид === "protocol" || вид === "planprep")) return canPrepare() ? "prep" : "meetings";   // подготовка — у участника пункта нет
+  // Пакет Б (05.11.2026): страница встречи — это «Реестр встреч»; «Подготовка встречи» подсвечена только при from=prep.
+  // Раньше адреса /protocol и /planprep подсвечивали «Подготовку», и смена вкладки меняла подсветку.
+  const [, id] = currentRouteParts();
+  if (маршрут === "meetings" && id) {
+    const from = new URLSearchParams(location.hash.split("?")[1] || "").get("from");
+    return from === "prep" && canPrepare() ? "prep" : "meetings";
+  }
   return маршрут;
 }
 

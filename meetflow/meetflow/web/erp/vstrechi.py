@@ -27,7 +27,7 @@ AUTO_LABEL = "дата ориентировочная"
 ARCHIVE_CUTOFF_DAYS = 28
 MAX_MATERIALS = 20
 ЕСЛИ_НЕТ_МАТЕРИАЛОВ = ("Собирать протокол не из чего: к встрече не приложены ни расшифровка, ни запись, ни заметки. "
-                       "Добавьте файл в «Источниках» подготовки встречи — протокол соберётся сам.")
+                       "Добавьте файл в «Материалах» встречи.")
 ПЕРЕСБОРКА_ЗАПРЕЩЕНА = ("Протокол правил человек — моделью он не пересобирается: правки человека сохраняются. Текст "
                         "поправьте на полотне («Правка»).")
 MEDIA_EXT = (".mp4", ".mkv", ".avi", ".mov", ".webm", ".m4a", ".mp3", ".wav", ".ogg", ".flac")
@@ -180,7 +180,7 @@ def mount(r: APIRouter, ctx: Ctx) -> None:
         if srcs:
             lb = last_build(m["id"])
             if lb and lb.get("status") == "failed":
-                return "сборка протокола не удалась — соберите заново кнопкой «Создать протокол»"
+                return "сборка протокола не удалась — соберите заново кнопкой «Сформировать протокол»"
             if any(s.get("local_asr") for s in srcs):
                 return "расшифровка записи, сделанная системой — можно собирать"
             if any(s.get("kind") == "transcript" for s in srcs):
@@ -210,10 +210,14 @@ def mount(r: APIRouter, ctx: Ctx) -> None:
                "leader_source": m.get("leader_source") or ("запись" if m.get("leader") else None),
                "leader_note": m.get("leader_note"), "project_id": m.get("project_id")}
         if full:
+            from ...core.intake import автозапуск_включён
             out.update({"состояние_протокола": state_line(m), "tasks_count": tasks_count(m["id"]), "draft_pending": False,
                         "building": bool(b["running"]), "предложена_пересборка": False,
                         "has_plan": bool(m.get("plan_md")), "plan_generated_at": iso_dt(m.get("plan_built_at")),
-                        "materials_count": len(sources_of(m["id"], True))})
+                        "materials_count": len(sources_of(m["id"], True)),
+                        # автозапуск сборки после добавления материала (05.11.2026, находка 4): от него зависит,
+                        # обещать ли «протокол соберётся сам» на пустом экране
+                        "autorun": автозапуск_включён(store, m.get("project_id"))})
         # проект и подпроект встречи (справочник проектов, `projects.parent_id`): подпись «Проект – Подпроект»
         root_name, sub_name = ctx.project_names(m.get("project_id"))
         out.update(project_name=root_name, subproject=sub_name or None, project_label=ctx.project_label(m.get("project_id")),
@@ -580,7 +584,7 @@ def mount(r: APIRouter, ctx: Ctx) -> None:
     def autorun_maybe(m: dict) -> tuple[bool, str]:
         from ...core.intake import автозапуск_включён
         if not автозапуск_включён(store, m["project_id"]):
-            return False, "автозапуск выключен — протокол собирается кнопкой «Создать протокол»"
+            return False, "автозапуск выключен — протокол собирается кнопкой «Сформировать протокол»"
         if (m.get("date") or "") > today_iso():
             return False, "встреча ещё не прошла"
         if m.get("protocol_md"):
@@ -722,12 +726,20 @@ def mount(r: APIRouter, ctx: Ctx) -> None:
         return {"id": res.get("source_id"), "kind": res.get("kind"), "original_filename": name, "relevance_warnings": [],
                 "autorun": run_now, "autorun_note": why}
 
+    def без_решёток(md: str) -> str:
+        """Убирает разметку «#»/«##» при показе и выгрузке (05.11.2026, находка 7). Сохранённые документы не переписываются:
+        преобразование только на выходе. Строка «## Заголовок **Тема:** текст» разделяется на заголовок и абзац — иначе
+        заголовок склеивался с текстом в один абзац."""
+        text = re.sub(r"(?m)^[ \t]*#{1,6}[ \t]+(.+?)[ \t]+(?=\*\*[^*\n]+?\*\*)", r"\1\n\n", md)
+        text = re.sub(r"(?<=\S)[ \t]+#{1,6}[ \t]+(?=\S)", "\n\n", text)
+        return re.sub(r"(?m)^[ \t]*#{1,6}[ \t]+", "", text)
+
     def docx_response(md: str, stem: str) -> Response:
         from ...connectors.export import DocxOutput
         from ...core.draft_checks import clean_document
         out = DocxOutput(ctx.theme.get("design.document_font", "Times New Roman"),
                          int(ctx.theme.get("design.document_size_pt", 12)))
-        body = out.render(clean_document(md)[0], "protocol")
+        body = out.render(clean_document(без_решёток(md))[0], "protocol")
         return Response(body, media_type=DOCX, headers={"Content-Disposition": "attachment; filename*=UTF-8''"
                                                         + quote(re.sub(r'[\\/:*?"<>|]', " ", stem)[:120] + ".docx")})
 
@@ -869,8 +881,9 @@ def mount(r: APIRouter, ctx: Ctx) -> None:
         ctx.meeting_or_404(mid)
         b = building(mid)
         lines = queue_lines(mid)
-        return {"running": b["running"], "since": b["since"], "queued": b["queued"], "place": b["place"],
-                "queue_lines": lines, "queue": {"строки": lines}, "pending": {}, "waiting_model": None}
+        return {"running": b["running"], "since": iso_dt(b["since"]), "queued": b["queued"], "place": b["place"],
+                "kind": b.get("kind"), "queue_lines": lines, "queue": {"строки": lines}, "pending": {},
+                "waiting_model": None}
 
     @r.get("/meetings/{mid}/path")
     def path(mid: int, request: Request):
@@ -879,6 +892,20 @@ def mount(r: APIRouter, ctx: Ctx) -> None:
         srcs = sources_of(mid, False)
 
         def step(k, title, at=None, detail="", state="ждёт", failure=None):
+            # Текущий несделанный шаг называем будущим действием, а не прошедшим временем (05.11.2026, находка 6):
+            # «Черновик собран» без сборки читался как сделанный шаг. Готовые шаги не переименовываем.
+            if state != "готово":
+                будущее = {"draft": "Собрать черновик", "transcript": "Получить расшифровку",
+                           "decision": "Принять решение", "saved": "Сохранить протокол",
+                           "next_plan": "Собрать план следующей"}
+                if k == "draft" and state == "идёт":
+                    title = "Собирается черновик"
+                elif k == "transcript" and state == "идёт":
+                    title = "Распознаётся запись"
+                elif k == "next_plan" and state == "идёт":
+                    title = "Собирается план следующей"
+                elif k in будущее:
+                    title = будущее[k]
             return {"k": k, "title": title, "at": iso_dt(at), "detail": detail, "state": state, "failure": failure}
         steps = []
         rec = [s for s in srcs if s.get("local_asr")]

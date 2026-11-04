@@ -53,10 +53,25 @@ def to_date(value: Any) -> date | None:
 
 
 def iso_dt(value: Any) -> str | None:
-    """Время в ответе — ISO без зоны, как у ERP (фронт сам приводит к дд.мм.гггг чч:мм)."""
+    """Время в ответе — ISO с настоящей зоной машины (05.11.2026, проход администратора, находка 2).
+
+    В базе время хранится местным без зоны (`core/store.py:now`). Прежде отдавали его как есть, фронт дописывал «Z» и
+    переводил в Москву — на стенде выходило «03:29» вместо «00:29». Здесь снимаем двусмысленность один раз: значение без
+    зоны считается местным и получает смещение машины. Старые записи не переписываются — зона добавляется при чтении.
+    Значение, уже пришедшее с зоной (`Z` или `+03:00`), не трогаем.
+    """
     if not value:
         return None
-    return str(value).replace(" ", "T")[:19]
+    s = str(value).strip().replace(" ", "T")
+    if re.search(r"(?:Z|[+-]\d{2}:?\d{2})$", s):
+        return s
+    try:
+        dt = datetime.fromisoformat(s)
+    except ValueError:
+        return s[:19]
+    if dt.tzinfo is None:
+        dt = dt.astimezone()          # наивное время — местное время машины
+    return dt.isoformat(timespec="seconds")
 
 
 def loads(value: Any, default: Any) -> Any:

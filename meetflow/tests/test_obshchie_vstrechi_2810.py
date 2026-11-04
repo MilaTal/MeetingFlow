@@ -203,9 +203,12 @@ def test_число_встреч_проекта_свежее_после_пере
     берёт число встреч с сервера."""
     nav = (STATIC / "nav.js").read_text(encoding="utf-8")
     app = (STATIC / "app.js").read_text(encoding="utf-8")
-    перенос = nav[nav.index("function перенестиВстречу(m)"):nav.index("function уведомлениеСОтменой")]
-    assert перенос.index("await загрузитьПроекты();") < перенос.index("renderProtocols();", перенос.index("move-project"))
-    удаление = nav[nav.index("function менюВстречи("):nav.index("function перенестиВстречу(m)")]
-    assert удаление.count("await загрузитьПроекты();") == 2
-    окно = app[app.index("$m.querySelector('[data-act=\"delete\"]')"):app.index("function нуженПроект(")]
-    assert окно.index("await загрузитьПроекты();") < окно.index("Встреч в нём")
+    # перевёрнуто 05.11.2026 (пакет Б, Б4): у переноса появился общий колбэк перерисовки; число встреч по-прежнему
+    # перечитывается до показа нового экрана
+    перенос = nav[nav.index("function перенестиВстречу(m, перерисовать)"):nav.index("function уведомлениеСОтменой")]
+    assert перенос.index("await загрузитьПроекты();") < перенос.index("после();")
+    # удаление встречи переехало в общий обработчик меню «⋯» (app.js): с задачами — with_tasks и отмена, проекты перечитываются
+    удаление = app[app.index("document.addEventListener(\"click\", async (e) => {\n  const btn = e.target.closest(\"[data-delete-meeting]\")"):
+                     app.index("// «Вернуть на новую дату»")]
+    assert "with_tasks=true" in удаление and "await загрузитьПроекты();" in удаление
+    assert "уведомлениеСОтменой(" in удаление

@@ -27,8 +27,7 @@ function путьHtml(p) {
   const сегодня = `${д.getFullYear()}-${String(д.getMonth() + 1).padStart(2, "0")}-${String(д.getDate()).padStart(2, "0")}`;
   if (String(p.date).slice(0, 10) > сегодня && !p.steps.some(ш => ш.k === "saved" && ш.state === "готово")) {
     return `<button type="button" class="path-head" aria-expanded="${_путьОткрыт}">Встреча ${esc(fmtRuDate(p.date))}<span class="path-now"> · ещё не прошла</span></button>
-      <div class="path path-future reg-sub">Встреча ещё не прошла. После неё — протокол.</div>
-      <div class="path-links"><a href="#meetings/${p.meeting_id}">страница встречи</a> · <a href="#meetings/${p.meeting_id}/planprep">план встречи</a></div>`;
+      <div class="path path-future reg-sub">Встреча ещё не прошла. После неё — протокол.</div>`;
   }
   const шаги = p.steps.map(ш => {
     const текущий = ш.k === p.current;
@@ -54,8 +53,7 @@ function путьHtml(p) {
   // На узком экране путь свёрнут в одну строку с текущим шагом — раскрывается нажатием (снимок на 400 px: путь занимал весь
   // первый экран, документ начинался ниже). На широком — всегда раскрыт, строка-кнопка выглядит заголовком.
   const сейчас = p.steps.find(ш => ш.k === p.current);
-  return `<button type="button" class="path-head" aria-expanded="${_путьОткрыт}">Путь встречи ${esc(fmtRuDate(p.date))}${сейчас ? `<span class="path-now"> · ${esc(сейчас.title)}${сейчас.state && сейчас.state !== "ждёт" ? `: ${esc(сейчас.state)}` : ""}</span>` : ""}</button><ol class="path">${шаги}</ol>
-    <div class="path-links"><a href="#meetings/${p.meeting_id}">страница встречи</a> · <a href="#meetings/${p.meeting_id}/protocol">протокол</a> · <a href="#meetings/${p.meeting_id}/planprep">план встречи</a></div>`;
+  return `<button type="button" class="path-head" aria-expanded="${_путьОткрыт}">Путь встречи ${esc(fmtRuDate(p.date))}${сейчас ? `<span class="path-now"> · ${esc(сейчас.title)}${сейчас.state && сейчас.state !== "ждёт" ? `: ${esc(сейчас.state)}` : ""}</span>` : ""}</button><ol class="path">${шаги}</ol>`;
 }
 
 async function показатьПуть(id) {
@@ -101,8 +99,10 @@ function убратьПуть() {
 }
 
 function этоПодготовка() {
-  const [r, id, вид] = currentRouteParts();
-  return r === "meetings" && id && (вид === "protocol" || вид === "planprep") ? id : null;
+  // С 05.11.2026 (пакет Б) экран встречи рисуется напрямую одной страницей (`renderMeetingReader`): путь — точками в
+  // строке над заголовком, «Материалы» — правой панелью. Прежние переносы узлов наблюдателем и левая колонка пути больше
+  // не нужны; `следитьЗаПутём` видит null и убирает колонку.
+  return null;
 }
 
 async function следитьЗаПутём() {

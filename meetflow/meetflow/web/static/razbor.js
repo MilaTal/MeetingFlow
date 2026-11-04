@@ -38,7 +38,9 @@ function срокСтрокиРазбора(с) {
   if (!с.expires_at) return '<span class="page-sub">без срока</span>';
   const дата = fmtRuDate(String(с.expires_at).slice(0, 10));
   // срок уже вышел — строка уйдёт при ближайшем почасовом проходе чистки; меньше суток — «истечёт завтра»
-  if (new Date(с.expires_at + "Z").getTime() <= Date.now()) return `<span class="badge badge-warning" title="Срок ${esc(дата)} вышел — уйдёт по правилу своего вида при ближайшей чистке">срок вышел</span>`;
+  // Время приходит с настоящей зоной (05.11.2026, находка 2) — «Z» не дописываем; старые записи читаются как местные.
+  const срок = /[zZ]$|[+-]\d{2}:?\d{2}$/.test(String(с.expires_at)) ? String(с.expires_at) : String(с.expires_at).replace(" ", "T");
+  if (new Date(срок).getTime() <= Date.now()) return `<span class="badge badge-warning" title="Срок ${esc(дата)} вышел — уйдёт по правилу своего вида при ближайшей чистке">срок вышел</span>`;
   return с.expires_tomorrow ? `<span class="badge badge-warning" title="Уйдёт по правилу своего вида ${esc(дата)}">истечёт завтра</span>`
     : `<span class="page-sub">до ${esc(дата)}</span>`;
 }

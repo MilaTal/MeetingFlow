@@ -95,6 +95,9 @@ python -m meetflow serve --theme erp_rollout --db data/project.db --port 8002   
 | `MEETFLOW_HOST`, `MEETFLOW_PORT` | адрес и порт для `python -m meetflow.web.app` | `127.0.0.1`, `8002` |
 | `VOICE_BASE_PATH` | общая база голосов, только чтение | — (или «Настройки») |
 | `HF_HUB_OFFLINE` | Whisper без сети | `1` в сценарии запуска |
+
+`python -m meetflow demo` **не читает** `VOICE_BASE_PATH` и `TEAM_SHARED_PATH`: демо-база не должна получать
+настоящих людей общей «Команды». Боевой `serve` эти переменные читает как раньше.
 | `MEETFLOW_SUITE_V2` | только для тестов: путь к `suite_v2.json` набора вехи 4 (тесты К17/К18) | — (тесты пропускаются) |
 
 ## 5. Первый проект
