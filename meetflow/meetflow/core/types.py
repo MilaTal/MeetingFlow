@@ -99,6 +99,7 @@ class TaskDraft:
     line_no: int | None = None
     due_date: str | None = None
     source_name: str = ""
+    doubt_reason: str = ""       # причина «под вопросом» без карточки (объединение/мусор, 05.11.2026)
 
 
 @dataclass

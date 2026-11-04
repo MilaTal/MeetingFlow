@@ -169,6 +169,9 @@ def объединение(store, project_id: int, planned: list, запись: 
         if t.get("description_before_expand"):
             d = replace(d, description=t["description"])
             g = replace(g, description=t["description"])
+        if t.get("под_вопросом"):
+            # Пометка «под вопросом» без карточки: довести до задачи, не трогая цитату/место (05.11.2026)
+            d.doubt_reason = str(t["под_вопросом"])
         новые.append((d, g))
     return {"planned": новые, "журнал": журнал, "сведённые": сведённые}
 

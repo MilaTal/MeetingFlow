@@ -1129,7 +1129,7 @@ class MeetingPipeline:
                         # (решение владелицы 16.10.2026 и 24.10.2026, ERP `test_otdel_tekstom_1610`; перенос 27.10.2026)
                         who = (pend.get("name") or "").strip() or None
                     tid = self.reg.add(project_id, g.description, who, meeting_id, g.quote, d.due_date, mdate,
-                                       due_kinds.get(id(d)))
+                                       due_kinds.get(id(d)), doubt_reason=d.doubt_reason)
                     added.append((tid, d, g))
                     if id(d) in merged_history:
                         ukrupnenie_sborka.записать_историю(self.s, tid, merged_history[id(d)])
