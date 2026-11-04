@@ -174,7 +174,7 @@ def mount(r: APIRouter, ctx: Ctx) -> None:
         except Exception:  # noqa: BLE001
             pass
         edge = (datetime.now() - timedelta(days=7)).strftime("%Y-%m-%dT%H:%M:%S")
-        where, args = "kind=? AND status='open'", [TECH]
+        where, args = "kind IN (?, 'event') AND status='open'", [TECH]
         if not all_period:
             where += " AND created_at>=?"
             args.append(edge)
@@ -189,13 +189,13 @@ def mount(r: APIRouter, ctx: Ctx) -> None:
     @r.get("/project-status/errors/count")
     def errors_count(request: Request):
         ctx.need_super(request)
-        return {"count": store.q("SELECT COUNT(*) AS n FROM cards WHERE kind=? AND status='open'", (TECH,))[0]["n"]}
+        return {"count": store.q("SELECT COUNT(*) AS n FROM cards WHERE kind IN (?, 'event') AND status='open'", (TECH,))[0]["n"]}
 
     @r.post("/project-status/errors/{cid}/resolve", status_code=204)
     def resolve_error(cid: int, request: Request):
         u = ctx.need_super(request)
         c = store.get("cards", cid)
-        if not c or c["kind"] != TECH:
+        if not c or c["kind"] not in (TECH, "event"):
             raise HTTPException(404, "Сообщение не найдено")
         store.update("cards", cid, status="accepted", resolution=f"закрыто: {ctx.name(u)}", resolved_at=now())
         return Response(status_code=204)
@@ -205,7 +205,7 @@ def mount(r: APIRouter, ctx: Ctx) -> None:
         u = ctx.need_super(request)
         if not payload.confirm:
             raise HTTPException(400, "Удаление — только с подтверждением")
-        rows = store.q("SELECT id FROM cards WHERE kind=?", (TECH,))
+        rows = store.q("SELECT id FROM cards WHERE kind IN (?, 'event')", (TECH,))
         for x in rows:
             store.delete("cards", x["id"])
         ctx.sys_msg("Удалены все технические сообщения", f"Удалил: {ctx.name(u)}. Удалено: {len(rows)}.", "system_messages")
@@ -320,7 +320,7 @@ def mount(r: APIRouter, ctx: Ctx) -> None:
               "poll_every_var": "MEETFLOW_WATCH_INTERVAL_SEC", "poll_every_min": 10, "poll_every_max": 86400,
               "poll_every_value_setting": store.get_setting("watch_interval", pid) if pid else None,
               "poll_every_note": "" if pid else "выберите проект вверху левой панели — у каждого проекта своя папка"}
-        cards_open = store.q("SELECT kind, COUNT(*) AS n FROM cards WHERE status='open' AND kind NOT IN ('technical') GROUP BY kind")
+        cards_open = store.q("SELECT kind, COUNT(*) AS n FROM cards WHERE status='open' AND kind NOT IN ('technical','event') GROUP BY kind")
         n_open = sum(x["n"] for x in cards_open)
         from ...core import asr_journal
         try:
@@ -373,10 +373,10 @@ def mount(r: APIRouter, ctx: Ctx) -> None:
                                           "by_kind": {x["kind"]: x["n"] for x in cards_open}},
                        "superadmins": roles.get("super_admin", 0),
                        "conflicts_open": n_open,
-                       "conflicts_resolved_day": store.q("SELECT COUNT(*) AS n FROM cards WHERE kind!='technical' AND resolved_at>=?",
+                       "conflicts_resolved_day": store.q("SELECT COUNT(*) AS n FROM cards WHERE kind NOT IN ('technical','event') AND resolved_at>=?",
                                                          (day_ago,))[0]["n"],
-                       "system_open": store.q("SELECT COUNT(*) AS n FROM cards WHERE kind='technical' AND status='open'")[0]["n"],
-                       "system_closed_day": store.q("SELECT COUNT(*) AS n FROM cards WHERE kind='technical' AND resolved_at>=?",
+                       "system_open": store.q("SELECT COUNT(*) AS n FROM cards WHERE kind IN ('technical','event') AND status='open'")[0]["n"],
+                       "system_closed_day": store.q("SELECT COUNT(*) AS n FROM cards WHERE kind IN ('technical','event') AND resolved_at>=?",
                                                     (day_ago,))[0]["n"],
                        "recordings_held": store.q("SELECT COUNT(*) AS n FROM cards WHERE status='open' AND kind IN "
                                                   "('held_recording','waiting_tools')")[0]["n"],

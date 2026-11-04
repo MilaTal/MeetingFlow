@@ -328,7 +328,7 @@ def create_app(theme_name: str | None = None, db_path: str | None = None, journa
             intake.start()        # фоновый забор из папок-приёмников
             backups.start()       # автокопия базы по расписанию
         elif watch_on:
-            pipe.cards.open(None, "technical", "Второй экземпляр MeetFlow на той же базе — забор из папки и автокопия "
+            pipe.cards.open(None, "event", "Второй экземпляр MeetFlow на той же базе — забор из папки и автокопия "
                             "в нём выключены", {"why": "первый экземпляр работает: его процесс жив и порт слушает; "
                                                        "остановите лишний запуск"})
         yield
@@ -956,7 +956,7 @@ def create_app(theme_name: str | None = None, db_path: str | None = None, journa
 
     @app.get("/api/projects/{pid}/cards")
     def cards(pid: int, u: dict = Depends(admin)):
-        out = [c for c in pipe.cards.list(pid) if c["kind"] != "technical"]
+        out = [c for c in pipe.cards.list(pid) if c["kind"] not in ("technical", "event")]
         for c in out:
             if c["kind"] == "task_doubt" and c["status"] == "open":
                 c["payload"] = {**c["payload"], "buttons": doubt_buttons_now(c)}
@@ -1509,7 +1509,7 @@ def create_app(theme_name: str | None = None, db_path: str | None = None, journa
                 except Exception as e:  # монитор не должен падать целиком
                     h = {"name": c.name, "ok": False, "detail": type(e).__name__}
                 conns.append({"kind": kind, **h})
-        tech = store.q("SELECT id, title, payload, created_at FROM cards WHERE kind='technical' AND status='open' "
+        tech = store.q("SELECT id, title, payload, created_at FROM cards WHERE kind IN ('technical','event') AND status='open' "
                        "ORDER BY id DESC LIMIT 50")
         # выбранный при развёртывании инструмент модели; ключ — только «задан / не задан», без значения
         tool = {"tool": llm_mode(), "generator": getattr(pipe.gen, "model", ""),
@@ -1673,7 +1673,7 @@ def create_app(theme_name: str | None = None, db_path: str | None = None, journa
         """Технические сообщения старше N дней закрываются сами (ERP: 2 дня)."""
         days = int(os.environ.get("MEETFLOW_SYSTEM_MESSAGES_KEEP_DAYS", "2") or 2)
         edge = (datetime.now() - timedelta(days=days)).strftime("%Y-%m-%dT%H:%M:%S")
-        for r in store.q("SELECT id FROM cards WHERE kind='technical' AND status='open' AND created_at < ?", (edge,)):
+        for r in store.q("SELECT id FROM cards WHERE kind IN ('technical','event') AND status='open' AND created_at < ?", (edge,)):
             store.update("cards", r["id"], status=CardStatus.ACCEPTED.value, resolution="закрыто по сроку",
                          resolved_at=now())
 
@@ -1685,7 +1685,7 @@ def create_app(theme_name: str | None = None, db_path: str | None = None, journa
         out.append({"key": "doubt", "title": "Задачи под вопросом", "count": n, "link": "#cards",
                     "need": "Подтвердить, снять как «не задача» или отметить дублем.",
                     "if_not": "Задача уже в реестре и в протоколе; без ответа она так и останется под вопросом."})
-        n = store.q("SELECT COUNT(*) AS n FROM cards WHERE status='open' AND kind != 'technical'")[0]["n"]
+        n = store.q("SELECT COUNT(*) AS n FROM cards WHERE status='open' AND kind NOT IN ('technical','event')")[0]["n"]
         out.append({"key": "cards", "title": "Карточки «Конфликтов»", "count": n, "link": "#cards",
                     "need": "Решить: кто исполнитель, задача ли это, закрыта ли задача.",
                     "if_not": "Задачи остаются без исполнителя или не заводятся; нерешённые снимаются по сроку."})
@@ -1721,10 +1721,10 @@ def create_app(theme_name: str | None = None, db_path: str | None = None, journa
                       "WHERE s.removed_reason LIKE 'запись распознана%' ORDER BY s.id DESC LIMIT 5")
         day = (datetime.now() - timedelta(days=1)).strftime("%Y-%m-%dT%H:%M:%S")
         q = {"tasks_doubt_open": store.q("SELECT COUNT(*) AS n FROM cards WHERE status='open' AND kind='task_doubt'")[0]["n"],
-             "cards_open": store.q("SELECT COUNT(*) AS n FROM cards WHERE status='open' AND kind != 'technical'")[0]["n"],
-             "cards_resolved_day": store.q("SELECT COUNT(*) AS n FROM cards WHERE kind != 'technical' AND resolved_at >= ?",
+             "cards_open": store.q("SELECT COUNT(*) AS n FROM cards WHERE status='open' AND kind NOT IN ('technical','event')")[0]["n"],
+             "cards_resolved_day": store.q("SELECT COUNT(*) AS n FROM cards WHERE kind NOT IN ('technical','event') AND resolved_at >= ?",
                                            (day,))[0]["n"],
-             "tech_open": store.q("SELECT COUNT(*) AS n FROM cards WHERE status='open' AND kind='technical'")[0]["n"]}
+             "tech_open": store.q("SELECT COUNT(*) AS n FROM cards WHERE status='open' AND kind IN ('technical','event')")[0]["n"]}
         return {"services": _services(), "awaiting_total": sum(g["count"] for g in aw), "recognition": rec, "queue": q,
                 "intake": intake.state(pid) if pid and store.get("projects", pid) else None,
                 "recognition_queue": recognition_lease.состояние(),   # кто распознаёт сейчас, кто ждёт
@@ -1739,14 +1739,14 @@ def create_app(theme_name: str | None = None, db_path: str | None = None, journa
     @app.get("/api/monitoring/system-messages")
     def mon_messages(u: dict = Depends(super_admin)):
         _tech_cleanup()
-        rows = store.q("SELECT id, title, payload, created_at FROM cards WHERE kind='technical' AND status='open' "
+        rows = store.q("SELECT id, title, payload, created_at FROM cards WHERE kind IN ('technical','event') AND status='open' "
                        "ORDER BY id DESC LIMIT 100")
         return [{**r, "payload": json.loads(r["payload"] or "{}")} for r in rows]
 
     @app.post("/api/monitoring/system-messages/{cid}/close")
     def mon_message_close(cid: int, u: dict = Depends(super_admin)):
         c = store.get("cards", cid)
-        if not c or c["kind"] != "technical":
+        if not c or c["kind"] not in ("technical", "event"):
             raise HTTPException(404, "Сообщение не найдено.")
         store.update("cards", cid, status=CardStatus.ACCEPTED.value, resolution=f"закрыто: {u['name'] or u['role']}",
                      resolved_at=now())
@@ -1754,7 +1754,7 @@ def create_app(theme_name: str | None = None, db_path: str | None = None, journa
 
     @app.post("/api/monitoring/system-messages/close-all")
     def mon_message_close_all(u: dict = Depends(super_admin)):
-        rows = store.q("SELECT id FROM cards WHERE kind='technical' AND status='open'")
+        rows = store.q("SELECT id FROM cards WHERE kind IN ('technical','event') AND status='open'")
         for r in rows:
             store.update("cards", r["id"], status=CardStatus.ACCEPTED.value,
                          resolution=f"закрыто: {u['name'] or u['role']}", resolved_at=now())

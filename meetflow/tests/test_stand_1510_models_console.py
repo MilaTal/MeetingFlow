@@ -76,7 +76,8 @@ def test_external_model_build_is_a_system_message_not_a_mark(app_with_deepseek):
     c.post(f"/api/meetings/{mid}/sources", headers=H, files={"file": ("t 01.10.2026.txt", TRANSCRIPT.encode())})
     rep = c.post(f"/api/meetings/{mid}/run", headers=H).json()
     assert rep["protocol_saved"]
-    msgs = app.state.store.q("SELECT title, payload FROM cards WHERE kind='technical' AND meeting_id=?", (mid,))
+    # 05.11.2026: «собран внешней моделью» — событие журнала (вид event), в «Разбор» не идёт
+    msgs = app.state.store.q("SELECT title, payload FROM cards WHERE kind='event' AND meeting_id=?", (mid,))
     assert any("собран внешней моделью" in m["title"] and "api.deepseek.com" in m["payload"] for m in msgs)
     md = app.state.store.get("meetings", mid)["protocol_md"]
     assert "внешн" not in md.lower() and "deepseek" not in md.lower()

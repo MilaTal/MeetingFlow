@@ -224,9 +224,12 @@ class Ctx:
 
     # ------------------------------------------------------------------ служебное
     def sys_msg(self, context: str, message: str, source: str = "auth") -> None:
-        """Системное сообщение («Параметры системы → Системные сообщения») — техническая карточка MeetFlow."""
+        """Системное сообщение («Параметры системы → Системные сообщения») — событие журнала, вид `event`.
+
+        В «Разбор» события не идут: там решения человека, а не записи о том, что роль назначена или встреча
+        удалена. Сбои по-прежнему `technical` и считаются в норму (решение владелицы 25.10.2026)."""
         try:
-            self.pipe.cards.open(None, "technical", context[:200], {"message": message, "source": source})
+            self.pipe.cards.open(None, "event", context[:200], {"message": message, "source": source})
         except Exception:  # noqa: BLE001 — журнал не должен ронять действие
             pass
 

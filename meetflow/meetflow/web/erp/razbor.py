@@ -32,7 +32,20 @@ VIEW_OF = {"ungrounded_task": "tasks", "duplicate_task": "tasks", "due_date": "t
            "person": "people", "held_recording": "people", "voice_hint": "people", "project_hint": "projects",
            "agreement_doubt": "agree", "agreement_replace": "agree", "agreement_close": "agree",
            "review_finding": "system", "suspicious_source": "system", "source_kind": "system"}
-EXCLUDED = ("technical", "task_doubt")
+# «Разбор» — решения человека. События журнала (роль назначена, встреча удалена, протокол собран внешней моделью)
+# решением не являются и в очередь не идут: у них свой вид `event` и «Системные сообщения». Сбои (`technical`) идут и
+# считаются в норму (решение владелицы 25.10.2026). «Под вопросом» показывается строками задач, карточка — нет.
+EXCLUDED = ("event", "task_doubt")
+# Старые карточки-события до разделения видов лежали в `technical`: их узнаём по началу заголовка. Всё, чего в списке
+# нет, считается сбоем: лучше лишняя карточка, чем скрытый сбой (решение разработчика 05.11.2026).
+СОБЫТИЯ = ("Протокол встречи", "Удалена встреча", "Встреча переименована", "Второй экземпляр", "Назначена роль",
+           "Из протокола убрана системная пометка")
+
+
+def это_событие(заголовок: str | None) -> bool:
+    """Заголовок технической карточки — событие журнала, а не сбой. Неизвестный заголовок событием не считается."""
+    т = (заголовок or "").strip()
+    return any(т.startswith(н) for н in СОБЫТИЯ)
 
 
 class InModel(BaseModel):
@@ -132,7 +145,9 @@ def mount(r: APIRouter, ctx: Ctx) -> None:
     def open_cards(request: Request) -> list[dict]:
         extra, args = ctx.scope_sql(request)
         rows = store.q("SELECT * FROM cards WHERE status='open'" + extra + " ORDER BY id", args)
-        return [c for c in rows if c["kind"] not in EXCLUDED]
+        # техническая карточка-событие старого вида (`technical`) в очередь не идёт; сбой — идёт
+        return [c for c in rows if c["kind"] not in EXCLUDED
+                and not (c["kind"] == "technical" and это_событие(c["title"]))]
 
     @r.get("/task-conflicts")
     def list_conflicts(request: Request, status: str = "open"):

@@ -473,13 +473,15 @@ def test_разбор_одна_очередь_и_карточки_в_виде_er
     _card(env, "task_doubt", {"task_id": tid, "description": "Подготовить акт приёмки"})
     t2 = _task(env, description="Согласовать график", assignee=None)
     cid = _card(env, "assign_person", {"task_id": t2, "named": "Вера", "candidates": [{"id": 1, "name": "Сидорова Вера"}]})
-    _card(env, "technical", {"error": "x"})
+    # 05.11.2026: сбой (`technical`) в «Разборе» показывается и считается в норму; событие (`event`) — нет
+    тех = _card(env, "technical", {"error": "x"}, title="Голоса не разобраны: запись")
+    _card(env, "event", {"message": "x"}, title="Удалена встреча 03.11.2026")
     d = c.get("/razbor", headers=h()).json()
-    assert d["total"] == 2 and {x["source"] for x in d["items"]} == {"task", "card"} and d["norm"] == 15
+    assert d["total"] == 3 and {x["source"] for x in d["items"]} == {"task", "card"} and d["norm"] == 15
     assert c.get("/razbor", headers=h("member")).status_code == 403
     lst = c.get("/task-conflicts?status=open", headers=h()).json()
-    assert [x["id"] for x in lst] == [cid] and lst[0]["source"] == "unconfirmed_person" and lst[0]["candidates"]
-    assert c.get("/badges", headers=h()).json()["razbor"] == 2
+    assert [x["id"] for x in lst] == [cid, тех] and lst[0]["source"] == "unconfirmed_person" and lst[0]["candidates"]
+    assert c.get("/badges", headers=h()).json()["razbor"] == 3
     r = c.post("/razbor/batch", json={"source": "task", "ids": [tid], "action": "to_task"}, headers=h()).json()
     assert r["done"] == 1 and c.get(f"/tasks/{tid}", headers=h()).json()["under_question_label"] is None
 

@@ -1356,7 +1356,7 @@ class MeetingPipeline:
                         protocol_md, f"{md_h:%d.%m.%Y}" if md_h else None),
                     "пояснение": f"новых {len(added)}, возвращено {rep.tasks_returned}"})
                 if marks:
-                    self.cards.open(project_id, "technical", "Из протокола убрана системная пометка",
+                    self.cards.open(project_id, "event", "Из протокола убрана системная пометка",
                                     {"marks": marks[:10]}, meeting_id)
                 role = self.theme.get("prompts.domain_role")
                 protocol_md, filtered = filter_text(protocol_md, (role,) if isinstance(role, str) else ())
@@ -1370,7 +1370,7 @@ class MeetingPipeline:
                 wrote = budget.answered.get("protocol") or budget.answered.get("extract_tasks") or []
                 if budget.answered.get("_external"):
                     # собран внешней моделью — строкой в системных сообщениях, в документе пометки нет (инструкция 14.10.26)
-                    self.cards.open(project_id, "technical", f"Протокол встречи {meeting.get('date') or ''} собран внешней моделью",
+                    self.cards.open(project_id, "event", f"Протокол встречи {meeting.get('date') or ''} собран внешней моделью",
                                     {"points": sorted(set(budget.answered["_external"]))}, meeting_id)
                 n = self.s.q("SELECT COUNT(*) AS n FROM protocol_versions WHERE meeting_id=?", (meeting_id,))[0]["n"]
                 self.s.insert("protocol_versions", meeting_id=meeting_id, version=n + 1, protocol_md=protocol_md,
