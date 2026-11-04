@@ -363,7 +363,7 @@ function доделатьВозврат() {
   вернутьРамки(з.снимок, true);
   вернутьФокус(з.фокус);
 }
-// Обёртка для перерисовок мимо render() (страница встречи после правки, «Команда», «Конфликты» после ответа): снимок до,
+// Обёртка для перерисовок мимо render() (страница встречи после правки, «Команда», «Разбор» после ответа): снимок до,
 // возврат после. Вложенный вызов и вызов изнутри render() снимка не делают — его делает внешний.
 let _прокруткаГлубина = 0;
 // Прокрутка на месте после действия по строке задачи (владелица 26.10.2026: «При выборе каких-то действий по строчке задачи —
@@ -441,7 +441,7 @@ function погаситьСтроку(э) {
   if (строка) строка.classList.add("row-gone");
   return new Promise(готово => setTimeout(готово, строка ? 220 : 0));
 }
-// Перерисовки мимо render() держат прокрутку на месте (18.10.26, `сПрокруткойНаМесте`; объявления функций всплывают — присваивание работает и здесь, до них): протокол и страница встречи после правки, «Команда», «Конфликты» после ответа, «Единицы», «Статус».
+// Перерисовки мимо render() держат прокрутку на месте (18.10.26, `сПрокруткойНаМесте`; объявления функций всплывают — присваивание работает и здесь, до них): протокол и страница встречи после правки, «Команда», «Разбор» после ответа, «Единицы», «Статус».
 renderMeetingProtocol = сПрокруткойНаМесте(renderMeetingProtocol);
 renderMeetingDetail = сПрокруткойНаМесте(renderMeetingDetail);
 renderTeam = сПрокруткойНаМесте(renderTeam);
@@ -1121,7 +1121,7 @@ function человекКоманды(id) {
 
 // ---- Форма «Фамилия / Имя / Отчество / Роль на проекте …» (Доработки 2, 20.09.26). Одно правило на сервере
 // (app/services/names.problem); здесь оно повторено только ради подсказки до отправки. Один и тот же набор полей — в «Команде»
-// и в окне «Уточнить ФИО или роль и подтвердить» в «Конфликтах».
+// и в окне «Уточнить ФИО или роль и подтвердить» в «Разборе».
 const EXTERNAL_ORG_HINT = "У внешнего контакта укажите организацию и роль на проекте: по ним его отличают от тёзок из других организаций («Иван» из ТМК и «Иван» из Газпрома — разные люди).";
 const EXTERNAL_ROLE_HINT = "У внешнего контакта неполное имя — так бывает, но тогда заполните «Роль на проекте», чтобы его можно было отличить от других.";
 // Внешний одним словом без инициала («Кравчук», «Тимофей») — только с явным «да» и причиной (решение владелицы 24.10.2026, п. 7).
@@ -1134,7 +1134,7 @@ function внешнийОднимСловом(v) {
   return токены.length - инициалы.length <= 1 && инициалы.length === 0;
 }
 
-// Выбор команды — общий для всех форм человека: «Завести», правка карандашом, «Уточнить» в «Конфликтах» (15.10.26). Подписи —
+// Выбор команды — общий для всех форм человека: «Завести», правка карандашом, «Уточнить» в «Разборе» (15.10.26). Подписи —
 // те же, что на вкладках «Команды», чтобы было видно, куда человек попадёт после сохранения. Вид одинаков с Планёркой.
 function kindSwitchHtml(p, external) {
   return `<div class="kind-switch" role="radiogroup" aria-label="Команда">
@@ -1574,11 +1574,11 @@ async function перечитатьПрава() {
 
 function isSuperAdmin() {
   // «Параметры системы» и переключатель входа — решение 22.09.26 (ERROR_REGISTRY.md F12): мониторинг ошибок
-  // — не работа администратора, который ведёт встречи. «Конфликты» с 23.09.26 (F14) видит и админ (isAdmin).
+  // — не работа администратора, который ведёт встречи. «Разбор» с 23.09.26 (F14) видит и админ (isAdmin).
   return !!me && me.access_role === "super_admin";
 }
 
-// Куда отсылать за подробностями сбоя в тексте тоста/панели — «Конфликты» видит только супер-админ,
+// Куда отсылать за подробностями сбоя в тексте тоста/панели — «Разбор» видит только супер-админ,
 // остальным (включая обычного администратора проекта) текст без ссылки, но с понятным адресатом.
 function conflictsRef() {
   // Системные сообщения (технические подробности) живут на «Параметры системы» — своя страница с 23.09.26.
@@ -1599,7 +1599,7 @@ function названиеСистемы() {
   const п = _проекты.find(x => x.id === id);
   if (id && п && п.general) return "Общие встречи";                 // Доработка 2, 28.10.2026
   if (id && п) return `Проект — ${п.label || п.name}`;          // подпроект — «Проект — Проект – Подпроект»
-  return id ? "MeetFlow" : "Все проекты компании";
+  return id ? "Проект" : "Все проекты компании";
 }
 function показатьНазваниеПроекта() {
   const имя = названиеСистемы();
@@ -2199,7 +2199,7 @@ async function render() {
     if (el.dataset.route === пункт) el.setAttribute("aria-current", "page"); else el.removeAttribute("aria-current");
   });
   document.getElementById("help-link")?.classList.toggle("active", route === "help");
-  // Решение 17.09.26 — вкладка «Конфликты» (сами расхождения, текстовая очередь) видна админу и
+  // Решение 17.09.26 — вкладка «Разбор» (сами расхождения, текстовая очередь) видна админу и
   // супер-админу. Решение 22.09.26 (F12) сузило было до супер-админа, но 23.09.26 уточнено: сама
   // очередь конфликтов — как раньше, для обеих админских ролей; только «Системные сообщения» и
   // «Параметры системы» (страница «system», ссылка внизу «Конфликтов») остаются супер-админу.
@@ -2225,7 +2225,7 @@ async function render() {
   const $possibleNav = document.getElementById("nav-possible");
   if ($possibleNav) $possibleNav.hidden = !isAdmin();
   // Решение 23.09.26 — отдельный пункт «Параметры системы» (системные сообщения + живая панель
-  // метрик) за своей чертой внизу левого меню, виден только супер-админу; сама страница «Конфликты»
+  // метрик) за своей чертой внизу левого меню, виден только супер-админу; сама страница «Разбор»
   // (текстовая очередь) — выше, для обеих админских ролей, без изменений.
   // Блок суперадминистратора — «Параметры системы», «Мониторинг RealTime», «Модели», «База голосов», «Разбор голосов» и
   // черта блока — одной функцией по роли (задание 23.10.2026)
@@ -2249,7 +2249,7 @@ async function render() {
   if (route === "razbor" && !isAdmin()) { location.replace("#dashboard"); return; }        // «Разбор» — админам (25.10.2026)
   // прежний адрес вкладки «Под вопросом» — с 25.10.2026 в «Разбор», вид «Задачи» (было — «#pod»)
   if (route === "dashboard" && rest[0] === "pod") { location.replace(адресРазбора("pod")); return; }
-  // «Конфликты», «Под вопросом», «Возможные поручения» — одна вкладка «Разбор» (решение владелицы 25.10.2026): прежние адреса
+  // «Разбор», «Под вопросом», «Возможные поручения» — одна вкладка «Разбор» (решение владелицы 25.10.2026): прежние адреса
   // ведут в нужный вид, ссылки из «Мониторинга», писем и закладок не ломаются
   if (["conflicts", "pod", "possible"].includes(route)) { location.replace(адресРазбора(route)); return; }
   if ((route === "system" || route === "voices" || route === "voice-review" || route === "live" || route === "units" || route === "awaiting" || route === "models" || route === "design") && !isSuperAdmin()) { location.replace("#dashboard"); return; }
@@ -2512,7 +2512,7 @@ function точкаВопроса(t) {
   // С 20.10.2026 (решение владелицы, как в Планёрке): задача «под вопросом» стоит в «Все в работе», пометка — заметная, но
   // спокойная: та же точка и слово «под вопросом» приглушённым цветом (без новых цветов); причина — подсказкой; ведёт на
   // «Разбор», вид «Задачи» (с 25.10.2026, решение владелицы: одно место решения; прежде — страница «Под вопросом», ещё раньше —
-  // точка-ссылка на «Конфликты»).
+  // точка-ссылка на «Разбор»).
   const подсказка = `под вопросом: ${t.under_question_label || t.source_anchor}${isAdmin()
     ? " — решить в «Разборе»" : " — ждёт подтверждения администратора"}`;
   // точка — ссылкой на «Разбор» у администратора; у остальных ролей его нет — точка без ссылки
@@ -2662,7 +2662,7 @@ function startDelayedDone(taskId, btn) {
 function wireTaskActions() {
   $main.querySelectorAll(".task-done-cell").forEach(wireTaskDoneCell);
   // «Отметиться» — всем ролям (решение владельца 02.10.26, по письму 39 Планёрки): готовый ответ в один клик или свой
-  // текст. Статус меняет только ведущий: отметка участника приходит ему карточкой в «Конфликты».
+  // текст. Статус меняет только ведущий: отметка участника приходит ему карточкой в «Разбор».
   $main.querySelectorAll(".task-note").forEach(btn => btn.addEventListener("click", () => {
     // Здесь текст только ПОКАЗЫВАЕТСЯ (с подписью «поставлена …» — так задачу узнают; замечание владельца 07.10.26), не
     // сохраняется — поэтому из ячейки. Окно «Изменить задачу» ниже сохраняет формулировку и берёт её из данных строки.
@@ -3041,7 +3041,7 @@ async function runMeetingGeneration({ id, btnId, endpoint, findingsId, idleLabel
     }
     if (result.saved_with_findings) {
       // Решение владельца 15.10.26: протокол сохранён сразу, замечания проверки — карточками
-      toast(`Протокол сохранён. Замечания проверки (${result.findings_count || 0}) — карточками в «Конфликтах»`, false);
+      toast(`Протокол сохранён. Замечания проверки (${result.findings_count || 0}) — карточками в «Разборе»`, false);
     }
     const ru = result.roadmap_update;
     // Документ с замечаниями проверки сохранён сразу (15.10.26): число замечаний и где они — в том же сообщении.
@@ -3054,7 +3054,7 @@ async function runMeetingGeneration({ id, btnId, endpoint, findingsId, idleLabel
     // Похожие задачи, не заведённые повторно (30.09.26, по находке Планёрки) — раньше терялись
     // молча: и в ответе были, и на экране нигде не показывались.
     // С 30.09.26 два случая разные: дословный повтор просто не заводится, а совпадение только по
-    // предмету уходит карточкой в «Конфликты» — решает человек, одна это задача или две.
+    // предмету уходит карточкой в «Разбор» — решает человек, одна это задача или две.
     // Что изменилось в реестре (письмо Планёрки «35»: сервер перечислял последствия, экран их не читал — человек видел
     // «сохранён» и не знал, что задачи закрыты). Новые задачи, сменённые статусы и закрытые по источнику — сразу.
     const closedBySource = result.closed_by_source || [];
@@ -3073,12 +3073,12 @@ async function runMeetingGeneration({ id, btnId, endpoint, findingsId, idleLabel
         same.map(d => `«${d.description.slice(0, 60)}»`).join(", "));
     }
     if (similar.length) {
-      toast(`Похожие задачи (${similar.length}) не заведены сами — ждут решения в «Конфликтах»: ` +
+      toast(`Похожие задачи (${similar.length}) не заведены сами — ждут решения в «Разборе»: ` +
         similar.map(d => `«${d.description.slice(0, 60)}»`).join(", "), true);
     }
     const ug = result.ungrounded_tasks || [];
     if (ug.length) {
-      toast(`Задачи без опоры в тексте встречи (${ug.length}) заведены с пометкой — проверьте их в «Конфликтах»: ` +
+      toast(`Задачи без опоры в тексте встречи (${ug.length}) заведены с пометкой — проверьте их в «Разборе»: ` +
         ug.map(d => `«${d.description.slice(0, 60)}»`).join(", "), true);
     }
     if (similar.length || ug.length) updateConflictsBadge();
@@ -3251,7 +3251,7 @@ function meetingLeaderLine(m, admin) {
 
 // Единицы встречи (единицы вместо монолита, 02.10.26): решения, договорённости, уточнения, открытые вопросы, вехи и, возможно,
 // пропущенные задачи — с цитатой из источника (берёт код), таймкодом и ролями людей. Извлечённое — кандидаты: в работу только
-// после «Принять». Одним списком на странице встречи, не карточками в «Конфликтах» — на встречу их бывает под три десятка.
+// после «Принять». Одним списком на странице встречи, не карточками в «Разборе» — на встречу их бывает под три десятка.
 const UNIT_ORDER = ["Решение", "Договорённость", "Уточнение", "Открытый вопрос", "Веха", "Задача"];
 const UNIT_ROLE_RU = { "ответственный": "ответственные", "участник": "участники", "влияющий": "влияющие" };
 async function loadUnitsPanel(meetingId, admin) {
@@ -3319,7 +3319,7 @@ async function loadUnitsPanel(meetingId, admin) {
   });
 }
 
-// Табло «Единицы встреч» — супер-админу на время тестирования (владелец 02.10.26: «спорные моменты и так в «Конфликтах»; единицы
+// Табло «Единицы встреч» — супер-админу на время тестирования (владелец 02.10.26: «спорные моменты и так в «Разборе»; единицы
 // вынести в табло для супер-админа»). Выбор встречи — список встреч с Протоколом, по умолчанию последняя.
 async function renderUnitsBoard(rest) {
   заставкаЗагрузки();   // тот же экран — прежнее содержимое до новой отрисовки (26.10.2026)
@@ -3351,7 +3351,7 @@ async function renderUnitsBoard(rest) {
 
 // «Проверить после сохранения» (решение владельца 15.10.26). Протокол сохраняется сразу; то, что раньше человек решал
 // до сохранения, — задачи, которые код не завёл сам, и замечания проверки — уходит карточками. Этот блок собирает их
-// на странице встречи: решить задачу можно здесь одним нажатием (тот же запрос, что у карточки в «Конфликтах»),
+// на странице встречи: решить задачу можно здесь одним нажатием (тот же запрос, что у карточки в «Разборе»),
 // поправить текст — существующей точечной правкой. Блок служебный: только администраторам, вне документа (в docBlock
 // и в выгрузку он не входит), и скрыт, когда проверять нечего. Зеркально Планёрке.
 function открытьТочечнуюПравку(blockId) {
@@ -3461,7 +3461,7 @@ async function renderMeetingProtocol(id, verdict, verdictFor) {
   const archiveCutoff = new Date();
   archiveCutoff.setDate(archiveCutoff.getDate() - ARCHIVE_CUTOFF_DAYS);
   const isArchived = new Date(meeting.date) < archiveCutoff;
-  let backLabel = "← Встречи", backHref = "#meetings";
+  let backLabel = "← Реестр встреч", backHref = "#meetings";
   if (from) {
     try {
       const origin = await api(`/meetings/${from}`);
@@ -3493,7 +3493,7 @@ async function renderMeetingProtocol(id, verdict, verdictFor) {
   const sourceBar = showBar ? `
     <div class="src-bar-wrap" id="source-drop-zone" data-drop-input="source-file">
       <div class="src-bar-panel" id="src-panel"${panelOpen ? "" : " hidden"}>
-        <div class="src-panel-head"><span>Источники протокола · ${sources.length}</span>
+        <div class="src-panel-head"><span>Материалы · ${sources.length}</span>
           <span class="src-panel-tools">${sources.length && admin ? `<button type="button" class="src-link-btn" id="reset-sources-btn">удалить все</button>` : ""}
           <button type="button" class="btn-sm src-close" data-close-panel>Свернуть ▾</button></span></div>
         ${sources.length ? sources.map(src => sourceRow(sourceTag(src), esc(src.original_filename), src.status ? esc(src.status) : "",
@@ -3507,7 +3507,7 @@ async function renderMeetingProtocol(id, verdict, verdictFor) {
         <div id="verify-findings-minutes"></div>
       </div>
       <div class="src-bar">
-        <span class="src-bar-label">Источники:</span>
+        <span class="src-bar-label">Материалы:</span>
         <button type="button" class="src-bar-sources" id="src-toggle" aria-expanded="${panelOpen}">${sources.length ? chips : `<span class="src-bar-chip">нет</span>`}<span class="src-bar-caret" aria-hidden="true">${panelOpen ? "▾" : "▴"}</span></button>
         <span class="src-add">
           <button type="button" class="btn-sm" id="src-add-btn" aria-haspopup="menu">+ добавить</button>
@@ -3521,7 +3521,7 @@ async function renderMeetingProtocol(id, verdict, verdictFor) {
         ${draftVerdict ? `<span class="src-hint" style="color:var(--danger)">Протокол собран, но не сохранился — сохранить можно кнопкой над документом</span>` : ""}
         <span class="src-bar-spacer"></span>
         <span class="src-hint" id="prepare-minutes-hint"></span>
-        <button class="btn-primary" id="prepare-minutes-btn" disabled title="${hasMin ? "Новая версия станет текущей; прежняя версия не удаляется — остаётся в базе" : "Протокол сохранится с датой встречи, задачи и статусы применятся"}">${идётСборкаС ? "Генерирую…" : (hasMin ? "↻ Пересобрать протокол" : "Создать протокол")}</button>
+        <button class="btn-primary" id="prepare-minutes-btn" disabled title="${hasMin ? "Новая версия станет текущей; прежняя версия не удаляется — остаётся в базе" : "Протокол сохранится с датой встречи, задачи и статусы применятся"}">${идётСборкаС ? "Генерирую…" : (hasMin ? "↻ Пересобрать протокол" : "Сформировать протокол")}</button>
       </div>
     </div>` : "";
 
@@ -3695,10 +3695,10 @@ async function renderMeetingProtocol(id, verdict, verdictFor) {
       }
       // F22 (24.09.26): подтверждение источника перед платной генерацией — человек видит файлы и дату встречи
       const srcNames = (sources || []).map(s => s.original_filename || "вставленный текст").join("\n  • ");
-      if (!(await confirmDialog(`Создать протокол встречи ${fmtRuDate(meeting.date)} по этим источникам?\n  • ${srcNames || "вставленный текст"}\n\nПроверьте, что это записи именно этой встречи: запись другой встречи того же дня по содержанию не отличить.`))) return;
+      if (!(await confirmDialog(`Сформировать протокол встречи ${fmtRuDate(meeting.date)} по этим источникам?\n  • ${srcNames || "вставленный текст"}\n\nПроверьте, что это записи именно этой встречи: запись другой встречи того же дня по содержанию не отличить.`))) return;
       runMeetingGeneration({
         id, btnId: "prepare-minutes-btn", endpoint: `/meetings/${id}/prepare-minutes?confirm=1${hasMin ? "&rebuild=true" : ""}`, findingsId: "verify-findings-minutes",
-        idleLabel: hasMin ? "↻ Пересобрать протокол" : "Создать протокол",
+        idleLabel: hasMin ? "↻ Пересобрать протокол" : "Сформировать протокол",
         okToast: "Протокол сохранён",
         partialToast: `Протокол сохранён, но Дорожная карта/Сводка не обновились — ${conflictsRef()}`,
         rerender: (v, f) => renderMeetingProtocol(id, v, f),
@@ -3825,7 +3825,7 @@ async function renderMeetingDetail(id, verdict, verdictFor) {
         <div id="verify-findings-plan"></div>
       </div>
       <div class="src-bar">
-        <span class="src-bar-label">Источники:</span>
+        <span class="src-bar-label">Материалы:</span>
         <button type="button" class="src-bar-sources" id="plan-src-toggle" aria-expanded="${panelOpen}"><span class="src-bar-chip">${sourcesCount} ${plural(sourcesCount, "источник", "источника", "источников")}</span><span class="src-bar-caret" aria-hidden="true">${panelOpen ? "▾" : "▴"}</span></button>
         <span class="src-hint">файл можно перетащить на страницу</span>
         ${идётСборкаС ? `<span class="src-hint" style="color:var(--accent)">Сборка идёт${идётСборкаС !== true ? ` — начата в ${esc(fmtRuDateTime(String(идётСборкаС).replace(/Z$/, "")))}` : ""}: результат появится на этом экране сам</span>` : ""}
@@ -3837,7 +3837,7 @@ async function renderMeetingDetail(id, verdict, verdictFor) {
 
   $main.innerHTML = `
     ${планВерх}
-    ${meetingDocHead({ backHref: "#meetings", backLabel: "← Встречи", meeting, active: "plan", hasPlan,
+    ${meetingDocHead({ backHref: "#meetings", backLabel: "← Реестр встреч", meeting, active: "plan", hasPlan,
         hasMin: !!(minutes && minutes.available), generatedAt: hasPlan ? plan.generated_at : null,
         exportUrl: hasPlan ? `/meetings/${id}/plan/export` : null, editId: hasPlan && !isArchived ? "plan-block-edit" : null,
         editBase: `/meetings/${id}/plan`,
@@ -4243,7 +4243,7 @@ function docBlock(doc, exportUrl, lastTaskChange, editBaseUrl, blockId, opts = {
   // «Откуда — собрано …» — строка состояния документа: только администратору (правило владельца 13.10.26 «документы чистые»)
   const sourcesLine = (!opts.hideSources && isAdmin() && doc.sources && doc.sources.length) ? `<div class="doc-sources-line">
       <b>Откуда</b> — собрано ${doc.generated_at ? fmtRuDateTime(doc.generated_at) : "автоматически"}.
-      Источники: ${doc.sources.map(s => `«${esc(s.original_filename)}»`).join(", ")}.
+      Материалы: ${doc.sources.map(s => `«${esc(s.original_filename)}»`).join(", ")}.
     </div>` : "";
   return `<div class="card card-output stack${opts.compact ? " doc-compact" : ""}${opts.noBar ? " doc-nobar" : ""}">
     ${sourcesLine}
@@ -4257,9 +4257,12 @@ function docBlock(doc, exportUrl, lastTaskChange, editBaseUrl, blockId, opts = {
 // кнопки внизу»). Слева — назад, встреча и переключатель «План | Протокол» (два документа одной встречи — вкладки, а не
 // отдельные строки-ссылки), справа — «Скачать .docx» и «Правка». Текст документа идёт сразу под ней и тянется на экран.
 function meetingDocHead({ backHref, backLabel, meeting, active, hasPlan, hasMin, generatedAt, exportUrl, editId, editBase = "", безПротокола = false }) {
-  const tab = (key, label, href, exists) => key === active
-    ? `<span class="doc-tab doc-tab-on">${label}</span>`
-    : `<a class="doc-tab${exists ? "" : " doc-tab-empty"}" href="${href}">${label}${exists ? "" : " · нет"}</a>`;
+  const tab = (key, label, href, exists) => {
+    if (!exists) return "";                    // пустой вкладки нет (05.11.2026): «План · нет» не показываем
+    return key === active
+      ? `<span class="doc-tab doc-tab-on">${label}</span>`
+      : `<a class="doc-tab" href="${href}">${label}</a>`;
+  };
   return `<div class="doc-head">
     <a href="${backHref}" class="btn btn-sm">${esc(backLabel)}</a>
     <h1>Встреча ${esc(fmtRuDate(meeting.date))}${cleanLabel(meeting.label) ? " — " + esc(cleanLabel(meeting.label)) : ""}</h1>
@@ -4880,8 +4883,8 @@ async function renderTeamList(external) {
   const accessExpanded = localStorage.getItem("teamAccessExpanded") === "1";
   document.getElementById("users-list").outerHTML = users.length
     ? `<div id="users-list" class="card card-output${admin && !accessExpanded ? " access-collapsed" : ""}"><div class="table-scroll"><table class="team-table"><thead><tr><th class="team-name">ФИО</th><th class="team-pos" title="Должность и роль на проекте">Должность и роль</th><th class="team-dept">${external ? "Организация" : "Отдел"}</th><th class="team-access">Доступ</th>${admin ? `<th class="c-act" aria-label="Изменить"></th><th class="c-del" aria-label="Удалить"></th><th class="access-col"><button type="button" class="access-toggle" id="access-toggle" aria-expanded="${accessExpanded}" title="${accessExpanded ? "Свернуть колонку входа" : "Показать вход по логину и паролю"}"><svg class="key-ico" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="8" cy="15" r="4"/><path d="M11 12l9-9M16 7l3 3M14 9l2 2"/></svg><span class="access-toggle-label">Вход по логину и паролю</span><span class="access-chevron" aria-hidden="true">›</span></button>${superAdmin ? " " + подсказкаПаролейHtml() : ""}</th>` : ""}</tr></thead><tbody>
-        ${users.map(u => `<tr data-user-id="${u.id}"><td><div class="team-cap-name">${esc(u.full_name)}${u.is_confirmed === false ? ` <span class="badge badge-neutral" title="Названа в Протоколе не полностью — уточните ФИО на странице «Конфликты»">Не подтверждён</span>` : ""}${teamLeadHtml(u, admin)}</div></td><td class="team-pos"><div class="team-cap-pos">${teamPositionHtml(u)}</div></td><td><div class="team-cap-dept">${esc(external ? ([u.organization, u.department].filter(Boolean).join(" · ") || "—") : (u.department || "—"))}</div></td>
-          <td class="team-access">${roleCell(u)}</td>${admin ? `<td class="c-act"><button class="btn-icon user-edit" data-id="${u.id}" title="Изменить: опечатка, дополнить сведения" aria-label="Изменить">&#9998;</button>${/* «Подтвердить» у неподтверждённой записи, как в Планёрке (решение владелицы 24.10.2026, вариант «а») */ u.is_confirmed === false ? `<button class="btn-sm user-confirm" data-id="${u.id}" title="Отметить, что это реальный человек: запись начнёт использоваться, вопрос о ней в «Конфликтах» закроется">Подтвердить</button>` : ""}</td>
+        ${users.map(u => `<tr data-user-id="${u.id}"><td><div class="team-cap-name">${esc(u.full_name)}${u.is_confirmed === false ? ` <span class="badge badge-neutral" title="Названа в Протоколе не полностью — уточните ФИО на странице «Разбор»">Не подтверждён</span>` : ""}${teamLeadHtml(u, admin)}</div></td><td class="team-pos"><div class="team-cap-pos">${teamPositionHtml(u)}</div></td><td><div class="team-cap-dept">${esc(external ? ([u.organization, u.department].filter(Boolean).join(" · ") || "—") : (u.department || "—"))}</div></td>
+          <td class="team-access">${roleCell(u)}</td>${admin ? `<td class="c-act"><button class="btn-icon user-edit" data-id="${u.id}" title="Изменить: опечатка, дополнить сведения" aria-label="Изменить">&#9998;</button>${/* «Подтвердить» у неподтверждённой записи, как в Планёрке (решение владелицы 24.10.2026, вариант «а») */ u.is_confirmed === false ? `<button class="btn-sm user-confirm" data-id="${u.id}" title="Отметить, что это реальный человек: запись начнёт использоваться, вопрос о ней в «Разборе» закроется">Подтвердить</button>` : ""}</td>
           <td class="c-del danger-action-cell"><button class="btn-icon danger-action user-delete" data-id="${u.id}" title="Удалить" aria-label="Удалить">&#128465;</button></td>` : ""}${accessCell(u)}</tr>`).join("")}
       </tbody></table></div></div>`
     : `<div id="users-list" class="card empty-state">${external ? "Внешних контактов пока нет." : "Сотрудников пока нет."}</div>`;
@@ -4923,7 +4926,7 @@ async function toggleAuthMode() {
 }
 
 // Кнопка переключения в левом меню видна только супер-администратору (решение 22.09.26, F12 — переключатель
-// входа того же рода «сопровождение», что и «Конфликты», не работа администратора проекта).
+// входа того же рода «сопровождение», что и «Разбор», не работа администратора проекта).
 function updateModeSwitch() {
   const show = isSuperAdmin();
   document.getElementById("mode-switch-testing").hidden = !show;
@@ -4998,7 +5001,7 @@ function wireTeamEditButtons(users) {
       const логинПравка = $логин && $логин.value.trim() !== (u.login || "") ? { login: $логин.value.trim() } : {};
       // Неподтверждённую запись сохраняют и неполной — сервер проверяет правило только у подтверждённой (`_patch_user`).
       // Раньше форма требовала полного правила и здесь: сотрудника, ошибочно записанного внешним, нельзя было перевести
-      // во внутреннюю команду, пока не дописано имя или роль (15.10.26). Подтверждают — в «Конфликтах», там правило в силе.
+      // во внутреннюю команду, пока не дописано имя или роль (15.10.26). Подтверждают — в «Разборе», там правило в силе.
       const problem = u.is_confirmed === false ? null : identityProblem(v);
       if (problem) { showIdentityHint("usr", problem); throw new Error(problem); }
       await api(`/users/${u.id}`, { method: "PATCH", json: {
@@ -5027,7 +5030,7 @@ function wireTeamEditButtons(users) {
 
 // Кнопка «Подтвердить» в строке неподтверждённой записи (решение владелицы 24.10.2026, вариант «а»; как «Подтвердить» в
 // «Команде» Планёрки). «Подтверждён» — только человеком: засев и общая «Команда» больше не подтверждают сами, поэтому путь
-// подтверждения нужен прямо в таблице, а не только в «Конфликтах». Окно в один шаг: те же поля, что у правки, и то же
+// подтверждения нужен прямо в таблице, а не только в «Разборе». Окно в один шаг: те же поля, что у правки, и то же
 // правило — внешнему одним словом без инициала нужно «да, известно только одно слово» с причиной; внутренних и внешних —
 // одинаково. Сервер пишет источник подтверждения «экран», закрывает карточку о человеке и ставит ждавшие задачи при опоре.
 function wireTeamConfirmButtons(users) {
@@ -5051,7 +5054,7 @@ function wireTeamConfirmButtons(users) {
         is_confirmed: true, ...(v.nameShortReason ? { name_short_reason: v.nameShortReason } : {}),
       }});
       await loadUsersForWhoAmI();
-      toast("Запись подтверждена — вопрос о ней в «Конфликтах» закрыт");
+      toast("Запись подтверждена — вопрос о ней в «Разборе» закрыт");
       if (v.external !== !!u.is_external) location.hash = v.external ? "team/external" : "team";
       else renderTeam();
     });
@@ -5644,7 +5647,7 @@ function conflictValueLabel(field, value) {
 // пропускает) и сразу после собственных действий пользователя (`updateConflictsBadge()` без числа). Страница, у которой
 // число уже есть из своего списка, передаёт его в `числа` — без запроса.
 //
-// Решение 24.09.26 (реальная находка пользователя: бейдж «Конфликты» показывал 10, сама страница — «Открытых конфликтов
+// Решение 24.09.26 (реальная находка пользователя: бейдж «Разбор» показывал 10, сама страница — «Открытых конфликтов
 // нет»): у каждой страницы — свой бейдж, из того же источника, который она сама показывает.
 var _значки = { conflicts: null, errors: null, awaiting: null, pod: null, voice_review: null, possible: null, razbor: null };   // razbor — «Разбор», всё открытое (25.10.2026)   // possible — «Возможные поручения» (24.10.2026)   // pod — «Под вопросом» (20.10.2026), voice_review — «Разбор голосов» (21.10.2026)   // var: render() может прийти раньше этой строки
 var _значкиТаймер = null;
@@ -5703,7 +5706,7 @@ async function updateConflictsBadge(числа = {}, { толькоНезапо�
   return обновитьЗначки();                           // после действия пользователя — свежие числа
 }
 
-// Решение 23.09.26, уточнение после F12: сама очередь «Конфликты» (текстовые расхождения) —
+// Решение 23.09.26, уточнение после F12: сама очередь «Разбор» (текстовые расхождения) —
 // доступ админа и супер-админа, как было исходно до F12. «Системные сообщения» и «Параметры
 // системы» — по-прежнему только супер-админу, вынесены на отдельную страницу «#system», сюда —
 // только ссылка на неё за отсечкой, и то не всем, а только тем, кто её видит.
@@ -5712,7 +5715,7 @@ async function updateConflictsBadge(числа = {}, { толькоНезапо�
 // что и почему было решено, можно было только через базу. Переключатель на той же странице, не
 // отдельный пункт меню — оба смотрят на одну и ту же сущность (TaskConflict), разный статус.
 async function renderConflicts() {
-  $main.innerHTML = `<h1>Конфликты</h1>
+  $main.innerHTML = `<h1>Разбор</h1>
     <div class="page-sub">Находки, которые нужно решить вручную — сверка с файловым реестром,
       неоднозначности при проверке источников, пробелы в данных. По каждой — принять предложенное,
       оставить как есть, или вписать своё значение.</div>
@@ -5731,7 +5734,7 @@ const RESOLVED_STATUS_LABELS = { accepted: "принято предложенн�
 // «Реестр решений» — вкладка «Параметров системы» (решение владельца 01.10.26, «как в Планёрке»). С 15.10.26 — в стиле
 // «Конфликтов» (владелец: «по реестру решений примени примерно такой же дизайн, как у Планёрки», её 5d034c7, 8e042d8, fde782a):
 // группы с числом, свёрнуты до заголовка, открыта первая; в открытой — строки по высоте окна и «Показать все». Порядок по
-// важности: действующие правила («Убрать») → снятые («Вернуть») → разобранные карточки. Строка как в «Конфликтах»: значок |
+// важности: действующие правила («Убрать») → снятые («Вернуть») → разобранные карточки. Строка как в «Разборе»: значок |
 // суть, под ней смысл курсивом и служебная строка (вид · дата · применений) | мягкая кнопка справа. Служебные пояснения —
 // в «i»; коды — подписями (раньше в строке стояло «review_finding»).
 const РЕШЕНИЯ_ПОДПИСИ = {
@@ -6179,7 +6182,7 @@ async function renderSettingsTab() {
       <label style="display:flex; gap:8px; align-items:center"><input type="checkbox" id="setting-doubt-mark"${в.mark_enabled ? " checked" : ""}>
         Отметка «под вопросом» в реестре</label>
       <div class="page-sub">Неброская точка у задачи, заведённой под вопросом; видят только администраторы. Временная на пилот
-        (решение владельца 15.10.2026). Выключенная — точки нет; карточки в «Конфликтах» и счётчики остаются.</div>
+        (решение владельца 15.10.2026). Выключенная — точки нет; карточки в «Разборе» и счётчики остаются.</div>
     </div></div>` +
     // Проект системы (задание 23.10.2026) — здесь, а не на «Диске и доступах»: записка ЛМ ведёт в «Настройки» (отчёт ЛМ
     // 23.10.2026 — карточку там не нашли); суперадминистратору
@@ -6286,7 +6289,7 @@ function moscowNow() {
 // Новые отпечатки общей базы голосов, сгруппированные по говорящему встречи и по предполагаемому человеку. По каждому
 // говорящему — отрывки (если вырезаны при распознавании), реплика, встреча и время, предложенное ФИО с косинусом и
 // отрывом. Решение «Это он» / «Не он» / «Другой человек» (из «Команды») / «Шум / не голос» сразу меняет общую базу
-// двух систем; отрывок после решения удаляется на сервере, подсказка голоса в «Конфликтах» закрывается сама.
+// двух систем; отрывок после решения удаляется на сервере, подсказка голоса в «Разборе» закрывается сама.
 // Галочка у отпечатка — входит ли он в решение: снятый остаётся на разбор. Отпечатки без строки на экране (больше 12 у
 // говорящего или без отрывка и реплики) входят в решение всегда.
 // 25.10.2026 (замечание владелицы): в очереди только непонятные — «вероятно» и «не узнан». Опознанные правилом к
@@ -6488,7 +6491,7 @@ async function renderVoiceReview() {
     $к.querySelectorAll("button, select, input").forEach(эл => { эл.disabled = true; });
     try {
       const итог = await api("/voice/review/decision", { method: "POST", json: { ids, reshenie: решение, imya: имя, vybran: кн.dataset.kto || "", kandidat: к.kandidat || "" } });
-      toast(`${д.reshenia[решение]}: разобрано отпечатков ${итог.razobrano}` + (итог.kartochek_zakryto ? `, подсказок в «Конфликтах» закрыто: ${итог.kartochek_zakryto}` : ""));
+      toast(`${д.reshenia[решение]}: разобрано отпечатков ${итог.razobrano}` + (итог.kartochek_zakryto ? `, подсказок в «Разборе» закрыто: ${итог.kartochek_zakryto}` : ""));
       if (итог.kartochek_zakryto) updateConflictsBadge();
       renderVoiceReview();
     } catch (e) {
@@ -6500,7 +6503,7 @@ async function renderVoiceReview() {
 
 // «База голосов» — отдельный пункт меню супер-админа, как у Планёрки (решение владельца 01.10.26, её снимок экрана).
 // Та же раскладка карточек «название | значение | пояснение», что в «Параметрах системы». Пишут в базу ОБЕ
-// программы (ERP — с 05.10.26: свои отпечатки), но людей подтверждает только Планёрка, у себя в «Конфликтах»;
+// программы (ERP — с 05.10.26: свои отпечатки), но людей подтверждает только Планёрка, у себя в «Разборе»;
 // здесь — что накоплено, кто сколько написал и что из этого доходит до ERP.
 // «Кто пишет в базу» — разбивка по источникам (решение владельца 05.10.26). Одним словом «planerka»
 // этого не рассказать: пишут обе программы, и у каждой своя роль. Строка ERP показывается даже когда
@@ -6516,33 +6519,33 @@ function пустойРаздел(заголовок, пометка) {
 
 function voiceWriters(v) {
   const rows = (v.by_project || []).map(p => {
-    const who = p.project === "erp" ? "ERP" : (p.project === "planerka" ? "Планёрка" : p.project);
+    const who = p.project === "erp" ? "Проект ERP" : (p.project === "planerka" ? "Планёрка" : p.project);
     return [who, `${p.samples} отп. · записей ${p.records}`,
             esc([`с заявленным именем ${p.named}`, p.linked ? `привязано к человеку ${p.linked}` : "",
                  p.last_at ? `писал ${датаРу(p.last_at)}` : ""].filter(Boolean).join(" · "))];
   });
   if (!(v.by_project || []).some(p => p.project === "erp")) {
-    rows.push(["ERP", `<span class="mon-off">пока ничего</span>`,
+    rows.push(["Проект ERP", `<span class="mon-off">пока ничего</span>`,
       !(v.contrib && v.contrib.erp_writes)
         ? `вклад выключен (${esc((v.contrib || {}).off_switch || "WEBAPP_VOICE_CONTRIB=off")})`
         : (v.contrib.models_ready
-           ? "отпечатки появятся, как только ERP обработает запись со своих встреч: они кладутся в базу по ходу разбора"
+           ? "отпечатки появятся, как только Проект ERP обработает запись со своих встреч: они кладутся в базу по ходу разбора"
            : (v.contrib.models_state === "not-used"
-              ? `${esc(v.contrib.models_hint)} — текст записей ERP распознаётся и без них`
+              ? `${esc(v.contrib.models_hint)} — текст записей Проекта ERP распознаётся и без них`
               : `писать пока нечем: ${esc(v.contrib.models_hint || "разбор по голосам недоступен")} — что именно положить, перечислено в «Мониторинге RealTime»`))]);
   }
   return monSection("Кто пишет в базу", monTable(rows) + `<div class="page-sub" style="margin:8px 0 0">
     Планёрка пишет отпечатки со своих планёрок и подтверждает людей (только её оператор решает «этот
-    голос — этот человек»). ERP с 05.10.26 пишет отпечатки со своих записей — по кускам речи длиннее
+    голос — этот человек»). Проект ERP с 05.10.26 пишет отпечатки со своих записей — по кускам речи длиннее
     ${v.contrib ? v.contrib.min_segment_sec : 5} с, — а имя даёт ЗАЯВЛЕННОЕ: только если голос совпал с уже
-    подтверждённым человеком базы. Новых людей ERP не заводит и не подтверждает: это решение человека,
+    подтверждённым человеком базы. Новых людей Проект ERP не заводит и не подтверждает: это решение человека,
     и принимается оно в Планёрке.</div>`, "оба пишут");
 }
 
 async function renderVoiceBase() {
   $main.innerHTML = `<h1>База голосов</h1>
-    <div class="page-sub">База общая с Планёркой, и пишут в неё ОБЕ программы (ERP — с 05.10.26).
-      ERP кладёт отпечатки со своих записей и берёт из базы подсказки написаний имён при разборе
+    <div class="page-sub">База общая с Планёркой, и пишут в неё ОБЕ программы (Проект ERP — с 05.10.26).
+      Проект ERP кладёт отпечатки со своих записей и берёт из базы подсказки написаний имён при разборе
       участников; людей заводит и подтверждает только Планёрка — её оператор и отличает «этот голос —
       этот человек».</div>
     <div id="voice-base-box" class="card empty-state">Загрузка…</div>`;
@@ -6568,17 +6571,17 @@ async function renderVoiceBase() {
     ["Из них с заявленным именем", `${v.claimed} из ${v.samples}`, "так голос назвала выгрузка ВКС или разбор записи. Связи с человеком ещё нет"],
     ["Отпечатков, привязанных к человеку", String(v.linked), ""],
     ["Людей с эталоном голоса", String(people.length), "оператор Планёрки сверил имя с «Командой»"],
-    ["Имён ждут сверки", String(pending.length), "подтверждают в Планёрке, во вкладке «Конфликты»"],
+    ["Имён ждут сверки", String(pending.length), "подтверждают в Планёрке, во вкладке «Разбор»"],
     ["Файл базы", esc(v.path), "вне папок обоих проектов"],
   ]), "по голосу");
   const writers = voiceWriters(v);
-  const forErp = monSection("Что получает ERP", monTable([
+  const forErp = monSection("Что получает Проект ERP", monTable([
     ["Подтверждённых людей", String(people.length), ""],
-    ["Из них есть в «Команде»", `${inTeam} из ${people.length}`, "только они дают подсказки. Остальных ERP не заводит"],
-    ["Разбор записи по голосам", "свой", "ERP делит запись по голосам сам (pyannote) и считает отпечатки локально — обращений к базе для этого нет"],
+    ["Из них есть в «Команде»", `${inTeam} из ${people.length}`, "только они дают подсказки. Остальных Проект ERP не заводит"],
+    ["Разбор записи по голосам", "свой", "Проект ERP делит запись по голосам сам (pyannote) и считает отпечатки локально — обращений к базе для этого нет"],
     ["Доступ к базе", v.contrib && v.contrib.erp_writes ? "пишет и читает" : "не пишет, только читает", v.contrib && v.contrib.erp_writes
       ? "свои отпечатки кладём в базу, подтверждённые написания имён берём подсказкой"
-      : `вклад ERP выключен (${esc((v.contrib || {}).off_switch || "WEBAPP_VOICE_CONTRIB=off")}) — база наполняется только Планёркой`],
+      : `вклад Проекта ERP выключен (${esc((v.contrib || {}).off_switch || "WEBAPP_VOICE_CONTRIB=off")}) — база наполняется только Планёркой`],
     ["Ожидание общей базы", `${v.lock_wait_seconds} с`, "сколько ждём, если базу сейчас пишет другая программа"],
   ]), "подсказки");
   const peopleBlock = !people.length ? пустойРаздел("Подтверждённые люди", "пока никого не подтвердили") : monSection("Подтверждённые люди", monTable(people.map(p => [p.full_name,
@@ -6754,7 +6757,7 @@ function renderMonitoringLive() {
     esc(z.state),
     (z.todo ? `${esc(z.why)} — ${esc(z.todo)}` : esc(z.why))
       // Действие — там, где человек видит состояние (решение владельца 12.10.26): не надо идти в
-      // «Конфликты» за тем же решением. Права проверяет сервер (панель и так только супер-админу).
+      // «Разбор» за тем же решением. Права проверяет сервер (панель и так только супер-админу).
       + (z.resume ? ` <button class="btn-sm" data-resume-job="${esc(String(z.job_id))}">Вернуть в распознавание</button>` : ""),
   ]);
   const recognition = monSection("Распознавание записи", `
@@ -6777,7 +6780,7 @@ function renderMonitoringLive() {
     ${monTable([
       ["Карточки «Конфликтов»", `ждут решения ${q.conflicts_open}`, `за сутки решено ${q.conflicts_resolved_day} · <a href="#razbor">разобрать</a>`],
       ["Технические сообщения", `открыто ${q.system_open}`, `за сутки закрыто ${q.system_closed_day} · <a href="#" id="open-system-tab">открыть</a>`],
-      ["Записи с нетипичной длительностью", `ждут ответа ${q.recordings_held}`, "карточкой в «Конфликтах»"],
+      ["Записи с нетипичной длительностью", `ждут ответа ${q.recordings_held}`, "карточкой в «Разборе»"],
       ["Записи, которые не распознались", `ждут ответа ${q.recordings_failed || 0}`, "карточкой «повторить / удалить»; без ответа 7 дней удаляются сами"],
     ])}`);
 
@@ -6802,10 +6805,10 @@ function renderMonitoringLive() {
     recognition + queues + autorun +
     // Стоимость модели (15.10.26): сегодня / 7 / 30 дней; разбивка по встречам и точкам — на вкладке «Расход».
     monSection("Стоимость модели", стоимостьМоделиHtml(m.llm_cost, false, "Встреча")
-      + `<div class="page-sub">По встречам, моделям и точкам — <a href="#system">«Параметры системы» → «Расход»</a>.</div>`);
+      + `<div class="page-sub">По встречам, моделям и точкам — <a href="#system/cost">«Параметры системы» → «Расход»</a>.</div>`);
 
   // «Вернуть в распознавание» со строки контроля (решение владельца 12.10.26) — то же решение, что
-  // карточка «Распознать» в «Конфликтах», но там, где человек видит состояние записи.
+  // карточка «Распознать» в «Разборе», но там, где человек видит состояние записи.
   document.querySelectorAll("[data-resume-job]").forEach(btn =>
     btn.addEventListener("click", вернутьВРаспознавание));
   document.getElementById("autorun-toggle-btn")?.addEventListener("click", async (e) => {
@@ -6978,10 +6981,10 @@ function renderMonitoringDataState() {
         diverge ? "расходятся: реестр менялся после сборки Карты/Сводки — это не сбой" : (ks.roadmap_generated_at ? `Карта собрана ${esc(fmtDate(ks.roadmap_generated_at))}` : "")],
     ])) +
     monSection("Люди", monTable([
-      ["Команда ERP", `${d.team_active} активных, не подтверждено ${d.team_unconfirmed}`, "неподтверждённые — карточками в «Конфликтах»"],
+      ["«Команда» Проекта ERP", `${d.team_active} активных, не подтверждено ${d.team_unconfirmed}`, "неподтверждённые — карточками в «Разборе»"],
       ["База голосов", !(m.voice_directory && m.voice_directory.configured) ? "не подключена"
         : m.voice_directory.read_error ? `подключена, но не читается: ${esc(m.voice_directory.read_error)}` : `подтверждённых людей ${m.voice_directory.confirmed_people}`,
-        "общая с Планёркой: ERP берёт подсказки и кладёт свои отпечатки (с 05.10.26)"],
+        "общая с Планёркой: Проект ERP берёт подсказки и кладёт свои отпечатки (с 05.10.26)"],
     ]));
 }
 
@@ -7111,7 +7114,7 @@ function renderMonitoringStatic() {
 }
 
 // Правило пользователя 19.09.26: ЛЮБЫЕ системные сообщения — только на
-// странице «Конфликты», никогда в рабочих вкладках (раньше журнал сбоев
+// странице «Разбор», никогда в рабочих вкладках (раньше журнал сбоев
 // стоял блоком на «Статусе проекта» и показывал сырой ответ модели).
 // В карточке — понятная формулировка, сырой текст и трассировка спрятаны
 // под «Технические подробности».
@@ -7560,7 +7563,7 @@ function personEvidence(c) {
   return c.task_id ? "" : ev;
 }
 
-// Пояснение на карточке: почему запись оказалась в «Конфликтах» (Доработки 2, п. 1.5).
+// Пояснение на карточке: почему запись оказалась в «Разборе» (Доработки 2, п. 1.5).
 function personConflictNote(c) {
   const date = ((c.evidence_quote || "").match(/Протокол (\d{2}\.\d{2}\.\d{2})/) || [])[1];
   const oneWord = c.current_value && !/\s/.test(c.current_value);
@@ -7690,7 +7693,7 @@ function стоимостьМоделиHtml(c, полная, встреча) {
     html += блок("По моделям — за 30 дней", c.by_model.map(м => строка(м.model, м)));
     html += блок("По точкам (подключениям) — за 30 дней", c.by_route.map(т => строка(т.route, т)));
     if (c.tariffs.length) html += `<div class="page-sub" style="margin-top:8px">Расчёт по тарифу: ${c.tariffs.map(esc).join("; ")}.</div>`;
-    if (c.backdated_calls) html += `<div class="page-sub">Задним числом посчитано вызовов: ${c.backdated_calls} — записаны до 15.10.2026 без стоимости; кэш в таких строках ERP не записан, сумма — верхняя оценка.</div>`;
+    if (c.backdated_calls) html += `<div class="page-sub">Задним числом посчитано вызовов: ${c.backdated_calls} — записаны до 15.10.2026 без стоимости; кэш в таких строках Проекта ERP не записан, сумма — верхняя оценка.</div>`;
     if (c.probes && c.probes.calls) html += `<div class="page-sub">${esc(c.probes.label)}.</div>`;
   }
   return html + `<div class="page-sub" style="margin-top:8px">${esc(c.note)} Данные на ${esc(c.as_of)}, дни — по Москве.</div>`;
@@ -8079,7 +8082,7 @@ async function renderModelRoutes(el, base, apiOpts = {}) {
 // --- «Возможные поручения» — общий список по всем встречам, пункт блока администратора (решение владелицы 24.10.2026) ---
 // Узкий порог задачи: в протокол и реестр идут только поручения с адресатом (человек или отдел); похожее на поручение без
 // адресата (безличное, обсуждение без решения, вопрос-просьба) — строкой здесь. Видят администратор и суперадминистратор
-// (права «Под вопросом»); в протокол, Word, реестр и «Конфликты» строки не идут. Отборы — дата встречи, причина, состояние
+// (права «Под вопросом»); в протокол, Word, реестр и «Разбор» строки не идут. Отборы — дата встречи, причина, состояние
 // (по умолчанию «новое» — неразобранные), поиск по словам. «В задачу» — маленькое окно: формулировка, исполнитель из
 // «Команды» или текстом, срок; задача заводится обычной задачей встречи. «Не задача» закрывает строку. Неразобранная строка
 // истекает сама через N дней (срок меняет суперадминистратор здесь же). Функция одинакова в обеих системах.
@@ -8105,7 +8108,7 @@ async function renderVozmozhnye() {
   const опция = (v, sel, label) => `<option value="${esc(v)}"${v === sel ? " selected" : ""}>${esc(label)}</option>`;
   const строкаHtml = (в) => {
     const решено = в.state !== "новое"
-      ? `<span class="page-sub">${esc(ВОЗМОЖНЫЕ_СОСТОЯНИЯ[в.state] || в.state)}${в.decided_by ? " · " + esc(в.decided_by) : ""}${в.decided_at ? " · " + esc(датаВозможного(в.decided_at)) : ""}${в.task_id ? ` · задача <a href="#registry">№${в.task_id}</a>` : ""}</span>`
+      ? `<span class="page-sub">${esc(ВОЗМОЖНЫЕ_СОСТОЯНИЯ[в.state] || в.state)}${в.decided_by ? " · " + esc(в.decided_by) : ""}${в.decided_at ? " · " + esc(датаВозможного(в.decided_at)) : ""}${в.task_id ? ` · задача <a href="#dashboard?task=${в.task_id}">№${в.task_id}</a>` : ""}</span>`
       : `<button class="btn-primary btn-sm vz-task" type="button" data-id="${в.id}">В задачу</button>
          <button class="btn-sm vz-not" type="button" data-id="${в.id}">Не задача</button>`;
     return `<tr data-possible-id="${в.id}">

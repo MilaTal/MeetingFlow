@@ -338,7 +338,7 @@ async function renderPrep() {
     ? `<div class="card prep-nearest" id="prep-nearest">
         <div class="prep-nearest-text">
           <div class="prep-nearest-title">Ближайшая встреча: ${esc(fmtRuDate(б.date))}, ${esc(деньНедели(б.date))}${своёНазвание(б) ? ` — ${esc(cleanLabel(б.label))}` : ""}</div>
-          <div class="prep-nearest-sub">${б.building ? "идёт сборка · " : ""}${б.has_plan ? `план собран ${esc(fmtRuDateTime(б.plan_generated_at))}` : "плана пока нет"} · материалов ${б.materials_count || 0}${авто(б)
+          <div class="prep-nearest-sub">${б.building ? "идёт сборка · " : ""}${б.has_plan ? `план собран ${esc(fmtRuDateTime(б.plan_generated_at))}` : "плана пока нет"}${б.materials_count ? ` · материалов ${б.materials_count}` : ""}${авто(б)
             ? ` · дата предложена системой${админ ? ` · <button type="button" class="link" id="prep-change-date" data-edit-date="${б.id}" data-date="${esc(б.date)}">изменить дату</button>` : ""}` : ""}${р.дубль(б.date)
             ? ` · <span class="prep-mark prep-mark-acc">${админ ? "на эту дату две встречи — сведите их в одну в таблице ниже" : "на эту дату две встречи — свести их в одну может администратор"}</span>` : ""}</div>
         </div>

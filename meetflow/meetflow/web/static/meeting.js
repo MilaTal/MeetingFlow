@@ -68,7 +68,7 @@ async function renderMeetingReader(id) {
   const сведения = встречи.find(m => m.id === Number(id)) || встреча;
   const состояние = сведения.building ? "идёт сборка" : сведения.draft_pending ? "черновик ждёт решения"
     : протокол.available ? "протокол готов" : (сведения.состояние_протокола || "протокола нет");
-  const назад = откуда === "reg" ? `<a href="#dashboard" class="mt-back">← Реестр</a>` : `<a href="#meetings" class="mt-back">← Реестр встреч</a>`;
+  const назад = откуда === "reg" ? `<a href="#dashboard" class="mt-back">← Реестр задач</a>` : `<a href="#meetings" class="mt-back">← Реестр встреч</a>`;
   const кнопка = (k, знак, текст, n) => `<button type="button" class="mt-btn" data-drawer="${k}" aria-expanded="false">${знак}${esc(текст)}${n !== undefined ? ` <span class="n">${n}</span>` : ""}</button>`;
   const естьПлан = !!(планЭтой && планЭтой.available);
   const заголовок = протокол.available ? `Протокол встречи ${fmtRuDate(встреча.date)}`
@@ -126,10 +126,10 @@ async function renderMeetingReader(id) {
             ${/* «Скачать .docx» и «Правка» — в ряду кнопок, а не в «⋯» (п. 1 замечаний владелицы 21.10.2026); в «⋯» — редкое */ ""}
             ${протокол.available ? `<a class="mt-btn" id="reader-docx" href="/meetings/${id}/minutes/export" target="_blank">${ВСТРЕЧА_ЗНАКИ.docx}Скачать .docx</a>`
               : естьПлан ? `<a class="mt-btn" id="reader-docx" href="/meetings/${id}/plan/export" target="_blank">${ВСТРЕЧА_ЗНАКИ.docx}Скачать .docx</a>` : ""}
-            ${/* «Сформировать протокол по вложенным материалам» (дефект Планёрки 22.10.2026, у нас так же): автосборка не прошла —
+            ${/* «Сформировать протокол» (дефект Планёрки 22.10.2026, у нас так же): автосборка не прошла —
                   протокола нет, сборка не идёт, черновик не ждёт решения, встреча прошла и не отменена. В ряду кнопок (21.10.2026) */ ""}
             ${!протокол.available && canPrepare() && !будущая && сведения.status !== "cancelled" && !сведения.building && !сведения.draft_pending
-              ? `<button type="button" class="mt-btn" id="reader-build" title="Платно, по источникам встречи — спросит подтверждение">${ВСТРЕЧА_ЗНАКИ.notes}Сформировать протокол по вложенным материалам</button>` : ""}
+              ? `<button type="button" class="mt-btn" id="reader-build" title="Платно, по источникам встречи — спросит подтверждение">${ВСТРЕЧА_ЗНАКИ.notes}Сформировать протокол</button>` : ""}
             ${правкаДоступна ? полотноПереключатель(основаПолотна, режимПолотна, "reader-edit") : ""}
             <button type="button" class="mt-btn" data-drawer="more" aria-label="Ещё" aria-expanded="false">⋯</button>
           </span></div>
@@ -391,7 +391,7 @@ async function renderAgreements() {
     <div class="card hstack" id="agr-filter" style="gap:8px;padding:12px 16px;margin:0 0 16px">
       ${/* фильтр проекта — всегда, один компонент с Планёркой (решения владелицы 25.10.2026, пп. 1–2): «Весь проект …» — все
             записи без отбора, ниже подпроекты проекта системы и «без подпроекта», если подпроекты есть */ ""}
-      ${фильтрПроектаHtml("agr-project", { все: (data.project_filter || {}).all || "Весь Проект ERP", варианты: (data.project_filter || {}).options || [],
+      ${фильтрПроектаHtml("agr-project", { все: (data.project_filter || {}).all || "Все записи проекта", варианты: (data.project_filter || {}).options || [],
         без: (data.project_filter || {}).none || "", безЗначение: (data.project_filter || {}).none_value || "__none__", выбран: f.project })}
       <select id="agr-kind" aria-label="Вид" style="width:auto"><option value="">Все виды</option>${опция(AGREEMENT_OPEN_FILTER, f.kind, "Открытые: вопросы и без решения")}${(data.kinds || []).map(k => опция(k, f.kind, AGREEMENT_KIND_LABELS[k])).join("")}</select>
       <label>с <input type="date" id="agr-from" value="${esc(f.date_from)}" style="width:150px"></label>

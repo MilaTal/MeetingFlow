@@ -10,9 +10,13 @@ let _путьВстречи = null;          // последний путь — 
 let _замечанияОткрыты = false;
 let _путьОткрыт = false;          // путь на узком экране — раскрыт ли (переживает обновление раз в 15 с)    // на подготовке замечания свёрнуты, пока их не открыли кнопкой «Замечания N»
 
-const ПУТЬ_ЧТО_ДЕЛАТЬ = "Обычно черновик собирается за 1–5 минут. Если дольше получаса — откройте «Систему → Мониторинг»: " +
+const ПУТЬ_ЧТО_ДЕЛАТЬ_СУПЕР = "Обычно черновик собирается за 1–5 минут. Если дольше получаса — откройте «Мониторинг RealTime»: " +
   "модель могла замолчать (система сама перейдёт на запасную точку или повторит сборку, когда модель ответит). Сменить " +
-  "модель — «Система → Модели». Зависшую сборку снимает перезапуск сервера: она продолжится сама с готовых шагов.";
+  "модель — «Модели». Зависшую сборку снимает перезапуск сервера: она продолжится сама с готовых шагов.";
+const ПУТЬ_ЧТО_ДЕЛАТЬ = "Обычно черновик собирается за 1–5 минут. Если дольше получаса — сборка продолжится сама, " +
+  "когда модель ответит; если не продолжилась, обратитесь к администратору проекта. Зависшую сборку снимает " +
+  "перезапуск сервера: она продолжится сама с готовых шагов.";
+function путьЧтоДелать() { return isSuperAdmin() ? ПУТЬ_ЧТО_ДЕЛАТЬ_СУПЕР : ПУТЬ_ЧТО_ДЕЛАТЬ; }
 
 function путьДата(iso) { return iso ? fmtRuDateTime(iso).replace(" в ", " ") : ""; }
 
@@ -37,7 +41,7 @@ function путьHtml(p) {
         <span class="reg-sub">или дождаться новой сборки${p.steps.find(x => x.k === "draft" && x.state === "идёт") ? " — она уже идёт" : ""}</span></div>`;
     }
     if (ш.k === "draft" && ш.state === "идёт") {
-      ещё = `<div class="reg-sub">идёт с ${esc(путьДата(ш.at))} · <span class="tip"><button type="button" class="link tip-link" aria-label="Что делать при долгой сборке">что делать</button><span class="tip-body" role="tooltip">${esc(ПУТЬ_ЧТО_ДЕЛАТЬ)}</span></span></div>`;
+      ещё = `<div class="reg-sub">идёт с ${esc(путьДата(ш.at))} · <span class="tip"><button type="button" class="link tip-link" aria-label="Что делать при долгой сборке">что делать</button><span class="tip-body" role="tooltip">${esc(путьЧтоДелать())}</span></span></div>`;
     }
     const сбой = ш.failure ? `<div class="path-fail">${esc(ш.failure.что)}<span class="reg-sub">Система: ${esc(ш.failure.сама)}. Вы: ${esc(ш.failure.человек)}.</span></div>` : "";
     return `<li class="path-step path-${класс}"${текущий ? ' aria-current="step"' : ""}>
@@ -155,7 +159,7 @@ function обустроитьМатериалы() {
   // кнопка «Материалы N» — в строке шапки
   const шапка = $main.querySelector(".doc-head");
   if (шапка && !$main.querySelector(".prep-mat-btn")) {      // кнопка могла уже переехать к заголовку (шапкаПодготовки)
-    шапка.insertAdjacentHTML("beforeend", `<button type="button" class="mt-btn prep-mat-btn" aria-expanded="false">${ВСТРЕЧА_ЗНАКИ.notes}Материалы <span class="n">${сколько}</span></button>`);
+    шапка.insertAdjacentHTML("beforeend", `<button type="button" class="mt-btn prep-mat-btn" aria-expanded="false">${ВСТРЕЧА_ЗНАКИ.notes}Материалы${сколько ? ` <span class="n">${сколько}</span>` : ""}</button>`);
     шапка.querySelector(".prep-mat-btn").addEventListener("click", ev => {
       const открыто = !панель.hidden;
       панель.hidden = открыто;
@@ -220,7 +224,7 @@ function назадВПодготовку() {
   // «Подготовка встречи» с 21.10.2026 — всем ролям (решение владелицы): назад — в неё у каждого, кто готовит встречу
   if (!canPrepare()) return;
   $main.querySelectorAll('a[href="#meetings"]').forEach(a => {
-    if (/Встречи/.test(a.textContent)) { a.setAttribute("href", "#prep"); a.textContent = "← Подготовка"; }
+    if (/Встречи/.test(a.textContent)) { a.setAttribute("href", "#prep"); a.textContent = "← Подготовка встречи"; }
   });
 }
 
