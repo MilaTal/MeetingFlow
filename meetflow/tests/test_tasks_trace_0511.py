@@ -20,6 +20,8 @@ def test_каждая_задача_имеет_строку_следа(tmp_path):
     pipe.run(pid, mid)
     строки = [json.loads(l) for l in (tmp_path / "tasks_trace.jsonl").read_text(encoding="utf-8").splitlines() if l.strip()]
     активные = {r["id"] for r in s.q("SELECT id FROM tasks WHERE source_meeting_id=? AND status='active'", (mid,))}
-    видны = {r["task_id"] for r in строки if r["meeting_id"] == mid}
+    видны = {r["task_id"] for r in строки if r["meeting_id"] == mid and r.get("task_id")}
     assert активные and активные <= видны
-    assert all(r["путь"] in ("новая", "прежняя") for r in строки if r["meeting_id"] == mid)
+    assert all(r.get("путь") in ("drafts", "units", "новая", "прежняя") for r in строки if r["meeting_id"] == mid)
+    # след теперь и на черновик/единицу-задачу: хотя бы один путь drafts и один units
+    assert {r.get("путь") for r in строки if r["meeting_id"] == mid} & {"drafts", "units"}

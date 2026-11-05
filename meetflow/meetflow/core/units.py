@@ -405,6 +405,16 @@ class UnitsExtractor:
                 потеряно.append({"шаг": "сторож задач", "причина": ", ".join(g.reasons) or "отказ сторожа",
                                  "вид": "task", "текст": u.text[:500], "строки": u.nums})
         units = [u for u in units if u.kind != "task"]
+        # След по каждому пути (записка e76073e): строка на единицу-задачу с путём units и решением шага.
+        путь_следа = getattr(self.pipe, "tasks_trace_path", None)
+        for u, g in tasks:
+            asr_journal.write(путь_следа, meeting_id=meeting["id"], путь="units", шаг="сторож",
+                              решение="запись в реестр", причина="", дл_формулировки=len(u.text),
+                              дл_цитаты=len(u.quote or ""), строки=u.nums)
+        for u, g in held:
+            asr_journal.write(путь_следа, meeting_id=meeting["id"], путь="units", шаг="сторож",
+                              решение="отказ", причина=", ".join(g.reasons)[:200],
+                              дл_формулировки=len(u.text), дл_цитаты=len(u.quote or ""), строки=u.nums)
         # журнал потерь (записка 05.11.2026): счётчики по шагам и текст каждого потерянного пункта;
         # правило не менялось, на экран ничего не идёт
         asr_journal.write(getattr(self.pipe, "units_journal_path", None), meeting_id=meeting["id"],

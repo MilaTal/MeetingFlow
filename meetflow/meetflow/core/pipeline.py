@@ -937,6 +937,15 @@ class MeetingPipeline:
                 else:
                     held.append((d, g.reasons, g.quote, g))
 
+            # След по черновикам (записка e76073e): путь drafts и решение сторожа — до укрупнения.
+            if self.tasks_trace_path:
+                for d_, g_ in planned:
+                    asr_journal.write(self.tasks_trace_path, meeting_id=meeting_id, путь="drafts", шаг="сторож",
+                                      решение="принят", причина="", дл_формулировки=len(d_.description or ""))
+                for d_, причины_, _ц_, _g_ in held:
+                    asr_journal.write(self.tasks_trace_path, meeting_id=meeting_id, путь="drafts", шаг="сторож",
+                                      решение="отказ", причина=", ".join(причины_)[:200],
+                                      дл_формулировки=len(d_.description or ""))
             # Укрупнение задач (ERP 25–26.10.2026, близнец `ukrupnenie_zadach`, перенос 27.10.2026): после ворот и стража
             # исполнителя, до реестра и таблицы документа — сведение с открытыми задачами того же исполнителя, затем
             # соседние поручения одного предмета или контрагента одной строкой. Сбой укрупнения сборку не роняет.
