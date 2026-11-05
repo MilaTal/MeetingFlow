@@ -203,7 +203,7 @@ async function renderMeetingReader(id, запрошеннаяВкладка) {
   const подписьПлана = hasPlan ? "Переформировать план встречи" : "Сформировать план встречи";
   const подписьГлавной = tab === "protocol" ? подписьПротокола : подписьПлана;
   const главная = tab === "protocol"
-    ? (!будущая && !отменена && готовит ? `<button type="button" class="btn-primary" id="reader-main-btn"${генерация.running || генерация.queued ? " disabled" : ""}>${подписьГлавной}</button>` : "")
+    ? (!будущая && !отменена && готовит && (tab !== "protocol" || !hasMin || isAdmin()) ? `<button type="button" class="btn-primary" id="reader-main-btn"${генерация.running || генерация.queued ? " disabled" : ""}>${подписьГлавной}</button>` : "")
     : (готовит && !отменена ? `<button type="button" class="btn-primary" id="reader-main-btn"${генерация.running || генерация.queued ? " disabled" : ""}>${подписьГлавной}</button>` : "");
   const экспорт = документ ? (tab === "protocol" ? `/meetings/${id}/minutes/export` : `/meetings/${id}/plan/export`) : "";
   const основаПолотна = документ ? (tab === "protocol" ? `/meetings/${id}/minutes` : `/meetings/${id}/plan`) : "";
