@@ -281,6 +281,10 @@ class MeetingPipeline:
         # журнала (тесты, разовые прогоны) не пишем в рабочий файл вовсе.
         self.asr_journal_path = (Path(journal_path).with_name("asr_journal.jsonl")
                                  if journal_path else None)
+        # Журнал потерь единиц (записка 05.11.2026): счётчики по шагам и текст каждого потерянного пункта —
+        # «полнота» без него не измеряется. На экран ничего не идёт.
+        self.units_journal_path = (Path(journal_path).with_name("units_losses.jsonl")
+                                   if journal_path else None)
         self.prof = profile(getattr(generator, "profile", "generic"))
         self.pb = PromptBuilder(theme.get("prompts.domain_role", ""), self.prof)
         self._configure_connectors()

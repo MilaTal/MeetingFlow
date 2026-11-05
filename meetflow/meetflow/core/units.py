@@ -43,6 +43,7 @@ from datetime import date, datetime
 from typing import Any
 
 from .dates import lenient_date
+from . import asr_journal
 from ..connectors.base import AnswerTruncated
 from .negation import NegationRule
 from .people import Team
@@ -239,21 +240,32 @@ class Extracted:
 
 
 def parse_items(items: Any, by_n: dict[int, Line], team: Team, open_tasks: dict[int, str],
-                meeting_date: date | None, how: str) -> list[Extracted]:
+                meeting_date: date | None, how: str, dropped: list | None = None) -> list[Extracted]:
+    """Пункты ответа модели; `dropped` (если передан) — сюда причина и текст каждого отброшенного пункта."""
     out: list[Extracted] = []
     for it in items if isinstance(items, list) else []:
         if not isinstance(it, dict):
             continue
         kind = RU_KIND.get(str(it.get("kind") or "").strip().lower())
         if not kind:
+            if dropped is not None:
+                dropped.append({"шаг": "разбор ответа", "причина": "неизвестный вид пункта",
+                                "вид": str(it.get("kind") or ""), "текст": str(it.get("statement") or "")[:500],
+                                "строки": []})
             continue
         nums = sorted({int(m.group()) for x in (it.get("lines") or [])
                        for m in [re.search(r"\d+", str(x))] if m and int(m.group()) in by_n})[:3]
         if not nums:
+            if dropped is not None:
+                dropped.append({"шаг": "разбор ответа", "причина": "нет номера строки источника", "вид": kind,
+                                "текст": str(it.get("statement") or "")[:500], "строки": []})
             continue                       # без строки источника единицы нет
         rows = [by_n[n] for n in nums]
         quote = _quote(rows)
         if len(words(quote)) < MIN_QUOTE_WORDS:
+            if dropped is not None:
+                dropped.append({"шаг": "разбор ответа", "причина": "цитата короче порога", "вид": kind,
+                                "текст": str(it.get("statement") or "")[:500], "строки": nums})
             continue
         m = re.search(r"\d+", str(it.get("task") or ""))
         task_id = int(m.group()) if m and int(m.group()) in open_tasks else None
@@ -300,16 +312,30 @@ def same_point(a: str, b: str, share: float = 0.6) -> bool:
     return common / (common + len(only_a) + len(only_b)) >= share
 
 
-def merge(found: list[Extracted]) -> list[Extracted]:
-    """Одна строка — одна единица; одна и та же мысль того же вида — одна
-    (same_point). Правило ERP _distinct «60 % у более короткой» сливало
-    «спецификация на шкаф» и «на стол»."""
+def merge_with_lost(found: list[Extracted]) -> tuple[list[Extracted], list[dict]]:
+    """(единицы, потерянные пункты) — слияние и след для журнала потерь (записка 05.11.2026).
+
+    Пересечение строк само по себе больше не приговор: строка распознавания — кусок в минуту, на ней живут
+    несколько мыслей. Разные виды на одной строке остаются оба; один вид сводится только при `same_point`
+    (та же мысль). Прежде любое пересечение номеров строк выбрасывало пункт — так гибла задача «Ознакомить…»
+    («одна строка — одна единица», раздел 7 отчёта).
+    """
     out: list[Extracted] = []
+    lost: list[dict] = []
     for it in sorted(found, key=lambda x: (x.task_id is None,)):
-        dup = any(set(it.nums) & set(o.nums) or (it.kind == o.kind and same_point(it.text, o.text)) for o in out)
-        if not dup:
-            out.append(it)
-    return out
+        same = next((o for o in out if it.kind == o.kind and same_point(it.text, o.text)), None)
+        if same is not None:
+            lost.append({"шаг": "слияние единиц", "причина": "та же мысль того же вида (same_point)",
+                         "вид": it.kind, "текст": it.text[:500], "строки": it.nums,
+                         "с_чем": same.text[:200]})
+            continue
+        out.append(it)
+    return out, lost
+
+
+def merge(found: list[Extracted]) -> list[Extracted]:
+    """Слияние единиц без следа — обёртка над `merge_with_lost` для вызывающих, кому журнал не нужен."""
+    return merge_with_lost(found)[0]
 
 
 def effective(u: dict, task_status: dict[int, str], today: date | None = None) -> tuple[str, str]:
@@ -351,19 +377,23 @@ class UnitsExtractor:
         listing = "\n".join(f"T{tid}: {txt}" for tid, txt in open_tasks.items()) or "(открытых задач нет)"
         found: list[Extracted] = []
         failed_ranges: list[tuple[int, int]] = []
+        пунктов_модели = 0
+        потеряно: list[dict] = []
         parts = chunk(lines)
         for part in parts:
             body, _ = fence(_render(part), "кусок записи, строки пронумерованы")
             try:
                 out = self.pipe._call(self.pipe.gen, budget, "units", self._head(md or "", listing), body,
                                       meeting["id"], fix_json=числа_строк)
-                found += parse_items(out.get("items") if isinstance(out, dict) else None, by_n, self.team,
-                                     open_tasks, mdate, "куски")
+                items = out.get("items") if isinstance(out, dict) else None
+                пунктов_модели += len(items) if isinstance(items, list) else 0
+                found += parse_items(items, by_n, self.team, open_tasks, mdate, "куски", dropped=потеряно)
             except (ValueError, json.JSONDecodeError, AnswerTruncated):
                 failed_ranges.append((part[0].src, part[-1].src))   # кусок пропущен — прежнее не стираем
         # виды единиц — из темы units.kinds (письмо 47: список был, но никем не читался)
         allowed = set(self.pipe.theme.get("units.kinds") or KIND_RU)
-        units = merge([u for u in found if u.kind in allowed])
+        units, слито = merge_with_lost([u for u in found if u.kind in allowed])
+        потеряно += слито
 
         # задачи из единиц — через общие проверки и не дублируя реестр
         tasks, held = [], []
@@ -371,7 +401,16 @@ class UnitsExtractor:
             who = next((r["person"] for r in u.roles if r["role"] == "ответственный"), None)
             g = self.gate.check(TaskDraft(u.text, who, quote=u.quote), source, existing_tasks)
             (tasks if g.accepted else held).append((u, g))
+            if not g.accepted:
+                потеряно.append({"шаг": "сторож задач", "причина": ", ".join(g.reasons) or "отказ сторожа",
+                                 "вид": "task", "текст": u.text[:500], "строки": u.nums})
         units = [u for u in units if u.kind != "task"]
+        # журнал потерь (записка 05.11.2026): счётчики по шагам и текст каждого потерянного пункта;
+        # правило не менялось, на экран ничего не идёт
+        asr_journal.write(getattr(self.pipe, "units_journal_path", None), meeting_id=meeting["id"],
+                          пунктов_модели=пунктов_модели, после_разбора=len(found), после_слияния=len(units),
+                          задач=len(tasks), отказов=len(held), кусков=len(parts),
+                          пропущено_кусков=len(failed_ranges), потеряно=потеряно)
 
         closings = self._close_by_voice(project_id, meeting, lines, by_n, units, budget)
         return {"units": units, "tasks": tasks, "held": held, "closings": closings, "failed_ranges": failed_ranges,

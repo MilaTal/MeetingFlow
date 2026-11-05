@@ -35,6 +35,14 @@ class TaskRegistry:
         # хвост секретаря («задача с 29.09.2026 не обсуждали…») — при любом заведении (находка стенда 31, 13.10.26)
         from .document_marks import strip_tails
         description = strip_tails(description)[0]
+        # Короткая цитата (записка 05.11.2026): строка распознавания в минуту — цитата из неё целиком ломает
+        # поиск, сравнение дублей и сторожа. Длинную заменяем окном вокруг совпадения; нет совпадений — цитата
+        # остаётся, задача получает пометку сомнения (поручение не теряется).
+        if meeting_id and quote:
+            from . import quote as quote_mod
+            quote, подтверждена = quote_mod.короткая(quote, description)
+            if not подтверждена and not doubt_reason:
+                doubt_reason = quote_mod.ПОМЕТКА
         tid = self.s.insert("tasks", project_id=project_id, description=description, assignee=assignee,
                             status=TaskStatus.ACTIVE.value, due_date=due_date, due_kind=due_kind,
                             date_set=date_set or now()[:10],
