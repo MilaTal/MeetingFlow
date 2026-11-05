@@ -563,7 +563,10 @@ def mount(r: APIRouter, ctx: Ctx) -> None:
 
     @r.post("/users", status_code=201)
     def create_user(payload: UserCreate, request: Request):
-        req = ctx.need_user(request)
+        # Заводить запись «Команды» может только администратор (решение владелицы 05.11.2026): экран участнику
+        # скрыт, а запрос был открыт любому вошедшему. Первого человека заводит `seed_super` (GET /users),
+        # поэтому исключения для «чистой базы» здесь не нужно.
+        req = ctx.need_admin(request)
         role = _role_ok(payload.access_role)
         if role == "super_admin" and req.get("role") != "super_admin":
             raise HTTPException(403, "Роль супер-администратора может назначить только супер-администратор")

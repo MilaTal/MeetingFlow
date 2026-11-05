@@ -254,18 +254,11 @@ def mount(r: APIRouter, ctx: Ctx) -> None:
     def refresh_status(request: Request):
         pid = ctx.project(request)
         st = (store.get_setting("status_refresh", pid) if pid else None) or {"status": "idle"}
-        out = {"status": st.get("status", "idle"), "finished_at": iso_dt(st.get("finished_at")),
-               "duration_seconds": st.get("duration_seconds"), "elapsed_seconds": 0, "likely_stuck": False,
-               "result": st.get("result") or {}}
-        u = ctx.user(request)
-        if st.get("finished_at") and not (u and u.get("role") == "super_admin"):
-            try:
-                nxt = datetime.fromisoformat(st["finished_at"]) .timestamp() + REFRESH_PAUSE_MIN * 60
-                if nxt > datetime.now().timestamp():
-                    out["next_manual_at"] = datetime.fromtimestamp(nxt).strftime("%Y-%m-%dT%H:%M:%S")
-            except ValueError:
-                pass
-        return out
+        # `next_manual_at` больше не отдаём (решение владелицы 05.11.2026): пересчёт идёт кодом, без модели,
+        # сразу — ни перерыва, ни «платного расчёта» здесь нет, и подписи не должны это обещать.
+        return {"status": st.get("status", "idle"), "finished_at": iso_dt(st.get("finished_at")),
+                "duration_seconds": st.get("duration_seconds"), "elapsed_seconds": 0, "likely_stuck": False,
+                "result": st.get("result") or {}}
 
     @r.post("/project-status/refresh")
     def refresh(request: Request):
