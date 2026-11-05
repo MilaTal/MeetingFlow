@@ -443,7 +443,7 @@ async function путьТочками(id) {
     return `<span class="mp-dot mp-${вид}"></span>`;
   }).join("");
   const путьHtmlКнопки = `<button type="button" class="mt-path${сбой ? " mt-path-fail" : ""}" aria-expanded="false"
-    aria-haspopup="dialog" aria-label="Путь встречи: ${esc(подпись)}"><span class="mp-line" aria-hidden="true">${точки}</span><span class="mp-label">${esc(подпись)}</span></button>`;
+    aria-haspopup="dialog" aria-label="Путь встречи: ${esc(подпись)}"><span class="mp-line" aria-hidden="true">${точки}</span><span class="mp-label">Путь: ${esc(подпись)}</span></button>`;
   if ($state) $state.insertAdjacentHTML("afterend", путьHtmlКнопки);
   else $bar.insertAdjacentHTML("beforeend", путьHtmlКнопки);
   const $btn = $bar.querySelector(".mt-path");

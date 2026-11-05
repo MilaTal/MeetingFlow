@@ -14,7 +14,7 @@ import os
 import sys
 
 from .core.config import list_themes, load_theme
-from .core.store import Store
+from .core.store import Store, now
 
 DEMO_TEXT = """[00:00:05] Орлова Мария: Доброе утро, начинаем.
 [00:01:10] Белов Сергей: Отчёт по тестам отправил вчера, сделано.
@@ -99,6 +99,12 @@ def main(argv: list[str] | None = None) -> int:
         pid = st.insert("projects", name="Демо-проект", theme=th.id)
         for name in ("Орлова Мария", "Белов Сергей", "Гаврилова Анна"):
             st.insert("people", project_id=pid, full_name=name)
+        # Роли демо (записка 05.11.2026): супер-админ, админ проекта и участник — чтобы выбор «Вы работаете как»
+        # показывал все три и промер шёл по ним, а не по людям без роли.
+        for имя, роль in (("Орлова Мария", "super_admin"), ("Белов Сергей", "project_admin"),
+                          ("Гаврилова Анна", "member")):
+            st.insert("accounts", login=None, full_name=имя, role=роль, password_hash="", active=1, failed_attempts=0,
+                      created_at=now(), confirmed=1, confirmed_source="демо")
         mid = st.insert("meetings", project_id=pid, date="2026-10-01", label="Демо-встреча")
         # Демо не должно читать настоящую общую базу (находка администратора 05.11.2026): иначе sync_people
         # заводит в демо-базу настоящих людей из VOICE_BASE_PATH. Боевой serve это не затрагивает.
