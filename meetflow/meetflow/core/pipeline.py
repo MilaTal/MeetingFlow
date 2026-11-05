@@ -285,6 +285,10 @@ class MeetingPipeline:
         # «полнота» без него не измеряется. На экран ничего не идёт.
         self.units_journal_path = (Path(journal_path).with_name("units_losses.jsonl")
                                    if journal_path else None)
+        # Журнал следа задач (записка 05.11.2026): одна строка на задачу встречи — путь, номер, статус, длины.
+        # Текст формулировки и цитаты не пишем. Файл вне git: папка data/ в .gitignore.
+        self.tasks_trace_path = (Path(journal_path).with_name("tasks_trace.jsonl")
+                                 if journal_path else None)
         self.prof = profile(getattr(generator, "profile", "generic"))
         self.pb = PromptBuilder(theme.get("prompts.domain_role", ""), self.prof)
         self._configure_connectors()
@@ -1333,6 +1337,19 @@ class MeetingPipeline:
                 if res.get("near_pairs"):
                     from . import asr_journal as _журнал
                     _журнал.write(self.units_journal_path, meeting_id=meeting_id, near_pairs=res["near_pairs"])
+                if self.tasks_trace_path:
+                    новые_id = {tid for tid, _d, _g in added}
+                    снятые_ид = {d["id"] for d in res.get("dropped") or []}
+                    сохранены = {x["id"]: x["новая"] for x in res.get("kept_number") or []}
+                    for r in self.s.q("SELECT id, status, description, source_quote, assignee FROM tasks "
+                                      "WHERE source_meeting_id=?", (meeting_id,)):
+                        asr_journal.write(self.tasks_trace_path, meeting_id=meeting_id, task_id=r["id"],
+                                          путь="новая" if r["id"] in новые_id else "прежняя",
+                                          статус=r["status"], дл_формулировки=len(r["description"] or ""),
+                                          дл_цитаты=len(r["source_quote"] or ""),
+                                          исполнитель=bool((r["assignee"] or "").strip()),
+                                          сохранён_номер=сохранены.get(r["id"]),
+                                          снят_правилом=r["id"] in снятые_ид)
                 for t, edits in res["kept"]:
                     # одна карточка на задачу за всё время: повторная пересборка новых не заводит
                     if any(json.loads(c["payload"] or "{}").get("task_id") == t["id"]
