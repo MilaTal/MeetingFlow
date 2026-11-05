@@ -271,7 +271,6 @@ def mount(r: APIRouter, ctx: Ctx) -> None:
     def razbor(request: Request):
         ctx.need_admin(request)
         vp.истечь(store)
-        pipe.cards.expire_assign()      # карточки исполнителя старше 7 дней (как ERP, 05.11.2026)
         extra, args = ctx.scope_sql(request)
         items = []
         meetings = {m["id"]: m["date"] for m in store.q("SELECT id, date FROM meetings")}
@@ -354,7 +353,6 @@ def mount(r: APIRouter, ctx: Ctx) -> None:
     def possible(request: Request, state: str = "", reason: str = "", date_from: str = "", date_to: str = "", q: str = ""):
         ctx.need_admin(request)
         vp.истечь(store)
-        pipe.cards.expire_assign()      # карточки исполнителя старше 7 дней (как ERP, 05.11.2026)
         extra, args = ctx.scope_sql(request)
         rows = store.q("SELECT * FROM possible_assignments WHERE 1=1" + extra + " ORDER BY COALESCE(meeting_date,'') DESC, id",
                        args)

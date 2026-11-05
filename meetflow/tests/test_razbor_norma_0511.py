@@ -15,6 +15,15 @@ def test_замечания_проверки_не_в_разборе():
     assert "review_finding" in EXCLUDED
 
 
+def test_чтение_разбора_данные_не_меняет():
+    """GET «Разбора» — чтение: срок карточек применяет фоновый обход раз в час и сборка, как в ERP (`conflict_cleanup`)."""
+    from pathlib import Path
+    razbor = (Path(__file__).resolve().parents[1] / "meetflow" / "web" / "erp" / "razbor.py").read_text(encoding="utf-8")
+    assert "expire_assign" not in razbor
+    app = (Path(__file__).resolve().parents[1] / "meetflow" / "web" / "app.py").read_text(encoding="utf-8")
+    assert "карточки_сторож_старт" in app and "pipe.cards.expire_assign()" in app
+
+
 def _card(s, kind, days_old, title="Карточка"):
     at = (datetime.now() - timedelta(days=days_old)).strftime("%Y-%m-%dT%H:%M:%S")
     return s.insert("cards", project_id=None, kind=kind, title=title, payload="{}", status="open", created_at=at)

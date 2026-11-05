@@ -239,6 +239,33 @@ def путь_данных(путь: str) -> str:
     return str(п if п.is_absolute() else ПАПКА_ПРОГРАММЫ / п)
 
 
+_карточки_сторож: list = [None, None]      # поток и событие остановки
+
+
+def карточки_сторож_старт(pipe) -> None:
+    """Фоновый обход карточек, как в ERP (`conflict_cleanup`): проход сразу при старте и раз в час.
+
+    Карточка выбора исполнителя старше 7 дней закрывается сама (решение владелицы 25.10.2026); GET «Разбора» данные
+    не меняет — срок применяет обход и сборка. Задача без исполнителя при этом остаётся в реестре."""
+    import threading
+    if _карточки_сторож[0] is not None:
+        return
+    стоп = threading.Event()
+    _карточки_сторож[1] = стоп
+
+    def обход():
+        while not стоп.is_set():
+            try:
+                pipe.cards.expire_assign()
+            except Exception:  # noqa: BLE001 — обход не роняет сервер
+                pass
+            стоп.wait(3600)
+
+    поток = threading.Thread(target=обход, name="meetflow-cards", daemon=True)
+    _карточки_сторож[0] = поток
+    поток.start()
+
+
 def create_app(theme_name: str | None = None, db_path: str | None = None, journal: str | None = None,
                watch: bool | None = None) -> FastAPI:
     theme = load_theme(theme_name or os.environ.get("MEETFLOW_THEME", "_default"))
@@ -327,11 +354,16 @@ def create_app(theme_name: str | None = None, db_path: str | None = None, journa
         if watch_on and _primary():
             intake.start()        # фоновый забор из папок-приёмников
             backups.start()       # автокопия базы по расписанию
+            карточки_сторож_старт(pipe)   # карточки исполнителя старше 7 дней — раз в час, как в ERP
         elif watch_on:
             pipe.cards.open(None, "event", "Второй экземпляр MeetFlow на той же базе — забор из папки и автокопия "
                             "в нём выключены", {"why": "первый экземпляр работает: его процесс жив и порт слушает; "
                                                        "остановите лишний запуск"})
         yield
+        if _карточки_сторож[1] is not None:
+            _карточки_сторож[1].set()
+            _карточки_сторож[0] = None
+            _карточки_сторож[1] = None
         intake.stop()
         backups.stop()
 
