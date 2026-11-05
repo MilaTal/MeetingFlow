@@ -133,7 +133,8 @@ def test_экран_приставка_фильтр_и_дерево():
     assert 'class="prj-parent"' in nav and "Надпроект" in nav
     app = (STATIC / "app.js").read_text(encoding="utf-8")
     assert 'repeat(п.level || 0)' in app
-    meet = (STATIC / "meeting.js").read_text(encoding="utf-8")
+    # 05.11.2026: подпроект встречи переехал в меню «⋯» (nav.js), старый экран страницы удалён
+    meet = (STATIC / "nav.js").read_text(encoding="utf-8")
     assert "/subproject`, { method: \"PATCH\"" in meet
 
 
