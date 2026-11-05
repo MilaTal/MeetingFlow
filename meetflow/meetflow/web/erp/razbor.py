@@ -163,6 +163,35 @@ def mount(r: APIRouter, ctx: Ctx) -> None:
         ctx.need_admin(request)
         return {"count": len(open_cards(request))}
 
+    def _подтвердить_в_команде(store, val: str, прежнее: str, payload) -> None:
+        """Подтвердить запись «Команды» (`accounts`) вместе с человеком — находка администратора 05.11.2026.
+
+        Прежде обновлялся только `people`, а существующая запись `accounts` оставалась `confirmed=0`: карточка
+        «Разбора» закрывалась, «Команда» показывала «Не подтверждён», `GET /users` отдавал `false`. Теперь
+        подтверждается та же запись, что читает экран «Команда»; нет записи — заводится (как и раньше).
+        """
+        val = (val or "").strip()
+        if not val:
+            return
+        строки = store.q("SELECT * FROM accounts WHERE full_name=?", (val,))
+        if not строки and прежнее and прежнее != val:
+            строки = store.q("SELECT * FROM accounts WHERE full_name=?", (прежнее,))
+        if строки:
+            поля = {"confirmed": 1, "confirmed_source": "карточка"}
+            if not store.q("SELECT id FROM accounts WHERE full_name=? AND id<>?", (val, строки[0]["id"])):
+                поля["full_name"] = val                      # уточнение ФИО, если имя свободно
+            if payload.project_role:
+                поля["project_role"] = payload.project_role
+            if payload.role:
+                поля["position"] = payload.role
+            if payload.department:
+                поля["department"] = payload.department
+            store.update("accounts", строки[0]["id"], **поля)
+            return
+        store.insert("accounts", login=None, full_name=val, role="member", password_hash="", active=1,
+                     created_at=now(), confirmed=1, confirmed_source="карточка", position=payload.role or "",
+                     project_role=payload.project_role or "", department=payload.department or "")
+
     def decide_card(c: dict, payload: ConflictIn, u: dict) -> dict:
         kind, p, act = c["kind"], loads(c.get("payload"), {}), payload.action
         who = ctx.name(u)
@@ -198,8 +227,23 @@ def mount(r: APIRouter, ctx: Ctx) -> None:
         if act == "duplicate":
             return resolve(c["id"], u, CardStatus.REJECTED, resolution="duplicate", action="duplicate")
         if act == "delete":
+            # «Удалить из «Команды»» из «Разбора» делает то же, что кнопка на экране «Команда»: убирает запись
+            # `accounts`, иначе человек остаётся в списке (находка администратора 05.11.2026). Запись
+            # супер-администратора не трогаем — как и `DELETE /users/{id}`.
+            if kind == "confirm_person":
+                for a in store.q("SELECT id, role FROM accounts WHERE full_name=?",
+                                 ((p.get("full_name") or p.get("name") or "").strip(),)):
+                    if a["role"] == "super_admin" and (u.get("role") or "") != "super_admin":
+                        continue
+                    store.delete("accounts", a["id"])
             return resolve(c["id"], u, CardStatus.REJECTED, resolution="не человек")
         if act in ("accept", "confirm"):
+            if kind == "confirm_person":
+                # «Подтвердить — это реальный сотрудник»: человек и его запись «Команды» подтверждаются вместе
+                имя = (p.get("full_name") or p.get("name") or "").strip()
+                if p.get("person_id"):
+                    store.update("people", int(p["person_id"]), confirmed=1)
+                _подтвердить_в_команде(store, имя, имя, payload)
             choice = ""
             if payload.person_id:
                 cands = p.get("candidates") or []
@@ -236,10 +280,7 @@ def mount(r: APIRouter, ctx: Ctx) -> None:
                                  role=payload.project_role or payload.role or "")
                 elif p.get("task_id"):
                     pipe.reg.set_assignee(p["task_id"], val, who, "уточнено в «Разборе»")
-                if not store.q("SELECT id FROM accounts WHERE full_name=?", (val,)):
-                    store.insert("accounts", login=None, full_name=val, role="member", password_hash="", active=1,
-                                 created_at=now(), confirmed=1, confirmed_source="карточка", position=payload.role or "",
-                                 project_role=payload.project_role or "", department=payload.department or "")
+                _подтвердить_в_команде(store, val, (p.get("full_name") or p.get("name") or "").strip(), payload)
                 if getattr(ctx, "sync_team", None):
                     ctx.sync_team(force=True)
                 store.update("cards", c["id"], status="accepted", resolution=val, resolved_at=now())
