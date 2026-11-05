@@ -145,9 +145,13 @@ function менюВстречи($кнопка, m, опции = {}) {
   const дубль = живыеНаДату.length > 1 && !отдельная(m);
   const пункты = [];
   пункты.push('<button type="button" role="menuitem" data-act="rename">Переименовать</button>');
-  // Дату меняют, только пока у встречи нет протокола: сервер отказывает, если уже есть протокол или источники.
-  if (!m.has_minutes && !отменена)
+  // Дату меняют, только пока у встречи нет протокола и материалов: сервер отказывает, если есть протокол или источники.
+  // 05.11.2026: причина видна до нажатия — пункт с числом материалов вместо кнопки, которая обещает и не делает.
+  const материалов = Number(m.materials_count || 0);
+  if (!m.has_minutes && !отменена && !материалов)
     пункты.push(`<button type="button" role="menuitem" data-edit-date="${m.id}" data-date="${esc(String(m.date).slice(0, 10))}">Изменить дату</button>`);
+  else if (!m.has_minutes && !отменена && материалов)
+    пункты.push(`<button type="button" role="menuitem" disabled title="Сначала удалите материалы встречи">Изменить дату нельзя: материалов ${материалов}</button>`);
   пункты.push('<button type="button" role="menuitem" data-act="move">Переместить в проект…</button>');
   if (!отменена) пункты.push('<button type="button" role="menuitem" data-act="subproject">Подпроект…</button>');
   пункты.push('<button type="button" role="menuitem" data-act="leader">Кто вёл</button>');
