@@ -1332,7 +1332,7 @@ class MeetingPipeline:
                 # Неполное извлечение (остановка по пределу) ничего не снимает: «не найдена» не доказано.
                 res = rebuild_mod.drop_missing(self.s, self.reg, meeting_id, mdate,
                                                kept_ids | {tid for tid, _d, _g in added},
-                                               incomplete=stopped is not None, текст_записи=source.text,
+                                               incomplete=stopped is not None or limited, текст_записи=source.text,
                                                new_ids={tid for tid, _d, _g in added})
                 if res.get("near_pairs"):
                     from . import asr_journal as _журнал
