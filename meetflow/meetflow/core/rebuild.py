@@ -190,6 +190,16 @@ def drop_missing(store, reg, meeting_id: int | None, meeting_date: str | None, k
         # новая формулировка и цитата пишутся в прежнюю, ручная правка человека не затирается, пустые поля
         # (исполнитель, срок) берутся у новой. Новая задача снимается, история остаётся у прежней.
         замена = next((n for n in новые if same_task_text(t["description"], [n["description"]])), None)
+        if замена is None:
+            # пары «почти та же работа» (доля 0,6–0,7) ничего не меняют, но идут строкой в журнал потерь:
+            # порог 0,7 оставлен (ответ 05.11.2026), решим по таблице с трёх встреч
+            from .text import stems as _stems, coverage as _coverage
+            for n in новые:
+                x, y = set(_stems(t["description"])), set(_stems(n["description"]))
+                доля = round(max(_coverage(x, y), _coverage(y, x)), 2)
+                if 0.6 <= доля < 0.7:
+                    out.setdefault("near_pairs", []).append(
+                        {"старая": t["description"], "новая": n["description"], "доля": доля})
         if замена is not None:
             полная = store.get("tasks", t["id"]) or {}
             edits = правилась_человеком(store, t["id"])

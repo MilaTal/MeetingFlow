@@ -1330,6 +1330,9 @@ class MeetingPipeline:
                                                kept_ids | {tid for tid, _d, _g in added},
                                                incomplete=stopped is not None, текст_записи=source.text,
                                                new_ids={tid for tid, _d, _g in added})
+                if res.get("near_pairs"):
+                    from . import asr_journal as _журнал
+                    _журнал.write(self.units_journal_path, meeting_id=meeting_id, near_pairs=res["near_pairs"])
                 for t, edits in res["kept"]:
                     # одна карточка на задачу за всё время: повторная пересборка новых не заводит
                     if any(json.loads(c["payload"] or "{}").get("task_id") == t["id"]
