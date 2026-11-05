@@ -954,6 +954,13 @@ class MeetingPipeline:
                                                  set(due_unconfirmed), meeting.get("date"))
                 planned = ук["planned"]
                 merged_history.update(ук["истории"])
+                # След шага укрупнения (записка 1d67734): что сведено и почему.
+                if self.tasks_trace_path:
+                    for з_ in ук.get("журнал") or []:
+                        if isinstance(з_, dict):
+                            asr_journal.write(self.tasks_trace_path, meeting_id=meeting_id, путь="drafts",
+                                              шаг="укрупнение", решение="сведена",
+                                              причина=str(з_.get("почему") or з_.get("причина") or з_.get("что") or "")[:200])
                 for новый, прежний in ук["замены"].items():     # вид срока объединённой — от первой части
                     if прежний in due_kinds:
                         due_kinds[новый] = due_kinds[прежний]
