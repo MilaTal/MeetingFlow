@@ -415,6 +415,11 @@ class UnitsExtractor:
             asr_journal.write(путь_следа, meeting_id=meeting["id"], путь="units", шаг="сторож",
                               решение="отказ", причина=", ".join(g.reasons)[:200],
                               дл_формулировки=len(u.text), дл_цитаты=len(u.quote or ""), строки=u.nums)
+        # След шага слияния (записка 1d67734): каждая потерянная единица — строкой с причиной.
+        for п_ in слито:
+            asr_journal.write(путь_следа, meeting_id=meeting["id"], путь="units", шаг="слияние",
+                              решение="потеряна", причина=str(п_.get("причина") or "")[:200],
+                              дл_формулировки=len(п_.get("текст") or ""), строки=п_.get("строки") or [])
         # журнал потерь (записка 05.11.2026): счётчики по шагам и текст каждого потерянного пункта;
         # правило не менялось, на экран ничего не идёт
         asr_journal.write(getattr(self.pipe, "units_journal_path", None), meeting_id=meeting["id"],
