@@ -615,7 +615,7 @@ class MeetingPipeline:
         self.cards.open(project_id, "technical", f"Шаг сборки не выполнен: {step}", {"detail": detail}, meeting_id)
 
     def _call(self, llm: LLMConnector, budget: RunBudget, purpose: str, system: str, user: str,
-              meeting_id: int) -> Any:
+              meeting_id: int, fix_json=None) -> Any:
         for attempt in (0, 1):
             worst = llm.worst_call_usd(len(system) + len(user)) if hasattr(llm, "worst_call_usd") else None
             budget.check(len(system) + len(user), purpose, worst_usd=worst)
@@ -643,7 +643,8 @@ class MeetingPipeline:
                                   if raw.get(k) is not None},
                                chars_out=len(res.text or ""))
             try:
-                return parse_json(res.text, self.prof.strip_think)
+                # fix_json — правка ответа до разбора (единицы: модель пишет L1 вместо числа, 05.11.2026)
+                return parse_json(fix_json(res.text) if fix_json else res.text, self.prof.strip_think)
             except (ValueError, json.JSONDecodeError) as e:
                 self.journal.bad_answer(purpose, meeting_id, res.model, res.text, f"{type(e).__name__}: {e}")
                 if attempt:
