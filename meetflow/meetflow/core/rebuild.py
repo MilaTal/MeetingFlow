@@ -105,14 +105,18 @@ def та_же_цитата(a: str | None, b: str | None) -> bool:
 
 
 def заменена(прежняя: dict, другая: dict, цитата_прежней: str | None, цитата_другой: str | None) -> bool:
-    """Задача с той же цитатой заменяет прежнюю, если это та же работа по правилу повторов реестра. «Под вопросом» —
-    замена только при узкой цитате: в ней одно поручение, разные слова о нём. В широкой цитате сомнение оставляет
-    задачу: потерять поручение дороже, чем показать пару, которую сведёт правило повторов или человек."""
+    """Задача этой встречи о той же работе заменяет прежнюю — **при любой цитате** (решение разработчика 05.11.2026).
+
+    Замер 05.11.2026 на результатах сухого хода: «под вопросом» при порогах 0,65/0,7/0,8/0,9 даёт ошибочную замену
+    настоящей задачи (`Промаркировать полки` и `Разработать структуру склада` — 1,0), поэтому заменяют только пары «да».
+    «Под вопросом» при той же узкой цитате остаётся заменой: это одно поручение другими словами (28.10.2026)."""
     if not (прежняя.get("responsible") and другая.get("responsible")):   # новая сборка могла не назвать исполнителя
         прежняя, другая = {**прежняя, "responsible": ""}, {**другая, "responsible": ""}
     вердикт = povtory_reestra.пара(прежняя, другая)[0]
     if вердикт == povtory_reestra.ДА:
         return True
+    if not та_же_цитата(цитата_прежней, цитата_другой):
+        return False
     return (вердикт == povtory_reestra.ПОД_ВОПРОСОМ
             and max(len(_слова(цитата_прежней)), len(_слова(цитата_другой))) <= ШИРОКАЯ_ЦИТАТА)
 
@@ -130,11 +134,12 @@ def цитата_занята(store, meeting_id: int, task_id: int, цитата
 
 
 def заменяющие(store, meeting_id: int, task_id: int, цитата: str | None) -> list:
-    """Действующие задачи этой встречи, которые заменяют задачу `task_id` (см. `цитата_занята`)."""
+    """Действующие задачи этой встречи, которые заменяют задачу `task_id` (см. `цитата_занята`). Перебираются все
+    задачи встречи: замена по работе не требует той же цитаты (05.11.2026)."""
     прежняя = _для_сравнения(store.get("tasks", task_id) or {})
     return [r for r in store.q("SELECT * FROM tasks WHERE source_meeting_id=? AND status=? AND id<>?",
                                (meeting_id, TaskStatus.ACTIVE.value, task_id))
-            if та_же_цитата(цитата, r["source_quote"]) and заменена(прежняя, _для_сравнения(r), цитата, r["source_quote"])]
+            if заменена(прежняя, _для_сравнения(r), цитата, r["source_quote"])]
 
 
 def перенести_исполнителя(store, reg, task_id: int, замены: list) -> None:
@@ -167,6 +172,9 @@ def drop_missing(store, reg, meeting_id: int | None, meeting_date: str | None, k
         if возвращена_владелицей(store, t["id"]):
             out.setdefault("kept_owner", []).append(dict(t))
             continue
+        if из_секретаря(store, t["id"]):
+            out.setdefault("kept_secretary", []).append(dict(t))
+            continue                      # строка протокола секретаря пересборкой не заменяется (05.11.2026)
         цит = store.get("tasks", t["id"]).get("source_quote")
         замены = заменяющие(store, meeting_id, t["id"], цит) if текст_записи and цитата_в_записи(цит, текст_записи) else None
         if замены == []:
@@ -198,6 +206,15 @@ def снята_пересборкой(store, task_id: int) -> bool:
     last = store.q("SELECT source, new_status FROM task_history WHERE task_id=? AND new_status IS NOT NULL "
                    "ORDER BY id DESC LIMIT 1", (task_id,))
     return bool(last) and last[0]["source"] == "rebuild" and last[0]["new_status"] == TaskStatus.DROPPED.value
+
+
+СЕКРЕТАРСКИЙ_ИСТОЧНИК = "secretary_table"     # строка истории: задачу отметил протокол секретаря
+
+
+def из_секретаря(store, task_id: int) -> bool:
+    """Задача пришла строкой протокола секретаря: её пересборка не заменяет (решение разработчика 05.11.2026)."""
+    return bool(store.q("SELECT 1 FROM task_history WHERE task_id=? AND source=? LIMIT 1",
+                        (task_id, СЕКРЕТАРСКИЙ_ИСТОЧНИК)))
 
 
 def возвращена_владелицей(store, task_id: int) -> bool:

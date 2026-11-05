@@ -705,6 +705,7 @@ class MeetingPipeline:
         # порог с экрана «Параметры системы → Пороги» важнее темы (владелец 11.10.26, как в Планёрке)
         days = self.s.get_setting("card_cleanup_days")
         self.cards.cleanup(project_id, int(days if days is not None else self.theme.get("operator.card_cleanup_days", 0) or 0))
+        self.cards.expire_assign()      # карточки исполнителя старше 7 дней (решение владелицы 25.10.2026, 05.11.2026)
         budget = RunBudget(limits or BudgetLimits(**self.theme.get("budget", {})))
         meeting = self.s.get("meetings", meeting_id) or {}
         # Проект записи из общей папки не определён: сборка идёт сразу в проекте папки (решение владелицы 28.10.2026:

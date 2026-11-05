@@ -35,7 +35,7 @@ VIEW_OF = {"ungrounded_task": "tasks", "duplicate_task": "tasks", "due_date": "t
 # «Разбор» — решения человека. События журнала (роль назначена, встреча удалена, протокол собран внешней моделью)
 # решением не являются и в очередь не идут: у них свой вид `event` и «Системные сообщения». Сбои (`technical`) идут и
 # считаются в норму (решение владелицы 25.10.2026). «Под вопросом» показывается строками задач, карточка — нет.
-EXCLUDED = ("event", "task_doubt")
+EXCLUDED = ("event", "task_doubt", "review_finding")
 # Старые карточки-события до разделения видов лежали в `technical`: их узнаём по началу заголовка. Всё, чего в списке
 # нет, считается сбоем: лучше лишняя карточка, чем скрытый сбой (решение разработчика 05.11.2026).
 СОБЫТИЯ = ("Протокол встречи", "Удалена встреча", "Встреча переименована", "Второй экземпляр", "Назначена роль",
@@ -271,6 +271,7 @@ def mount(r: APIRouter, ctx: Ctx) -> None:
     def razbor(request: Request):
         ctx.need_admin(request)
         vp.истечь(store)
+        pipe.cards.expire_assign()      # карточки исполнителя старше 7 дней (как ERP, 05.11.2026)
         extra, args = ctx.scope_sql(request)
         items = []
         meetings = {m["id"]: m["date"] for m in store.q("SELECT id, date FROM meetings")}
@@ -353,6 +354,7 @@ def mount(r: APIRouter, ctx: Ctx) -> None:
     def possible(request: Request, state: str = "", reason: str = "", date_from: str = "", date_to: str = "", q: str = ""):
         ctx.need_admin(request)
         vp.истечь(store)
+        pipe.cards.expire_assign()      # карточки исполнителя старше 7 дней (как ERP, 05.11.2026)
         extra, args = ctx.scope_sql(request)
         rows = store.q("SELECT * FROM possible_assignments WHERE 1=1" + extra + " ORDER BY COALESCE(meeting_date,'') DESC, id",
                        args)

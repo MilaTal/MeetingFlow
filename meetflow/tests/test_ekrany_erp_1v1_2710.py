@@ -473,6 +473,8 @@ def test_разбор_одна_очередь_и_карточки_в_виде_er
     _card(env, "task_doubt", {"task_id": tid, "description": "Подготовить акт приёмки"})
     t2 = _task(env, description="Согласовать график", assignee=None)
     cid = _card(env, "assign_person", {"task_id": t2, "named": "Вера", "candidates": [{"id": 1, "name": "Сидорова Вера"}]})
+    from meetflow.core.store import now as _now
+    env.st.update("cards", cid, created_at=_now())      # свежая: карточки исполнителя истекают через 7 дней (05.11.2026)
     # 05.11.2026: сбой (`technical`) в «Разборе» показывается и считается в норму; событие (`event`) — нет
     тех = _card(env, "technical", {"error": "x"}, title="Голоса не разобраны: запись")
     _card(env, "event", {"message": "x"}, title="Удалена встреча 03.11.2026")

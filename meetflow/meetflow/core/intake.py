@@ -142,7 +142,7 @@ class IntakeService:
         what = f"Папка-приёмник: {old or 'не задана'} → {path or 'отключена'}"
         self.s.insert("decisions", project_id=project_id, what=what, decision="изменено", why=f"кто: {by or '—'}",
                       at=now())
-        self.pipe.cards.open(project_id, "technical", "Изменён адрес папки-приёмника",
+        self.pipe.cards.open(project_id, "event", "Изменён адрес папки-приёмника",
                              {"было": old, "стало": str(path) if path else None, "кто": by})
 
     def interval(self, project_id: int) -> int:

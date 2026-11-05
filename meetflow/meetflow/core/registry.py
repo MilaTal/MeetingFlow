@@ -171,6 +171,18 @@ class CardQueue:
                           resolved_at=now())
         return len(rows)
 
+    def expire_assign(self, days: int = 7) -> int:
+        """Карточка выбора исполнителя старше 7 дней закрывается сама — как в ERP (решение владелицы 25.10.2026).
+
+        Задача при этом не теряется: она остаётся в реестре без исполнителя, а не снимается. Раньше `assign_person`
+        не истекал вовсе — на 05.11.2026 таких карточек было 20, из них 14 старше недели."""
+        edge = (datetime.now() - timedelta(days=days)).strftime("%Y-%m-%dT%H:%M:%S")
+        rows = self.s.q("SELECT id FROM cards WHERE kind='assign_person' AND status='open' AND created_at < ?", (edge,))
+        for r in rows:
+            self.s.update("cards", r["id"], status=CardStatus.REJECTED.value,
+                          resolution="срок карточки 7 дней: задача осталась без исполнителя", resolved_at=now())
+        return len(rows)
+
     def list(self, project_id: int, status: CardStatus | None = CardStatus.OPEN) -> list[dict]:
         if status is None:
             rows = self.s.q("SELECT * FROM cards WHERE project_id=? ORDER BY id", (project_id,))

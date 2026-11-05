@@ -18,7 +18,9 @@ def test_card_cleanup_days_is_applied(store, project, make_pipe):
     p.ingest(project, mid, "t 01.10.2026.txt", TRANSCRIPT.encode())
     p.run(project, mid)
     assert store.get("cards", held)["status"] == "rejected"           # снята по сроку
-    assert store.get("cards", keep)["status"] == "open"               # выбор исполнителя — не снимается
+    # 05.11.2026: карточка выбора исполнителя тоже истекает — через 7 дней, как в ERP (решение владелицы 25.10.2026)
+    assert store.get("cards", keep)["status"] == "rejected"
+    assert "срок карточки 7 дней" in (store.get("cards", keep)["resolution"] or "")
 
 
 def test_units_kinds_filters_units(store, project, make_pipe, theme):
