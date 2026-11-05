@@ -1105,3 +1105,7 @@ a.mt-btn { text-decoration: none; }
 .prep-project-pick select { min-width: 240px; }
 .prep-new-project form { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
 .prep-new-project input[type="text"] { min-width: 240px; }
+
+/* Строка инструментов встречи (05.11.2026): не шире окна — переносится, а не прокручивается вбок; «⋯» остаётся видно */
+#meeting-tools { flex-wrap: wrap; overflow-x: visible; row-gap: 8px; }
+@media (max-width: 560px) { #meeting-tools { gap: 8px; } }

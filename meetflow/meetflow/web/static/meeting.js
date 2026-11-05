@@ -254,10 +254,9 @@ async function renderMeetingReader(id, запрошеннаяВкладка) {
       ${показПлана ? `<a class="doc-tab${tab === "plan" ? " doc-tab-on" : ""}" href="#meetings/${id}/planprep${откуда ? `?from=${esc(откуда)}` : ""}">План</a>` : ""}
       ${главная}
       ${кнопка("materials", ВСТРЕЧА_ЗНАКИ.notes, "Материалы", всего)}
-      ${кнопка("tasks", ВСТРЕЧА_ЗНАКИ.tasks, "Задачи встречи", мои.length, true)}
-      ${договорённости ? кнопка("agreements", ВСТРЕЧА_ЗНАКИ.agreements, "Договорённости встречи", договорённости.length, true) : ""}
-      ${кнопка("plan", ВСТРЕЧА_ЗНАКИ.plan, "План следующей")}
-      ${админ && hasMin ? `<button type="button" class="mt-btn" data-drawer="notes" aria-expanded="false">${ВСТРЕЧА_ЗНАКИ.notes}Замечания${замечания ? ` <span class="n">${замечания}</span>` : ""}</button>` : ""}
+      ${кнопка("tasks", ВСТРЕЧА_ЗНАКИ.tasks, "Задачи", мои.length, true)}
+      ${договорённости ? кнопка("agreements", ВСТРЕЧА_ЗНАКИ.agreements, "Договорённости", договорённости.length, true) : ""}
+      ${/* «План следующей» и «Замечания» — в «⋯»: строка не должна быть шире окна (05.11.2026) */ ""}
       ${документ ? `<a class="mt-btn" href="${экспорт}" target="_blank">${ВСТРЕЧА_ЗНАКИ.docx}Скачать .docx</a>` : ""}
       ${правкаДоступна ? полотноПереключатель(основаПолотна, режимПолотна, "reader-edit") : ""}
       ${плашкаНовее}
@@ -329,8 +328,14 @@ async function renderMeetingReader(id, запрошеннаяВкладка) {
   };
   document.querySelectorAll(".mt-btn[data-drawer]").forEach(b => b.addEventListener("click", () => открыть(b.dataset.drawer, b)));
   // «⋯» — одно меню со встречей (Б4): те же пункты, что в реестре и подготовке.
+  const допПункты = [{ act: "plan-next", label: "План следующей" }];
+  if (админ && hasMin) допПункты.push({ act: "notes", label: `Замечания${замечания ? ` — ${замечания}` : ""}` });
   document.getElementById("meeting-more")?.addEventListener("click", () => менюВстречи(document.getElementById("meeting-more"), встреча,
-    { все: встречи, перерисовать: () => renderMeetingReader(id, tab) }));
+    { все: встречи, перерисовать: () => renderMeetingReader(id, tab), доп: допПункты,
+      приВыборе: (акт) => {
+        const к = document.querySelector(`.mt-btn[data-drawer="${акт === "plan-next" ? "plan" : "notes"}"]`);
+        открыть(акт === "plan-next" ? "plan" : "notes", к);
+      } }));
   const наEsc = ev => {
     if (ev.key !== "Escape") return;
     if (!document.getElementById("mt-drawer")) { document.removeEventListener("keydown", наEsc); return; }

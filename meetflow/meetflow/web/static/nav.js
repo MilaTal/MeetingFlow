@@ -155,6 +155,10 @@ function менюВстречи($кнопка, m, опции = {}) {
   пункты.push('<button type="button" role="menuitem" data-act="move">Переместить в проект…</button>');
   if (!отменена) пункты.push('<button type="button" role="menuitem" data-act="subproject">Подпроект…</button>');
   пункты.push('<button type="button" role="menuitem" data-act="leader">Кто вёл</button>');
+  // Дополнительные пункты экрана встречи (05.11.2026): «План следующей» и «Замечания» переехали из строки инструментов,
+  // чтобы она не была шире окна. Обработчик даёт экран, меню только место и подпись.
+  for (const д of (опции.доп || []))
+    пункты.push(`<button type="button" role="menuitem" data-act="${esc(д.act)}">${esc(д.label)}</button>`);
   if (дубль) пункты.push('<button type="button" role="menuitem" data-act="merge">Свести с другой…</button>');
   if (!отменена) пункты.push(`<button type="button" role="menuitem" data-delete-meeting="${m.id}" data-date="${esc(String(m.date).slice(0, 10))}">Удалить</button>`);
   const $m = document.createElement("div");
@@ -176,6 +180,11 @@ function менюВстречи($кнопка, m, опции = {}) {
   $m.querySelector('[data-act="subproject"]')?.addEventListener("click", () => { закрыть(); подпроектВстречи(m, перерисовать); });
   $m.querySelector('[data-act="leader"]')?.addEventListener("click", () => { закрыть(); ктоВёлВстречи(m, перерисовать); });
   $m.querySelector('[data-act="merge"]')?.addEventListener("click", () => { закрыть(); свестиВстречу(m, живыеНаДату, перерисовать); });
+  $m.querySelectorAll("[data-act]").forEach(b => {
+    const акт = b.dataset.act;
+    if (опции.приВыборе && !["rename", "move", "subproject", "leader", "merge"].includes(акт))
+      b.addEventListener("click", () => { закрыть(); опции.приВыборе(акт); });
+  });
   // «Изменить дату» и «Удалить» живут общими обработчиками (data-edit-date / data-delete-meeting, app.js) — меню только
   // даёт им место; старое отдельное действие не дублируется.
 }

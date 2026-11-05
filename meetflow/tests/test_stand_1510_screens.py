@@ -30,7 +30,7 @@ def test_task_and_meeting_link_both_ways(tmp_path):
     root = Path(__file__).parents[1] / "meetflow" / "web" / "static"
     reg, meet = (root / "registry.js").read_text(encoding="utf-8"), (root / "meeting.js").read_text(encoding="utf-8")
     assert 'class="reg-meet">встреча ${esc(fmtRuDate(t.source_meeting_date))} · протокол</a>' in reg
-    assert 'кнопка("tasks", ВСТРЕЧА_ЗНАКИ.tasks, "Задачи встречи", мои.length, true)' in meet
+    assert 'кнопка("tasks", ВСТРЕЧА_ЗНАКИ.tasks, "Задачи", мои.length, true)' in meet  # подпись короче с 05.11.2026
 
 
 def test_pending_change_applied_on_leave_and_close():
