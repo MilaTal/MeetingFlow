@@ -854,7 +854,9 @@ def mount(r: APIRouter, ctx: Ctx) -> None:
 
     @r.post("/meetings/{mid}/prepare-minutes")
     def prepare_minutes(mid: int, request: Request, rebuild: bool = False, confirm: bool = False):
-        u = ctx.need_user(request)
+        # «Пересобрать протокол» — только администратор и суперадминистратор (слово владелицы 05.11.2026).
+        # Первая сборка и запись из приёмника роль не проверяют: там работает система, а не человек.
+        u = ctx.need_admin(request) if rebuild else ctx.need_user(request)
         m = ctx.meeting_or_404(mid)
         check_not_cancelled(m)
         if (m.get("date") or "") > today_iso():
