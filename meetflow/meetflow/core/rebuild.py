@@ -155,7 +155,8 @@ def перенести_исполнителя(store, reg, task_id: int, заме
 
 
 def drop_missing(store, reg, meeting_id: int | None, meeting_date: str | None, kept_ids: set[int], *,
-                 incomplete: bool = False, when: str | None = None, текст_записи: str | None = None) -> dict:
+                 incomplete: bool = False, when: str | None = None, текст_записи: str | None = None,
+                 new_ids: set[int] | None = None) -> dict:
     """Снять задачи прежней сборки, которых нет в новой. `kept_ids` — задачи этой встречи, которые новая сборка
     подтвердила (в том числе заведённые заново в этом прогоне). `incomplete` — извлечение неполное: ничего не снимаем.
     `текст_записи` — запись встречи: задача, цитата которой в ней есть, не снимается — модель просто не выдала её в этот
@@ -164,10 +165,46 @@ def drop_missing(store, reg, meeting_id: int | None, meeting_date: str | None, k
     out: dict = {"dropped": [], "kept": [], "when": when}
     if incomplete or meeting_id is None:
         return out
+    from .pipeline import same_task_text        # локально: pipeline сам импортирует rebuild
     kept = set(kept_ids)
+    новые = [store.get("tasks", i) for i in sorted(new_ids or ())]
+    новые = [t for t in новые if t and t.get("status") == TaskStatus.ACTIVE.value]
+    # Работа, снятая человеком или по его решению, не возвращается ни своим номером, ни новым (решение владелицы
+    # 04.11.2026: задачи 3, 5 и 6 встречи 15.10). Проверяем до снятия «не вошедших»: пересборка заводит ту же
+    # работу новым номером — её и снимаем, причина уходит в журнал потерь.
+    снятые_людьми = [t for t in store.q("SELECT id, description FROM tasks WHERE source_meeting_id=? AND status=?",
+                                        (meeting_id, TaskStatus.DROPPED.value))
+                     if not снята_пересборкой(store, t["id"])]
+    for новая in list(новые):
+        hit = next((s for s in снятые_людьми if same_task_text(новая["description"], [s["description"]])), None)
+        if hit:
+            reg.set_status(новая["id"], TaskStatus.DROPPED, "rebuild",
+                           f"работа снята человеком (№{hit['id']}) — новая не заводится")
+            out.setdefault("dropped_human", []).append(dict(новая))
+            новые.remove(новая)
     for t in store.q("SELECT id, description FROM tasks WHERE source_meeting_id=? AND status=?", 
                      (meeting_id, TaskStatus.ACTIVE.value)):
         if t["id"] in kept:
+            continue
+        # Та же работа заведена заново новым номером — номер прежней задачи сохраняется (правка 05.11.2026):
+        # новая формулировка и цитата пишутся в прежнюю, ручная правка человека не затирается, пустые поля
+        # (исполнитель, срок) берутся у новой. Новая задача снимается, история остаётся у прежней.
+        замена = next((n for n in новые if same_task_text(t["description"], [n["description"]])), None)
+        if замена is not None:
+            полная = store.get("tasks", t["id"]) or {}
+            edits = правилась_человеком(store, t["id"])
+            поля = {"source_quote": замена.get("source_quote") or ""}
+            if not edits:
+                поля["description"] = замена["description"]
+            if not (полная.get("assignee") or "").strip() and замена.get("assignee"):
+                поля["assignee"] = замена["assignee"]
+            if not полная.get("due_date") and замена.get("due_date"):
+                поля["due_date"], поля["due_kind"] = замена["due_date"], замена.get("due_kind")
+            store.update("tasks", t["id"], **поля)
+            reg.set_status(замена["id"], TaskStatus.DROPPED, "rebuild",
+                           f"заменена прежней задачей №{t['id']}: номер сохранён")
+            новые.remove(замена)
+            out.setdefault("kept_number", []).append({"id": t["id"], "новая": замена["id"], "правка": bool(edits)})
             continue
         if возвращена_владелицей(store, t["id"]):
             out.setdefault("kept_owner", []).append(dict(t))
