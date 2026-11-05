@@ -965,6 +965,11 @@ class MeetingPipeline:
                     if прежний in due_kinds:
                         due_kinds[новый] = due_kinds[прежний]
                 rep.ukrupnenie = ук["строка"]
+                if self.tasks_trace_path:
+                    for t_ in ук["сведённые"]:
+                        asr_journal.write(self.tasks_trace_path, meeting_id=meeting_id, путь="drafts", шаг="повтор реестра",
+                                          решение="сведена", причина=f"с открытой задачей №{t_.get('duplicate_of')}",
+                                          дл_формулировки=len(str(t_.get('description') or "")))
                 for t in ук["сведённые"]:      # та же открытая задача прошлой встречи — не новая, строкой журнала
                     self.journal.write(purpose="triage", meeting_id=meeting_id, verdict="сведено с реестром",
                                        task_id=t.get("duplicate_of"), description=str(t.get("description"))[:300])
@@ -984,6 +989,12 @@ class MeetingPipeline:
             try:
                 об = ukrupnenie_sborka.объединение(self.s, project_id, planned, source.text, _дополнение,
                                                    meeting_id, meeting.get("date"))
+                if self.tasks_trace_path:
+                    for з_ in (об or {}).get("журнал") or []:
+                        if isinstance(з_, dict):
+                            asr_journal.write(self.tasks_trace_path, meeting_id=meeting_id, путь="drafts",
+                                              шаг="объединение", решение=str(з_.get("решение") or "объединена")[:80],
+                                              причина=str(з_.get("почему") or з_.get("причина") or "")[:200])
                 planned = об["planned"]
                 for t in об["сведённые"]:      # повтор открытой задачи по правилу повторов реестра (29.10.2026)
                     self.journal.write(purpose="triage", meeting_id=meeting_id, verdict="сведено с реестром",
