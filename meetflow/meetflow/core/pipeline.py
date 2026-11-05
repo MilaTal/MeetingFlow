@@ -43,6 +43,7 @@ from . import petlya_raspoznavaniya as petlya, polnota_rasshifrovki as polnota
 from . import korotkiy_protokol, schet_zadach, tablica_zadach, tekst_po_zapisi
 from . import iskazheniya_nazvaniy, slovar_whisper, ukrupnenie_sborka
 from . import obedinenie as obedinenie_mod     # объединение и мусор (Доработка 1, 29.10.2026)
+from . import vtoroy_sudya                      # второй судья в тень (записка 05.11.2026)
 from .team_sync import sync_people
 from ..connectors.team_shared import team_shared_state
 from .dates import due_text, lenient_date
@@ -1334,6 +1335,9 @@ class MeetingPipeline:
                                     f"Задача не вошла в пересборку, но правилась человеком: {(t['description'] or '')[:100]}",
                                     {"task_id": t["id"], "description": t["description"], "edits": edits,
                                      "when": res["when"]}, meeting_id)
+                # Второй судья в тень: один вызов на сборку, пары своей встречи от 0,4; ничего не снимает
+                # и не меняет — только строка в `vtoroy_sudya.jsonl` (записка 05.11.2026).
+                vtoroy_sudya.прогнать(self, project_id, meeting_id, budget)
                 # пометка «оперативная» из раздела секретаря — сама, до таблицы (как ERP, 26.10.2026)
                 if notes:
                     self._operativnye_po_sekretaryu(project_id, notes)

@@ -12,6 +12,7 @@ from __future__ import annotations
 import json
 import os
 import socket
+import sys
 import threading
 import time
 from contextlib import asynccontextmanager
@@ -266,6 +267,28 @@ def карточки_сторож_старт(pipe) -> None:
     поток.start()
 
 
+def голоса_при_старте(pipe) -> str:
+    """Голоса при запуске: нет папки моделей — строка в журнал и одна карточка сбоя (записка 05.11.2026).
+
+    Повод: 03.11.2026 файл `14.26` обработал процесс, запущенный в обход `python -m meetflow`, — `.env.local`
+    не прочитался, и разделение по голосам молча выключилось. Теперь такой запуск виден сразу: строка в журнал
+    сервера и карточка `technical` в «Разборе». Карточка одна на причину: `CardQueue.open` не заводит вторую
+    такую же открытую, а после закрытия человеком новый сбой снова её откроет. Возвращает `ok` / `off` / `fail`.
+    """
+    from ..core import diarize
+    if not diarize.enabled():
+        return "off"
+    try:
+        ready, why = diarize.available()
+    except Exception as exc:  # noqa: BLE001 — проверка не должна ронять старт сервера
+        ready, why = False, str(exc)
+    if ready:
+        return "ok"
+    print(f"MeetFlow: разделение по голосам недоступно — {why}", file=sys.stderr, flush=True)
+    pipe.cards.open(None, "technical", "Голоса не разобьются: разделение по голосам недоступно", {"detail": why})
+    return "fail"
+
+
 def create_app(theme_name: str | None = None, db_path: str | None = None, journal: str | None = None,
                watch: bool | None = None) -> FastAPI:
     theme = load_theme(theme_name or os.environ.get("MEETFLOW_THEME", "_default"))
@@ -355,6 +378,7 @@ def create_app(theme_name: str | None = None, db_path: str | None = None, journa
             intake.start()        # фоновый забор из папок-приёмников
             backups.start()       # автокопия базы по расписанию
             карточки_сторож_старт(pipe)   # карточки исполнителя старше 7 дней — раз в час, как в ERP
+            голоса_при_старте(pipe)       # нет папки моделей — строка в журнал и одна карточка, а не тишина
         elif watch_on:
             pipe.cards.open(None, "event", "Второй экземпляр MeetFlow на той же базе — забор из папки и автокопия "
                             "в нём выключены", {"why": "первый экземпляр работает: его процесс жив и порт слушает; "
