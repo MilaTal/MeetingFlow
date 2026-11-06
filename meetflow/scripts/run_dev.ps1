@@ -64,3 +64,5 @@ if (Test-Path $own) {
 }
 Set-Location (Split-Path $PSScriptRoot -Parent)
 python -m meetflow serve --theme $Theme --db $Db --port $Port --host $BindHost
+# Код выхода python — наружу (записка 57a2983, 06.11.2026): по коду 3 обёртка ждёт 60 с, а не 5
+if ($null -ne $LASTEXITCODE) { exit $LASTEXITCODE }

@@ -94,14 +94,16 @@ async function renderProtocols() {
     месяцПрежний = месяц;
     // Название встречи — как в прежней таблице (в том числе пометка «дата ориентировочная»; аудит 13.10.26)
     const название = cleanLabel(m.label);
+    // «…» — первой в строке (слово владелицы 06.11.2026): в конце строки её не видно, а кнопка нужна во всех строках
     return `<li><div class="proto-row" data-href="#meetings/${m.id}">
+        ${isAdmin() ? `<span class="reg-menu-wrap proto-more-wrap"><button type="button" class="pl-more proto-more" data-mid="${m.id}" aria-label="Действия со встречей ${esc(fmtRuDate(m.date))}" aria-haspopup="menu"${m.project_how ? ` title="${esc(m.project_how)}"` : ""}>…</button></span>` : ""}
         <span class="proto-month">${esc(месяцЯчейка)}</span>
         <a class="proto-date" href="#meetings/${m.id}">${esc(fmtRuDate(m.date))}</a>
         ${название ? `<span class="proto-label">${esc(название)}</span>` : ""}
         ${(!выбранныйПроект() && m.project_label) || m.subproject ? `<span class="proto-label"${m.project_how ? ` title="${esc(m.project_how)}"` : ""}>${esc(выбранныйПроект() ? m.subproject : m.project_label)}</span>` : ""}
         <span class="proto-state${с.акцент ? " proto-state-acc" : ""}">${НАВ_ЗНАКИ[с.знак] || ""}${esc(с.текст)}</span>
         ${m.предложена_пересборка && isAdmin() ? `<a class="proto-state proto-state-acc" href="#razbor" title="Пришёл источник, добавляющий новое. Протокол правили вручную, встреча старше пяти рабочих дней или автопересборок уже две — сами не пересобираем. Решение — в «Разборе»">есть новые материалы — пересобрать?</a>` : ""}
-        <span class="proto-tasks">задач ${m.tasks_count || 0}${isAdmin() ? `<span class="reg-menu-wrap"><button type="button" class="pl-more proto-more" data-mid="${m.id}" aria-label="Действия со встречей ${esc(fmtRuDate(m.date))}" aria-haspopup="menu"${m.project_how ? ` title="${esc(m.project_how)}"` : ""}>…</button></span>` : ""}</span></div></li>`;
+        <span class="proto-tasks">задач ${m.tasks_count || 0}</span></div></li>`;
   };
   const список = (строки, ключ) => { месяцПрежний = ""; return `<div class="card reg-card feed-list"><ul class="proto-feed" data-list="${ключ}">${строки.map(строка).join("")}</ul></div>`; };
   const заСрок = НЕДЕЛЬ_ДО_АРХИВА === 1 ? "за последнюю неделю" : `за последние ${НЕДЕЛЬ_ДО_АРХИВА} ${недельВин(НЕДЕЛЬ_ДО_АРХИВА)}`;

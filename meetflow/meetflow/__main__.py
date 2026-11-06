@@ -176,8 +176,38 @@ def main(argv: list[str] | None = None) -> int:
             print("Внимание: сервер открыт в локальную сеть, вход по паролю выключен — роль берётся из заголовка. "
                   "Открыто по слову владелицы 26.10.2026 (http://m46-ai-vm1.nevalab.ru:8005/).", file=sys.stderr)
         os.environ["MEETFLOW_PORT"] = str(a.port)      # метка запуска знает свой порт (стенд 34)
+        # Порт занят — выходим отдельным кодом 3 (записка 06.11.2026): обёртка по нему ждёт 60 с, а не 5, и не
+        # плодит второй сервер. Раньше падение шло общей ошибкой uvicorn, и цикл обёртки крутился впустую.
+        занят = _кто_держит_порт(a.host, a.port)
+        if занят:
+            print(f"порт {a.port} занят процессом {занят}", file=sys.stderr, flush=True)
+            return 3
         _crash_log(a.db)
         uvicorn.run(create_app(), host=a.host, port=a.port)
+    return 0
+
+
+def _кто_держит_порт(host: str, port: int) -> int | None:
+    """PID процесса, который уже слушает порт (None — свободен). Только чтение, без сети и без запуска сервера."""
+    import socket
+    проверять = "127.0.0.1" if host in ("0.0.0.0", "", None) else host
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+        s.settimeout(0.5)
+        if s.connect_ex((проверять, int(port))) != 0:
+            return None
+    if os.name != "nt":
+        return 0
+    try:
+        import subprocess
+        out = subprocess.run(["netstat", "-ano"], capture_output=True, text=True, timeout=15,
+                             encoding="cp866", errors="replace").stdout
+        for строка in out.splitlines():
+            части = строка.split()
+            if len(части) >= 5 and части[0].upper() == "TCP" and части[3].upper() == "LISTENING" \
+                    and части[1].endswith(f":{port}"):
+                return int(части[4])
+    except Exception:  # noqa: BLE001 — PID не узнали, но порт занят: код 3 всё равно верный
+        return 0
     return 0
 
 

@@ -39,7 +39,7 @@ from .people import Team
 from .prompts import PromptBuilder, chunks, parse_json, profile
 from .registry import CardQueue, OperatorMemory, TaskRegistry
 from . import deadline
-from . import asr_journal, hod, plan as plan_mod, voice_step
+from . import asr_journal, hod, mesto_citaty, plan as plan_mod, voice_step
 from . import petlya_raspoznavaniya as petlya, polnota_rasshifrovki as polnota
 from . import korotkiy_protokol, schet_zadach, tablica_zadach, tekst_po_zapisi
 from . import iskazheniya_nazvaniy, slovar_whisper, ukrupnenie_sborka
@@ -208,8 +208,7 @@ def _int(v: Any) -> int | None:
 # документа 14). Вне реестра — дубль, пустая формулировка и внедрённая инструкция: текст реестра идёт в подсказки
 # модели на следующих встречах. Уже отклонённое оператором отсекается раньше — по правилу памяти.
 # отсеиваются целиком: ни задачи, ни карточки — строкой в журнал разбора (владелец 15.10.26, вечер; Планёрка ddfa618)
-SIFTED = {"negation_in_quote", "question_not_assignment", "condition_not_assignment", "intent_not_assignment",
-          "insignificant"}     # мелочь и обрывок — правилом существенности (ERP 21–22.10.2026, перенос 27.10.2026)
+SIFTED = {"intent_not_assignment", "insignificant"}     # мелочь и обрывок — правилом существенности (ERP 21–22.10.2026, перенос 27.10.2026)
 OUT_OF_REGISTRY = {"duplicate", "empty_description", "suspicious_instruction",
                    # отрицание, вопрос, условие, намерение отсеиваются ДО «под вопросом» (владелец 15.10.26, вечер)
                    "negation_in_quote", "question_not_assignment", "condition_not_assignment", "intent_not_assignment",
@@ -956,6 +955,11 @@ class MeetingPipeline:
                     rep.skipped_by_rule += 1
                     continue
                 g = gate.check(d, source, existing)
+                # Правило владелицы 16.10 и 20.10 (записка 2588f5b): вопрос-просьба и отрицание внутри содержания —
+                # обычная задача без карточки; условие остаётся «под вопросом» с карточкой. Убираем эти два кода из
+                # причин сразу после сторожа — иначе они уводили черновик в held_task (карточка без задачи).
+                if g.reasons:
+                    g.reasons = [r for r in g.reasons if r not in ("question_not_assignment", "negation_in_quote")]
                 who = g.assignee.label if g.assignee else ""
                 # След исполнителя (записка 06.11.2026): что вернула модель и какое правило сняло имя. Бесплатно, и
                 # без этого разбивка «почему исполнителя нет» делается только чтением записи по каждой задаче.
@@ -970,6 +974,7 @@ class MeetingPipeline:
                         дополнить_исполнителя(hit, who)
                     repeats += 1
                     continue  # повторный прогон той же встречи: эта задача уже заведена
+                срок_след: dict = {}
                 if d.due_date:            # срок — только если прозвучал рядом с цитатой (01/6)
                     said = supported_due(d.due_date, self._window(source.lines, g.quote or d.quote), meeting.get("date"))
                     proposed = d.due_date
@@ -1014,6 +1019,21 @@ class MeetingPipeline:
                         # не молча: задача без срока и карточка, как в Планёрке (владелец 12.10.26)
                         rep.due_dropped += 1
                         due_unconfirmed[id(d)] = proposed
+                # След черновика целиком (записка 7208bf3): правило сторожа, была ли дословная цитата и нашлась ли она
+                # в записи, что стало со сроком. Без этого «почему черновик со сроком не стал задачей» не видно:
+                # снятые черновики раньше не попадали в след вовсе. Текст — только в журнал вне git.
+                if self.tasks_trace_path:
+                    цитата = (g.quote or d.quote or "").strip()
+                    asr_journal.write(self.tasks_trace_path, meeting_id=meeting_id, путь="drafts", шаг="черновик",
+                                      принят=int(bool(g.accepted)), guard_rule=";".join(g.reasons)[:200],
+                                      цитата_есть=int(bool(цитата)),
+                                      # 06.11.2026 (п. 1б): место цитаты по ERP, а не «целая строка в цитате»
+                                      цитата_найдена=int(bool(цитата) and
+                                                         mesto_citaty._место(цитата, "\n".join(source.lines)) is not None),
+                                      due_phrase=str(d.due_date or "")[:60],
+                                      due_final=str(срок_след.get("due_final") or "")[:40],
+                                      assignee_model=str(d.assignee or "")[:80],
+                                      цитата=цитата[:300])
                 if g.accepted:
                     planned.append((d, g))
                     existing.append((g.description, who))
@@ -1625,11 +1645,13 @@ class MeetingPipeline:
 
     @staticmethod
     def _window(lines: list[str], quote: str) -> str:
-        """Цитата и соседние строки — где должен прозвучать срок."""
-        hit = [i for i, ln in enumerate(lines) if ln.strip() and ln.strip() in (quote or "")]
-        if not hit:
-            return quote or ""
-        return "\n".join(lines[max(0, min(hit) - 1):max(hit) + 2])
+        """Цитата и соседние строки записи — где должен прозвучать срок.
+
+        06.11.2026 (записка `86a7917`, п. 1б): место цитаты ищет `mesto_citaty._место` из ERP — дословно, затем по
+        плотности основ. Раньше строка считалась найденной, только если целиком входила в цитату; строки записи —
+        длинные абзацы, поэтому окно почти всегда оставалось одной цитатой, и сверка срока не работала.
+        """
+        return mesto_citaty.окно_цитаты(quote, "\n".join(lines), 1)
 
     @staticmethod
     def _closing_candidates(active: list[dict], lines: list[str], per_task: int = 4,
