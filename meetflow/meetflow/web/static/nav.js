@@ -417,7 +417,7 @@ async function renderPrep() {
         <div class="prep-nearest-text">
           <div class="prep-nearest-title">Ближайшая встреча: ${esc(fmtRuDate(б.date))}, ${esc(деньНедели(б.date))}${своёНазвание(б) ? ` — ${esc(cleanLabel(б.label))}` : ""}</div>
           <div class="prep-nearest-sub">${б.building ? "идёт сборка · " : ""}${б.has_plan ? `план собран ${esc(fmtRuDateTime(б.plan_generated_at))}` : "плана пока нет"}${б.materials_count ? ` · материалов ${б.materials_count}` : ""}${авто(б)
-            ? ` · дата предложена системой${админ ? ` · <button type="button" class="link" id="prep-change-date" data-edit-date="${б.id}" data-date="${esc(б.date)}">изменить дату</button>` : ""}` : ""}${р.дубль(б.date)
+            ? `${админ ? ` · <button type="button" class="link" id="prep-change-date" data-edit-date="${б.id}" data-date="${esc(б.date)}">изменить дату</button>` : ""}` : ""}${р.дубль(б.date)
             ? ` · <span class="prep-mark prep-mark-acc">${админ ? "на эту дату две встречи — сведите их через «⋯» в таблице ниже" : "на эту дату две встречи — свести их в одну может администратор"}</span>` : ""}</div>
         </div>
         <a class="btn btn-primary" id="prep-open-plan" href="#meetings/${б.id}/planprep?from=prep">Открыть план встречи</a>
@@ -451,7 +451,7 @@ async function renderPrep() {
     // без акцента и без сводки
     const пометки = [ближняя ? '<span class="prep-mark prep-mark-acc">ближайшая</span>' : "",
       m.building && !отменена ? '<span class="prep-mark prep-mark-acc">идёт сборка</span>' : "",
-      авто(m) && !отменена ? '<span class="prep-mark">дата предложена системой</span>' : "",
+
       дубль ? '<span class="prep-mark prep-mark-acc">две встречи на дату</span>' : двеНаДату ? '<span class="prep-mark">две встречи на дату</span>' : "",
       отменена ? '<span class="prep-mark">отменена</span>' : ""].join("");
     const план = отменена ? '<span class="prep-muted">—</span>'
@@ -488,7 +488,7 @@ async function renderPrep() {
   };
   const $warn = document.getElementById("prep-date-warn");
   const показатьЗанято = (занятая) => {
-    $warn.innerHTML = `На ${esc(fmtRuDate(занятая.date))} уже есть встреча${занятая.label && !занятая.auto ? ` «${esc(занятая.label)}»` : ""} — ${занятая.has_plan ? "план собран" : "плана пока нет"}${занятая.auto ? " (дата предложена системой)" : ""}. <button type="button" class="link" id="prep-open-existing">Открыть её</button>`;
+    $warn.innerHTML = `На ${esc(fmtRuDate(занятая.date))} уже есть встреча${занятая.label && !занятая.auto ? ` «${esc(занятая.label)}»` : ""} — ${занятая.has_plan ? "план собран" : "плана пока нет"}. <button type="button" class="link" id="prep-open-existing">Открыть её</button>`;
     $warn.hidden = false;
     document.getElementById("prep-open-existing").addEventListener("click", () => открытьЕё(занятая));
   };
