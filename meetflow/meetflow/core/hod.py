@@ -99,6 +99,23 @@ if sys.platform == "win32":
     def процессор_секунды(pid: int) -> float | None:
         return _cpu_win(pid)
 
+    def время_создания(pid: int) -> float | None:
+        """Когда процесс создан (секунды Unix). Windows переиспользует номера, и по одному PID своего ребёнка от
+        чужого не отличить — сверяем время создания (записка 06.11.2026)."""
+        ядро = ctypes.WinDLL("kernel32", use_last_error=True)
+        ручка = ядро.OpenProcess(0x1000 | 0x0400, False, pid)
+        if not ручка:
+            return None
+        try:
+            создан, выход, ядро_вр, польз = (wintypes.FILETIME() for _ in range(4))
+            if not ядро.GetProcessTimes(ручка, ctypes.byref(создан), ctypes.byref(выход),
+                                        ctypes.byref(ядро_вр), ctypes.byref(польз)):
+                return None
+            # FILETIME — сотни наносекунд от 1601-01-01; в Unix-время — вычесть 11644473600 с
+            return (создан.dwHighDateTime << 32 | создан.dwLowDateTime) / 10_000_000 - 11_644_473_600
+        finally:
+            ядро.CloseHandle(ручка)
+
 else:
     def дети(parent: int) -> list[int]:
         найдено = []
@@ -123,6 +140,18 @@ else:
                 поля = ф.read().rsplit(")", 1)[1].split()
             return (int(поля[11]) + int(поля[12])) / os.sysconf("SC_CLK_TCK")   # utime + stime
         except (OSError, IndexError, ValueError):
+            return None
+
+    def время_создания(pid: int) -> float | None:
+        """Когда процесс создан (секунды Unix): starttime считаем от времени загрузки системы."""
+        try:
+            with open(f"/proc/{pid}/stat", "r", encoding="utf-8") as ф:
+                поля = ф.read().rsplit(")", 1)[1].split()
+            старт_тиков = int(поля[19])                        # starttime — 22-е поле
+            with open("/proc/stat", "r", encoding="utf-8") as ф:
+                загрузка = next(int(строка.split()[1]) for строка in ф if строка.startswith("btime "))
+            return загрузка + старт_тиков / os.sysconf("SC_CLK_TCK")
+        except (OSError, IndexError, ValueError, StopIteration):
             return None
 
 
@@ -276,10 +305,12 @@ def _записать_детей(список: list[dict]) -> None:
 
 
 def запомнить_ребёнка(pid: int) -> None:
-    """Записать свой дочерний процесс: при следующем старте видно, кого подбирать."""
+    """Записать свой дочерний процесс: при следующем старте видно, кого подбирать. Вместе с временем создания —
+    Windows переиспользует номера, и по одному PID своего ребёнка от чужого сервера не отличить (06.11.2026)."""
+    создан = время_создания(pid)
     with _замок_детей:
         список = [x for x in _прочитать_детей() if x["pid"] != pid]
-        список.append({"pid": int(pid), "сервер": os.getpid(),
+        список.append({"pid": int(pid), "сервер": os.getpid(), "создан": создан,
                        "начат": time.strftime("%Y-%m-%dT%H:%M:%S")})
         _записать_детей(список)
 
@@ -290,13 +321,38 @@ def забыть_ребёнка(pid: int) -> None:
         _записать_детей(список)
 
 
+def свои(запись: dict) -> bool:
+    """Это наш процесс? Сверяем время создания: у чужого сервера с тем же номером оно другое. Старые записи без
+    времени (до 06.11.2026) своим не считаем — лучше не остановить сироту, чем чужой сервер."""
+    pid = int(запись.get("pid") or 0)
+    записанное = запись.get("создан")
+    if not pid or записанное is None:
+        return False
+    живое = время_создания(pid)
+    return живое is not None and abs(float(живое) - float(записанное)) <= 1.0
+
+
+def занят_другим(запись: dict) -> bool:
+    """PID живой, но это не наш ребёнок — номер достался другому процессу."""
+    pid = int(запись.get("pid") or 0)
+    return bool(pid) and жив(pid) and not свои(запись)
+
+
 def осиротевшие() -> list[dict]:
-    """Записанные дети прошлых запусков, которые ещё живы и уже не наши."""
+    """Записанные дети прошлых запусков, которые ещё живы и точно наши. Записи, чей номер занят другим процессом,
+    снимаются: иначе старт сервера сделал бы `taskkill` чужому серверу (ERP 8000, Планёрке 8001)."""
     мои = set(дети(os.getpid()))
     итог = []
     for запись in _прочитать_детей():
         pid = int(запись["pid"])
-        if pid in мои or not жив(pid):
+        if not жив(pid):
+            забыть_ребёнка(pid)          # процесс закончился — запись больше не нужна
+            continue
+        if pid in мои:
+            continue                     # наш живой ребёнок: не сирота
+        if not свои(запись):
+            забыть_ребёнка(pid)
+            print(f"MeetFlow: PID {pid} занят другим процессом, пропущен", file=sys.stderr, flush=True)
             continue
         итог.append(запись)
     return итог

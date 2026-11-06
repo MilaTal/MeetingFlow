@@ -112,6 +112,8 @@ def test_осиротевший_ребёнок_находится_и_остан�
     monkeypatch.setattr(hod, "дети", lambda parent: [])
     живые = {4242: True}
     monkeypatch.setattr(hod, "жив", lambda pid: живые.get(pid, False))
+    созданные = {4242: 1_700_000_000.0}
+    monkeypatch.setattr(hod, "время_создания", lambda pid: созданные.get(pid))
     останавливали: list[int] = []
     monkeypatch.setattr(hod.os, "kill", lambda pid, sig: (останавливали.append(pid), живые.pop(pid, None)), raising=False)
     hod.запомнить_ребёнка(4242)
@@ -123,6 +125,27 @@ def test_осиротевший_ребёнок_находится_и_остан�
     monkeypatch.setattr(hod, "дети", lambda parent: [4242])
     живые[4242] = True
     hod.запомнить_ребёнка(4242)
+    assert hod.осиротевшие() == []
+
+
+def test_номер_процесса_занят_другим_не_трогаем(monkeypatch, tmp_path):
+    """Windows переиспользует PID (записка 06.11.2026): если время создания не совпало — это чужой процесс
+    (ERP 8000, Планёрка 8001, «Транс»), его не останавливаем, а запись снимаем."""
+    monkeypatch.setattr(hod, "ФАЙЛ_ДЕТЕЙ", tmp_path / "child_pids.json")
+    monkeypatch.setattr(hod, "дети", lambda parent: [])
+    monkeypatch.setattr(hod, "жив", lambda pid: pid == 777)
+    monkeypatch.setattr(hod, "время_создания", lambda pid: 1_700_000_000.0)
+    hod._записать_детей([{"pid": 777, "сервер": 1, "создан": 1_600_000_000.0, "начат": "2026-11-06T13:31:00"}])
+    assert hod.осиротевшие() == [], "чужой процесс по занятому номеру не наш"
+    assert hod._прочитать_детей() == [], "запись о таком номере должна сниматься"
+
+
+def test_старая_запись_без_времени_создания_не_трогается(monkeypatch, tmp_path):
+    monkeypatch.setattr(hod, "ФАЙЛ_ДЕТЕЙ", tmp_path / "child_pids.json")
+    monkeypatch.setattr(hod, "дети", lambda parent: [])
+    monkeypatch.setattr(hod, "жив", lambda pid: True)
+    monkeypatch.setattr(hod, "время_создания", lambda pid: 1_700_000_000.0)
+    hod._записать_детей([{"pid": 888, "сервер": 1, "начат": "2026-11-02T10:23:00"}])
     assert hod.осиротевшие() == []
 
 
