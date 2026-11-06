@@ -957,6 +957,13 @@ class MeetingPipeline:
                     continue
                 g = gate.check(d, source, existing)
                 who = g.assignee.label if g.assignee else ""
+                # След исполнителя (записка 06.11.2026): что вернула модель и какое правило сняло имя. Бесплатно, и
+                # без этого разбивка «почему исполнителя нет» делается только чтением записи по каждой задаче.
+                if self.tasks_trace_path:
+                    asr_journal.write(self.tasks_trace_path, meeting_id=meeting_id, путь="drafts", шаг="исполнитель",
+                                      assignee_model=str(d.assignee or "")[:120],
+                                      assignee_final=who[:120],
+                                      assignee_dropped_by=";".join(g.reasons)[:200] if not who else "")
                 if g.quote and (hit := already_set(g.quote, who, g.description)) is not None:
                     if hit > 0:
                         hit_kept(hit)
@@ -967,27 +974,39 @@ class MeetingPipeline:
                     said = supported_due(d.due_date, self._window(source.lines, g.quote or d.quote), meeting.get("date"))
                     proposed = d.due_date
                     kind = None
+                    срок_след = {"due_phrase": d.due_date, "due_supported": said}
                     md = lenient_date(meeting.get("date"))
                     if md is not None:
                         # относительный срок — в дату от даты встречи; «к следующей встрече» — маркер без даты
-                        # (решение владелицы 20.10.2026); фраза из записи важнее даты модели (общий deadline.py)
+                        # (решение владелицы 20.10.2026); фраза из записи важнее даты модели (deadline.py из ERP,
+                        # 06.11.2026: файл перенесён 1 в 1, поэтому `marker=True` передаём здесь — в ERP он по умолчанию выкл.)
                         win = self._window(source.lines, g.quote or d.quote)
                         if said is not None and lenient_date(said) is None:
-                            dl = deadline.resolve(said, md)
+                            dl = deadline.resolve(said, md, deadline.дата_модели(said), marker=True)
+                            срок_след.update(due_resolved=(f"{dl.due:%d.%m.%Y}" if dl.due else ""),
+                                             due_issue=dl.issue or "")
                             if dl.due is not None:
                                 said, kind = f"{dl.due:%d.%m.%Y}", dl.kind
                             elif dl.kind == deadline.NEXT_MEETING:
                                 said, kind = None, deadline.NEXT_MEETING
+                            else:
+                                # код не перевёл фразу («неделя», «за 2 дня»): не оставляем слово в сроке и не молчим —
+                                # задача без срока и карточка «срок под вопросом» (записка 06.11.2026, п. 3)
+                                said = None
                         elif said is None:
-                            heard = {(x, k) for x, k, _p in deadline._candidates(win, md)}
+                            heard = {(x, k) for x, k, _p in deadline._candidates(win, md, marker=True)}
                             if len({x for x, _k in heard}) == 1:
                                 x, kind = next(iter(heard))
                                 said = f"{x:%d.%m.%Y}" if x is not None else None
                         if said is not None and kind is None:
-                            same = [k for x, k, _p in deadline._candidates(win, md) if x == lenient_date(said)]
+                            same = [k for x, k, _p in deadline._candidates(win, md, marker=True) if x == lenient_date(said)]
                             kind = same[0] if same else None
                         if said is not None and lenient_date(said) == md:
                             kind = deadline.TODAY
+                    срок_след["due_final"] = said or ""
+                    if self.tasks_trace_path:
+                        asr_journal.write(self.tasks_trace_path, meeting_id=meeting_id, путь="drafts", шаг="срок",
+                                          **срок_след)
                     d = replace(d, due_date=said)
                     if kind is not None:
                         due_kinds[id(d)] = kind

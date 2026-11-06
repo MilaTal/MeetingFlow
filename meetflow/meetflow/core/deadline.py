@@ -1,12 +1,13 @@
-"""Копия `deadline.py` Проекта ERP и Планёрки (12.10.26); отличие одно — разбор на слова вместо импорта
-модуля отрицаний. Срок задачи из фразы совещания (правило владельца 12.10.2026, письмо ветки copilot «12.10 01-05»).
+"""Срок задачи из фразы совещания (правило владельца 12.10.2026, письмо ветки copilot «12.10 01-05»).
 
 Правило: срок пишется всегда, когда он прозвучал; не прозвучал — пусто. «Сегодня» и срок, равный дате совещания, — настоящий
 срок, показывается «сегодня (дд.мм.гггг)», голой датой — никогда: её путают с датой постановки. Относительный срок
 («завтра», «к пятнице», «через две недели») переводится в дату от даты совещания, исходная фраза хранится рядом.
-«К следующему совещанию» — маркер «к следующей встрече» без даты (решение владелицы 20.10.2026; в Проекте ERP осталось
-прежнее правило +7 дней с пометкой «оценка»). Спорное — два срока в одной фразе, срок раньше совещания, фраза без
-распознанного срока — не решается молча, а уходит оператору карточкой.
+«К следующему совещанию» — в ERP дата совещания + 7 дней с видом «оценка» (решение владельца 13.10.2026: у встреч ERP дата
+следующей заранее неизвестна; 20.10.2026 подтверждено: это регулярные встречи по проекту), в Планёрке — маркер без даты
+«к следующей встрече» (решение владелицы 20.10.2026, `marker=True`). Пометка «(оценка)» в подпись срока не входит: подпись
+идёт в документы и выгрузки, а там служебных пометок нет (правило 13.10.2026); на экране ERP её рисует сам экран. Спорное — два срока в одной фразе, срок раньше совещания, фраза без распознанного срока —
+не решается молча, а уходит оператору карточкой.
 
 Отрицание и вопрос срока не дают («не к пятнице», «к пятнице успеете?») — по правилу отрицаний. Поручение и будущее время
 сроку не мешают: «сделайте к следующему совещанию» и есть срок, поэтому общий признак «сомнительно» модуля negation здесь
@@ -21,24 +22,22 @@ import re
 from dataclasses import dataclass
 from datetime import date, timedelta
 
-
-
-class negation:  # noqa: N801 — в ERP и Планёрке это модуль правила отрицаний; здесь нужен только его разбор на слова
-    _TOKEN_RE = re.compile(r"[а-яёa-z0-9]+")
+from . import negation
 
 TODAY, ESTIMATE, BEFORE_MEETING = "сегодня", "оценка", "раньше встречи"
-NEXT_MEETING = "к следующей встрече"      # маркер без даты (решение владелицы 20.10.2026)
+NEXT_MEETING = "к следующей встрече"      # маркер без даты (Планёрка, решение владелицы 20.10.2026)
 ISSUE_TWO, ISSUE_BEFORE, ISSUE_UNREAD = "два срока", "срок раньше даты совещания", "срок не распознан"
 ISSUE_NOT_IN_RECORD = "срок не найден в записи рядом с поручением"
 NEXT_MEETING_DAYS = 7
 
 _WEEKDAYS = (("понедельник", 0), ("вторник", 1), ("сред", 2), ("четверг", 3), ("пятниц", 4), ("суббот", 5), ("воскресен", 6))
 _NUM_WORDS = {"один": 1, "одну": 1, "одна": 1, "два": 2, "две": 2, "три": 3, "четыре": 4, "пять": 5, "шесть": 6,
-              "семь": 7, "десять": 10}
+              "семь": 7, "десять": 10, "пару": 2, "пары": 2}
 
 _EXPLICIT = re.compile(r"(?<![\d.])(\d{1,2})[./](\d{1,2})(?:[./](\d{2,4}))?(?![\d])")
-_DAY_OF_MONTH = re.compile(r"\b(?:до|к|ко)\s+(\d{1,2})\s*-?\s*(?:го|му|е|числа)\b")
-_IN = re.compile(r"\bчерез\s+(\d+|один|одну|одна|два|две|три|четыре|пять|шесть|семь|десять)?\s*"
+_DAY_OF_MONTH = re.compile(r"\b(?:до|к|ко)\s+(\d{1,2})\s*-?\s*(?:го|му|е|числа|числу)\b(?!\s+(?:январ|феврал|март|апрел|"
+                           r"ма[яе]|июн|июл|август|сентябр|октябр|ноябр|декабр))")
+_IN = re.compile(r"\bчерез\s+(\d+|один|одну|одна|два|две|три|четыре|пять|шесть|семь|десять|пару|пары)?\s*"
                  r"(день|дня|дней|неделю|недели|недель|месяц|месяца|месяцев)\b")
 _WEEKDAY = re.compile(r"\b(?:до|к|ко|в|во|на)\s+(?:следующ\w+\s+|этот\s+|эту\s+|эти\s+)?"
                       r"(понедельник\w*|вторник\w*|сред[ауы]\w*|четверг\w*|пятниц\w*|суббот\w*|воскресен\w*)")
@@ -50,13 +49,72 @@ _SIMPLE = (
 )
 _END_WEEK = re.compile(r"\b(?:до|к)\s+конц\w*\s+(?:этой\s+)?недел\w*|\bна\s+этой\s+неделе\b")
 _NEXT_WEEK = re.compile(r"\bна\s+следующей\s+неделе\b|\b(?:до|к)\s+конц\w*\s+следующей\s+недел\w*")
-_END_MONTH = re.compile(r"\b(?:до|к)\s+конц\w*\s+(?:этого\s+)?месяц\w*")
+_END_MONTH = re.compile(r"\b(?:до|к)\s+конц\w*\s+(?:этого\s+)?месяц\w*|\bв\s+этом\s+месяце\b")
+# «к концу октября», «до конца ноября» (19.10.2026, подсказка сроков: модель возвращает срок словами, дату считает код)
+_MONTH_STEMS = ("январ", "феврал", "март", "апрел", "ма", "июн", "июл", "август", "сентябр", "октябр", "ноябр", "декабр")
+_END_NAMED_MONTH = re.compile(r"\b(?:до|к)\s+конц\w*\s+(январ\w*|феврал\w*|март\w*|апрел\w*|ма[яйе]\b|июн\w*|июл\w*|"
+                              r"август\w*|сентябр\w*|октябр\w*|ноябр\w*|декабр\w*)")
+
+# Пропущенные формы речи (25.10.2026, разбор набора тестов: срок верен у 13 из 89 совпавших задач на входе «только
+# расшифровка»). Правило прежнее — срок только прозвучавший; здесь формы, которых код не узнавал. День с месяцем и день
+# порядковым словом — только после предлога срока или слова «срок»: голое «30 октября» — упоминание даты, не срок.
+_MONTHS_GEN = (r"(январ[яе]|феврал[яе]|марта|марте|апрел[яе]|ма[яе]|июн[яе]|июл[яе]|августа|августе|сентябр[яе]|"
+               r"октябр[яе]|ноябр[яе]|декабр[яе])")
+_DEADLINE_PREP = r"(?:до|к|ко|по|не\s+позднее|не\s+позже|срок\w*\s*[-—–:]?\s*(?:до)?)"
+_DAY_MONTH = re.compile(r"\b" + _DEADLINE_PREP + r"\s+(\d{1,2})\s*-?\s*(?:го|му|е)?\s+" + _MONTHS_GEN + r"(?![а-я])")
+_ORDINALS = (("одиннадцат", 11), ("двенадцат", 12), ("тринадцат", 13), ("четырнадцат", 14), ("пятнадцат", 15),
+             ("шестнадцат", 16), ("семнадцат", 17), ("восемнадцат", 18), ("девятнадцат", 19), ("двадцат", 20),
+             ("тридцат", 30), ("перв", 1), ("втор", 2), ("трет", 3), ("четверт", 4), ("пят", 5), ("шест", 6),
+             ("седьм", 7), ("восьм", 8), ("девят", 9), ("десят", 10))
+_ORD_WORD = "(?:" + "|".join(k for k, _v in _ORDINALS) + r")(?:ьего|ьему|ого|ому|его|ему)"
+_DAY_ORDINAL = re.compile(r"\b(?:до|к|ко|не\s+позднее|не\s+позже)\s+((?:двадцать|тридцать)\s+)?(" + _ORD_WORD + r")"
+                          r"(?:\s+" + _MONTHS_GEN + r"(?![а-я])|\s+числ[ау](?![а-я])|(?=\s*(?:[,.;:!?)]|$|\s+включительно)))")
+# без месяца и слова «число» порядковое — срок, только если за ним конец фразы: «до тридцатого.»; «к первому вопросу» — нет
+_WEDNESDAY_DAT = re.compile(r"\b(?:к|ко)\s+(?:следующ\w+\s+|этой\s+)?среде\b")
+_WITHIN = re.compile(r"\bв\s+течени[ие]\s+(\d+|одного|одной|двух|трех|четырех|пяти|шести|семи|десяти)?\s*"
+                     r"(дня|дней|недели|недель|месяца|месяцев)\b")
+_WITHIN_NUM = {"одного": 1, "одной": 1, "двух": 2, "трех": 3, "четырех": 4, "пяти": 5, "шести": 6, "семи": 7, "десяти": 10}
+_END_DAY = re.compile(r"\b(?:до|к)\s+конц\w*\s+(?:этого\s+|сегодняшнего\s+|рабочего\s+)?дня\b")
+
+
+def _month_of(word: str) -> int:
+    return next(i for i, stem in enumerate(_MONTH_STEMS, 1) if word.startswith(stem))
+
+
+def _day_in(meeting: date, day: int, month: int | None) -> date | None:
+    """Число без года: с месяцем — ближайшая не прошедшая дата (как «дд.мм» без года), без месяца — этот месяц или
+    следующий, если число уже прошло (как «к 30-му»)."""
+    try:
+        if month:
+            d = date(meeting.year, month, day)
+            return d if d >= meeting else date(meeting.year + 1, month, day)
+        d = date(meeting.year, meeting.month, day)
+        return d if d >= meeting else _add_months(d, 1)
+    except ValueError:
+        return None
+
+
+def дата_модели(raw: str | None) -> date | None:
+    """Дата, которую вернула модель: «дд.мм.гггг» или «гггг-мм-дд». Вторая пропадала молча (25.10.2026): не дата по
+    «дд.мм.гггг» и не фраза срока — без срока и без карточки. Подтверждение «прозвучал рядом с поручением» — прежнее."""
+    t = (raw or "").strip()
+    try:
+        m = re.search(r"(?<!\d)(\d{1,2})\.(\d{1,2})\.(\d{2,4})(?!\d)", t)
+        if m:
+            d, mo, y = (int(g) for g in m.groups())
+            return date(y + 2000 if y < 100 else y, mo, d)
+        m = re.search(r"(?<!\d)(\d{4})-(\d{2})-(\d{2})(?!\d)", t)
+        if m:
+            return date(int(m.group(1)), int(m.group(2)), int(m.group(3)))
+    except ValueError:
+        return None
+    return None
 
 
 @dataclass
 class Deadline:
     due: date | None = None
-    kind: str | None = None          # None — обычная дата; «сегодня»; «оценка»; «раньше встречи»
+    kind: str | None = None          # None — обычная дата; «сегодня»; «оценка»; «раньше встречи»; «к следующей встрече»
     phrase: str = ""
     issue: str | None = None         # спорное — карточкой оператору
 
@@ -107,9 +165,9 @@ def _friday_of_week(d: date) -> date:
     return friday if friday >= d else friday + timedelta(days=7)
 
 
-def _candidates(text: str, meeting: date, *, marker: bool = True) -> list[tuple[date | None, str | None, int]]:
-    """Все сроки фразы: (дата, вид, позиция). Отрицания и вопросы отброшены. `marker` — «к следующей встрече»
-    маркером без даты: (None, NEXT_MEETING, позиция) — правило владелицы 20.10.2026."""
+def _candidates(text: str, meeting: date, *, marker: bool = False) -> list[tuple[date | None, str | None, int]]:
+    """Все сроки фразы: (дата, вид, позиция). Отрицания и вопросы отброшены. `marker` — «к следующей встрече» маркером без
+    даты: (None, NEXT_MEETING, позиция) — так в Планёрке (решение владелицы 20.10.2026); без него — дата + 7 дней, «оценка»."""
     t = _norm(text)
     out: list[tuple[date | None, str | None, int]] = []
 
@@ -154,25 +212,49 @@ def _candidates(text: str, meeting: date, *, marker: bool = True) -> list[tuple[
         word = m.group(1)
         wd = next(i for stem, i in _WEEKDAYS if word.startswith(stem[:4]))
         add(_next_weekday(meeting, wd), None, m.start())
-    for m in _NEXT_MEETING.finditer(t):
-        if marker:
-            if not _negated_or_question(t, m.start()):
-                out.append((None, NEXT_MEETING, m.start()))
+    for m in _DAY_MONTH.finditer(t):                     # «до 30 октября», «не позднее 5 ноября» (25.10.2026)
+        add(_day_in(meeting, int(m.group(1)), _month_of(m.group(2))), None, m.start())
+    for m in _DAY_ORDINAL.finditer(t):                   # «до тридцатого», «к двадцать пятому октября» (25.10.2026)
+        tens = {"двадцать": 20, "тридцать": 30}.get((m.group(1) or "").strip(), 0)
+        unit = next(v for k, v in _ORDINALS if m.group(2).startswith(k))
+        if tens and unit >= 10:
+            continue                                     # «двадцать двадцатого» — не число
+        add(_day_in(meeting, tens + unit, _month_of(m.group(3)) if m.group(3) else None), None, m.start())
+    for m in _WEDNESDAY_DAT.finditer(t):                 # «к среде» (25.10.2026); «в среде 1С» — не день недели
+        add(_next_weekday(meeting, 2), None, m.start())
+    for m in _WITHIN.finditer(t):                        # «в течение недели», «в течение двух дней» (25.10.2026)
+        n = m.group(1)
+        n = int(n) if n and n.isdigit() else _WITHIN_NUM.get(n or "", 0)
+        unit = m.group(2)
+        if unit.startswith("д"):
+            add(meeting + timedelta(days=n), None, m.start())          # «в течение дня» — сегодня
+        elif unit.startswith("нед"):
+            add(meeting + timedelta(days=7 * (n or 1)), None, m.start())
         else:
+            add(_add_months(meeting, n or 1), None, m.start())
+    for m in _END_DAY.finditer(t):                       # «до конца дня» — сегодня (25.10.2026)
+        add(meeting, None, m.start())
+    for m in _NEXT_MEETING.finditer(t):
+        if not marker:
             add(meeting + timedelta(days=NEXT_MEETING_DAYS), ESTIMATE, m.start())
+        elif not _negated_or_question(t, m.start()):
+            out.append((None, NEXT_MEETING, m.start()))
     for m in _NEXT_WEEK.finditer(t):
         add(_friday_of_week(meeting) + timedelta(days=7), ESTIMATE, m.start())
     for m in _END_WEEK.finditer(t):
         add(_friday_of_week(meeting), None, m.start())
     for m in _END_MONTH.finditer(t):
         add(date(meeting.year, meeting.month, calendar.monthrange(meeting.year, meeting.month)[1]), None, m.start())
+    for m in _END_NAMED_MONTH.finditer(t):
+        month = next(i for i, stem in enumerate(_MONTH_STEMS, 1) if m.group(1).startswith(stem))
+        year = meeting.year if month >= meeting.month else meeting.year + 1
+        add(date(year, month, calendar.monthrange(year, month)[1]), None, m.start())
     return out
 
 
-def resolve(phrase: str | None, meeting: date, model_date: date | None = None, *, marker: bool = True) -> Deadline:
+def resolve(phrase: str | None, meeting: date, model_date: date | None = None, *, marker: bool = False) -> Deadline:
     """Срок из фразы совещания. Фраза важнее даты модели: код считает от даты встречи сам и не верит пересказу. Нет фразы —
-    берётся дата модели (её тоже проверяют на «раньше встречи»). `marker` — «к следующей встрече» без даты
-    (решение владелицы 20.10.2026; прежнее правило +7 дней осталось только в Проекте ERP)."""
+    берётся дата модели (её тоже проверяют на «раньше встречи»). `marker` — «к следующей встрече» без даты (Планёрка)."""
     phrase = (phrase or "").strip()
     found = _candidates(phrase, meeting, marker=marker) if phrase else []
     if not found and model_date is None:
@@ -180,7 +262,7 @@ def resolve(phrase: str | None, meeting: date, model_date: date | None = None, *
             return Deadline(phrase=phrase, issue=ISSUE_UNREAD)
         return Deadline(phrase=phrase)
     if found:
-        dates = {d if d is not None else k for d, k, _p in found}
+        dates = {d or k for d, k, _p in found}
         due, kind, _pos = sorted(found, key=lambda x: x[2])[0]
         issue = ISSUE_TWO if len(dates) > 1 else None
     else:
@@ -201,12 +283,11 @@ def _negated_any(phrase: str) -> bool:
 
 
 def label(due: date | None, date_set: date | None = None, kind: str | None = None) -> str:
-    """Как срок показывается человеку: «сегодня (дд.мм.гггг)», «дд.мм.гггг (оценка)» или просто дата. Голой датой срок,
-    равный дате постановки, не показывается никогда."""
+    """Как срок пишется в документах и выгрузках: дата «дд.мм.гггг», маркер «к следующей встрече» — словами. Срок «сегодня» —
+    тоже просто датой (решение владельца 17.10.26 (С1 сведения): срок «сегодня» — голой датой на экранах и в документах;
+    правило 12.10.26 «сегодня (дата)» снято); вид срока «сегодня» в базе остаётся — по нему считается просрочка. Пометки
+    «(оценка)» здесь нет (решение владелицы 20.10.2026, правило 13.10.2026 «документ без служебных пометок»): вид «оценка»
+    хранится в задаче, и пометку рисует только экран."""
     if due is None:
         return NEXT_MEETING if kind == NEXT_MEETING else ""
-    if kind == TODAY or (date_set is not None and due == date_set):
-        return f"сегодня ({due:%d.%m.%Y})"
-    if kind == ESTIMATE:
-        return f"{due:%d.%m.%Y} (оценка)"
     return f"{due:%d.%m.%Y}"

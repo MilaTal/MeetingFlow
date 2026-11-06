@@ -11,6 +11,10 @@ from dataclasses import dataclass, field
 
 from .morph import has_done_form
 
+# Признак слова — тот же, что в negation.py ERP. Им пользуется deadline.py, перенесённый из ERP 1 в 1 (06.11.2026):
+# сам файл срока не правим, поэтому недостающий признак добавлен здесь.
+_TOKEN_RE = re.compile(r"[а-яёa-z0-9]+")
+
 DEFAULT_LEXICON: dict[str, list[str]] = {
     "negation": [r"\bне\s+\w+", r"\bнет\b", r"\bни\s+разу\b", r"\bникак\b", r"\bне\s*-?\s*актуальн"],
     "question": [r"\?", r"\bли\b", r"\bразве\b", r"\bкогда\s+будет\b"],
