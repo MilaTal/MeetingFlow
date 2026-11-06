@@ -653,6 +653,7 @@ def mount(r: APIRouter, ctx: Ctx) -> None:
     async def upload_source(mid: int, request: Request, kind: str = Form("other"), file: UploadFile = File(...)):
         u = ctx.need_user(request)
         m = ctx.meeting_or_404(mid)
+        ctx.проверить_проект_встречи(request, m)
         check_not_archived_settled(m)
         check_not_cancelled(m)
         name = file.filename or "файл"
@@ -858,6 +859,7 @@ def mount(r: APIRouter, ctx: Ctx) -> None:
         # Первая сборка и запись из приёмника роль не проверяют: там работает система, а не человек.
         u = ctx.need_admin(request) if rebuild else ctx.need_user(request)
         m = ctx.meeting_or_404(mid)
+        ctx.проверить_проект_встречи(request, m)
         check_not_cancelled(m)
         if (m.get("date") or "") > today_iso():
             raise HTTPException(400, f"Встреча {ru_date(m['date'])} ещё не прошла — протокол собирается после неё")

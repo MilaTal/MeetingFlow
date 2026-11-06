@@ -1,0 +1,30 @@
+# -*- coding: utf-8 -*-
+"""Чужой X-Project-Id на изменяющем запросе по встрече — 409 (Д2.4)."""
+from fastapi.testclient import TestClient
+
+W = {"X-Requested-With": "erp-webapp"}
+
+
+def _env(tmp_path):
+    from meetflow.web.app import create_app
+    app = create_app("erp_rollout", str(tmp_path / "t.db"), str(tmp_path / "j.jsonl"), watch=False)
+    c = TestClient(app); st = app.state.store
+    a = st.insert("accounts", login=None, full_name="Орлова Анна", role="super_admin", password_hash="", active=1, confirmed=1)
+    p1 = st.insert("projects", name="Объект А", theme="erp_rollout", archived=0)
+    p2 = st.insert("projects", name="Объект Б", theme="erp_rollout", archived=0)
+    mid = st.insert("meetings", project_id=p1, date="2026-11-05", label="В")
+    c.h = lambda pid: {**W, "X-User-Id": str(a), "X-Project-Id": str(pid)}
+    return c, st, p1, p2, mid
+
+
+def test_чужой_проект_на_пересборке_409(tmp_path):
+    c, st, p1, p2, mid = _env(tmp_path)
+    r = c.post(f"/meetings/{mid}/prepare-minutes?rebuild=1", headers=c.h(p2))
+    assert r.status_code == 409 and "другому проекту" in r.text
+
+
+def test_свой_проект_и_все_проекты_пропускаются(tmp_path):
+    c, st, p1, p2, mid = _env(tmp_path)
+    for pid in (p1, 0):
+        r = c.post(f"/meetings/{mid}/prepare-minutes?rebuild=1", headers=c.h(pid))
+        assert r.status_code != 409, r.text

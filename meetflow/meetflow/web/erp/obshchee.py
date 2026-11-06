@@ -216,6 +216,18 @@ class Ctx:
             raise HTTPException(404, "Встреча не найдена")
         return m
 
+    def проверить_проект_встречи(self, request: Request, m: dict) -> None:
+        """Д2.4 (решение владелицы 05.11.2026): изменяющий запрос по встрече с чужим X-Project-Id — 409.
+
+        Замок на данных, а не на экране: 0 — «Все проекты», пусто — заголовка нет, оба случая пропускаем."""
+        if request.method in ("GET", "HEAD", "OPTIONS"):
+            return
+        чужой = (request.headers.get("x-project-id") or "").strip()
+        if чужой in ("", "0"):
+            return
+        if str(m.get("project_id")) != чужой:
+            raise HTTPException(409, "Встреча принадлежит другому проекту — откройте её из своего проекта")
+
     def task_or_404(self, tid: int) -> dict:
         t = self.store.get("tasks", tid)
         if not t:
