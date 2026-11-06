@@ -1367,8 +1367,10 @@ textarea.role-text { width: 100%; min-height: 5.2em; resize: vertical; line-heig
 /* Лента «Протоколы» */
 .proto-feed { list-style: none; margin: 0; padding: 0; }
 .proto-feed li + li { border-top: 1px solid var(--reg-line); }
-.proto-row { display: grid; grid-template-columns: minmax(170px, 1fr) minmax(200px, 2fr) 90px; gap: 12px; align-items: center;
+.proto-row { display: grid; grid-template-columns: auto minmax(170px, 1fr) minmax(200px, 2fr) 90px; gap: 12px; align-items: center;
   padding: 12px 14px; color: var(--text); text-decoration: none; font-size: 14.5px; }
+/* «…» первой в строке (слово владелицы 06.11.2026): своя колонка слева — кнопка стоит на одном месте во всех строках */
+.proto-more-wrap { display: inline-flex; align-items: center; }
 .proto-row:hover { background: var(--field-bg); }
 .proto-date { font-weight: 500; }
 .proto-state { display: inline-flex; gap: 6px; align-items: center; color: var(--text-muted); font-size: 13px; }
