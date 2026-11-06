@@ -39,7 +39,7 @@ from .people import Team
 from .prompts import PromptBuilder, chunks, parse_json, profile
 from .registry import CardQueue, OperatorMemory, TaskRegistry
 from . import deadline
-from . import asr_journal, hod, plan as plan_mod, voice_step
+from . import asr_journal, hod, mesto_citaty, plan as plan_mod, voice_step
 from . import petlya_raspoznavaniya as petlya, polnota_rasshifrovki as polnota
 from . import korotkiy_protokol, schet_zadach, tablica_zadach, tekst_po_zapisi
 from . import iskazheniya_nazvaniy, slovar_whisper, ukrupnenie_sborka
@@ -1023,8 +1023,9 @@ class MeetingPipeline:
                     asr_journal.write(self.tasks_trace_path, meeting_id=meeting_id, путь="drafts", шаг="черновик",
                                       принят=int(bool(g.accepted)), guard_rule=";".join(g.reasons)[:200],
                                       цитата_есть=int(bool(цитата)),
-                                      цитата_найдена=int(bool(цитата) and any(ln.strip() and ln.strip() in цитата
-                                                                            for ln in source.lines)),
+                                      # 06.11.2026 (п. 1б): место цитаты по ERP, а не «целая строка в цитате»
+                                      цитата_найдена=int(bool(цитата) and
+                                                         mesto_citaty._место(цитата, "\n".join(source.lines)) is not None),
                                       due_phrase=str(d.due_date or "")[:60],
                                       due_final=str(срок_след.get("due_final") or "")[:40],
                                       assignee_model=str(d.assignee or "")[:80],
@@ -1640,11 +1641,13 @@ class MeetingPipeline:
 
     @staticmethod
     def _window(lines: list[str], quote: str) -> str:
-        """Цитата и соседние строки — где должен прозвучать срок."""
-        hit = [i for i, ln in enumerate(lines) if ln.strip() and ln.strip() in (quote or "")]
-        if not hit:
-            return quote or ""
-        return "\n".join(lines[max(0, min(hit) - 1):max(hit) + 2])
+        """Цитата и соседние строки записи — где должен прозвучать срок.
+
+        06.11.2026 (записка `86a7917`, п. 1б): место цитаты ищет `mesto_citaty._место` из ERP — дословно, затем по
+        плотности основ. Раньше строка считалась найденной, только если целиком входила в цитату; строки записи —
+        длинные абзацы, поэтому окно почти всегда оставалось одной цитатой, и сверка срока не работала.
+        """
+        return mesto_citaty.окно_цитаты(quote, "\n".join(lines), 1)
 
     @staticmethod
     def _closing_candidates(active: list[dict], lines: list[str], per_task: int = 4,
