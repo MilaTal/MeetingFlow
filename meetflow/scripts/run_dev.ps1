@@ -49,5 +49,18 @@ if ($needKey -and -not $env:OPENROUTER_API_KEY) {
         Write-Host "Ключ OpenRouter взят из $KeyFrom (значение не показывается)."
     }
 }
+# Портал единого входа (06.11.2026): секрет обмена и адрес портала — из своего .env.local MeetFlow. Прежде отсюда читался
+# только ключ OpenRouter, и PORTAL_SECRET, записанный в .env.local, до сервера не доходил — приём входа был бы выключен.
+# Значения не печатаются. Явно заданная переменная окружения сильнее файла.
+if (Test-Path $own) {
+    foreach ($row in Get-Content -LiteralPath $own -Encoding UTF8) {
+        if ($row -match '^\s*(PORTAL_SECRET|PORTAL_INTERNAL_URL)\s*=\s*(.*)$') {
+            $name = $Matches[1]
+            if (-not [Environment]::GetEnvironmentVariable($name, "Process")) {
+                [Environment]::SetEnvironmentVariable($name, $Matches[2].Trim().Trim('"').Trim("'"), "Process")
+            }
+        }
+    }
+}
 Set-Location (Split-Path $PSScriptRoot -Parent)
 python -m meetflow serve --theme $Theme --db $Db --port $Port --host $BindHost
