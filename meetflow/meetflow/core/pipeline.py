@@ -211,7 +211,7 @@ def _int(v: Any) -> int | None:
 SIFTED = {"intent_not_assignment", "insignificant"}     # мелочь и обрывок — правилом существенности (ERP 21–22.10.2026, перенос 27.10.2026)
 OUT_OF_REGISTRY = {"duplicate", "empty_description", "suspicious_instruction",
                    # отрицание, вопрос, условие, намерение отсеиваются ДО «под вопросом» (владелец 15.10.26, вечер)
-                   "negation_in_quote", "question_not_assignment", "condition_not_assignment", "intent_not_assignment",
+                   "negation_in_quote", "question_not_assignment", "intent_not_assignment",
                    "insignificant"}
 REASON_TEXT = {
     "insignificant": "несущественное поручение: мелочь или обрывок без предмета",
