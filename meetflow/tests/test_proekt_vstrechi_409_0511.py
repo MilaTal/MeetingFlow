@@ -28,3 +28,25 @@ def test_свой_проект_и_все_проекты_пропускаются
     for pid in (p1, 0):
         r = c.post(f"/meetings/{mid}/prepare-minutes?rebuild=1", headers=c.h(pid))
         assert r.status_code != 409, r.text
+
+
+import pytest
+
+
+@pytest.mark.parametrize("метод,путь", [
+    ("post", "/meetings/{mid}/sources/text"),
+    ("post", "/meetings/{mid}/materials"),
+    ("post", "/meetings/{mid}/prepare-plan"),
+    ("post", "/meetings/{mid}/accept-draft"),
+    ("post", "/meetings/{mid}/move-project"),
+    ("post", "/meetings/{mid}/cancel-with-plan"),
+    ("patch", "/meetings/{mid}/label"),
+    ("patch", "/meetings/{mid}/date"),
+    ("delete", "/meetings/{mid}"),
+])
+def test_чужой_проект_409_на_всех_путях(tmp_path, метод, путь):
+    c, st, p1, p2, mid = _env(tmp_path)
+    адрес = путь.format(mid=mid)
+    вызов = getattr(c, метод)
+    r = вызов(адрес, headers=c.h(p2)) if метод == "delete" else вызов(адрес, headers=c.h(p2), json={})
+    assert r.status_code == 409, (метод, адрес, r.status_code, r.text[:120])

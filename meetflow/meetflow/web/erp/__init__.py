@@ -6,6 +6,8 @@
 """
 from __future__ import annotations
 
+import re
+
 from fastapi import APIRouter, FastAPI, Request
 from fastapi.responses import JSONResponse
 
@@ -41,5 +43,14 @@ def mount(app: FastAPI, **parts) -> Ctx:
         if path.startswith(ERP_PREFIXES) and path not in OPEN_PATHS and ctx.accounts.auth_required() \
                 and not ctx.accounts.by_session(request.cookies.get(COOKIE)):
             return JSONResponse({"detail": "Требуется вход"}, 401)
+        # Д2.4 (решение владелицы 05.11.2026): изменяющий запрос по встрече с чужим X-Project-Id — 409.
+        # Замок на данных и один раз на все пути встречи: материалы, план, протокол, перенос, задачи, отметки.
+        if request.method not in ("GET", "HEAD", "OPTIONS"):
+            м = re.match(r"^/meetings/(\d+)(?:/|$)", path)
+            чужой = (request.headers.get("x-project-id") or "").strip()
+            if м and чужой not in ("", "0"):
+                встреча = ctx.store.get("meetings", int(м.group(1)))
+                if встреча and str(встреча.get("project_id")) != чужой:
+                    return JSONResponse({"detail": "Встреча принадлежит другому проекту — откройте её из своего проекта"}, 409)
         return await call_next(request)
     return ctx
