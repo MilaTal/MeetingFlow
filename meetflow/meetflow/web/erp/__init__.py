@@ -17,7 +17,10 @@ from .obshchee import COOKIE, Ctx
 ERP_PREFIXES = ("/auth", "/users", "/meetings", "/tasks", "/badges", "/units", "/project-status", "/search",
                 "/agreements", "/razbor", "/task-conflicts", "/operator-rules", "/possible-assignments",
                 "/recognition-settings", "/review-notes", "/voice", "/meeting-topics", "/projects-list")
-OPEN_PATHS = {"/auth/mode", "/auth/login", "/auth/logout", "/auth/first-login", "/auth/first-login/people"}
+OPEN_PATHS = {"/auth/mode", "/auth/login", "/auth/logout", "/auth/first-login", "/auth/first-login/people",
+              # портал единого входа (этап 2, 06.11.2026): приём кода — до входа; обратный канал проверяет секрет сам
+              "/auth/portal", "/auth/portal/logout", "/auth/portal/accounts",
+              "/auth/portal/passwords"}
 
 
 def mount(app: FastAPI, **parts) -> Ctx:
@@ -25,8 +28,9 @@ def mount(app: FastAPI, **parts) -> Ctx:
     ctx.app = app
     app.state.erp = ctx
     r = APIRouter()
-    from . import karkas, komanda
+    from . import karkas, komanda, portal_vhod
     komanda.mount(r, ctx)
+    portal_vhod.mount(r, ctx)   # приём входа от портала единого входа (06.11.2026)
     karkas.mount(r, ctx)
     import importlib
     import importlib.util

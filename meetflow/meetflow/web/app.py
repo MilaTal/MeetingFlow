@@ -427,7 +427,7 @@ def create_app(theme_name: str | None = None, db_path: str | None = None, journa
     app.state.accounts, app.state.backups = accounts, backups
     app_dir = Path(__file__).resolve().parents[2]
     COOKIE = "mf_session"
-    PUBLIC = {"/api/theme", "/api/auth/mode", "/api/auth/login", "/api/auth/logout"}
+    PUBLIC = {"/api/theme", "/api/auth/logout"}   # 06.11.2026: старый вход ядра закрыт
 
     @app.middleware("http")
     async def _login_gate(request: Request, call_next):
@@ -1635,22 +1635,9 @@ def create_app(theme_name: str | None = None, db_path: str | None = None, journa
         if request.headers.get("x-requested-with") != "MeetFlow":
             raise HTTPException(403, "Запрос без защитного заголовка.")
 
-    @app.get("/api/auth/mode")
-    def auth_mode():
-        return {"auth_required": accounts.auth_required()}
-
-    @app.post("/api/auth/login")
-    def auth_login(body: LoginIn, request: Request):
-        _csrf(request)
-        try:
-            a = accounts.check(body.login, body.password, client_ip(request))
-        except AuthError as e:
-            raise HTTPException(401, str(e)) from None
-        resp = JSONResponse({"login": a["login"], "full_name": a["full_name"], "role": a["role"]})
-        resp.set_cookie(COOKIE, accounts.open_session(a), httponly=True, samesite="strict",
-                        secure=request.url.scheme == "https", max_age=12 * 3600)
-        return resp
-
+    # Старый вход ядра закрыт (решение владелицы 06.11.2026, файл 20, вопрос 5): адресов /api/auth/login, /api/auth/mode и
+    # экрана учётных записей «Мониторинга» (/api/monitoring/accounts) больше нет — через них участник с личным паролем и
+    # внешний обходили правила входа. Вход один — слой «Команды» (`web/erp/komanda.py`), выключатель режима один — там же.
     @app.post("/api/auth/logout")
     def auth_logout(request: Request):
         _csrf(request)
@@ -1662,34 +1649,6 @@ def create_app(theme_name: str | None = None, db_path: str | None = None, journa
     @app.get("/api/auth/me")
     def auth_me(u: dict = Depends(user)):
         return {**u, "auth_required": accounts.auth_required()}
-
-    @app.post("/api/auth/mode")
-    def auth_set_mode(body: ModeIn, request: Request, u: dict = Depends(super_admin)):
-        """Включить вход — только подтвердив логин и пароль супер-администратора (иначе войти будет нечем);
-        выключить при включённом входе — своим паролем (украденная сессия не снимет защиту одним запросом)."""
-        was = accounts.auth_required()
-        if body.auth_required != was:
-            confirm_super(u, body.login, body.password, request)
-            accounts.set_auth_required(body.auth_required, u["name"] or u["role"])
-            pipe.cards.open(None, "technical", "Вход по логину и паролю " + ("ВКЛЮЧЁН" if body.auth_required
-                            else "ВЫКЛЮЧЕН (тестовый режим)"), {"кто": u["name"] or u["role"]})
-        return {"auth_required": accounts.auth_required()}
-
-    @app.get("/api/monitoring/accounts")
-    def mon_accounts(u: dict = Depends(super_admin)):
-        return accounts.list()
-
-    @app.post("/api/monitoring/accounts")
-    def mon_accounts_save(body: AccountIn, u: dict = Depends(super_admin)):
-        if body.role not in theme["roles"]:
-            raise HTTPException(422, "Такой роли нет в теме.")
-        try:
-            a = accounts.save(body.login, body.full_name, body.role, body.password)
-        except AuthError as e:
-            raise HTTPException(422, str(e)) from None
-        pipe.cards.open(None, "technical", f"Доступ выдан или пароль сменён: {a['login']}",
-                        {"роль": a["role"], "кто": u["name"] or u["role"]})
-        return accounts.list()
 
     # ---------------------------------------------------------------- Мониторинг RealTime (как в ERP)
     def _row(name: str, state: str, detail: str) -> dict:

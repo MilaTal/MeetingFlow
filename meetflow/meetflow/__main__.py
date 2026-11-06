@@ -63,24 +63,54 @@ def main(argv: list[str] | None = None) -> int:
     s.add_argument("--port", type=int, default=8002); s.add_argument("--host", default="127.0.0.1")
     r = sub.add_parser("routes"); r.add_argument("action", choices=("show", "use", "check"))
     r.add_argument("role", nargs="?"); r.add_argument("point", nargs="?")
-    sp = sub.add_parser("set-password", help="учётная запись для входа по паролю; пароль спрашивается скрыто")
+    sp = sub.add_parser("set-password", help="временный пароль на 24 часа со сменой при входе (как скрипт сброса ERP)")
     sp.add_argument("--login", required=True); sp.add_argument("--name", default="")
-    sp.add_argument("--role", default="super_admin"); sp.add_argument("--db", default="data/meetflow.db")
+    # Роль по умолчанию убрана (решение владелицы 06.11.2026, файл 20, вопрос 5): прежде команда без --role делала
+    # существующего участника суперадмином. Новой записи роль обязательна, существующей — меняется, только если указана.
+    sp.add_argument("--role", default=None); sp.add_argument("--db", default="data/meetflow.db")
     a = ap.parse_args(argv)
 
     if a.cmd == "set-password":
+        # Переведено на правила слоя «Команды», как скрипт сброса ERP (решение владелицы 06.11.2026, вопрос 5): пароль не
+        # вводится, а выдаётся временный — на 24 часа, показан один раз, при входе обязательна смена; сессии человека
+        # закрываются; в «Системные сообщения» — строка без пароля. Прежде команда ставила постоянный пароль по правилам
+        # ядра (8 знаков), не закрывала сессии и ничего не писала в журнал.
         import getpass
-        from .core.accounts import Accounts, AuthError
-        pw = getpass.getpass("Пароль (не отображается): ")
-        if pw != getpass.getpass("Повторите пароль: "):
-            print("Пароли не совпадают.", file=sys.stderr)
+        import platform
+        from datetime import datetime, timedelta
+        from .core.registry import CardQueue
+        from .web.erp.bezopasnost import generate_temp_password, hash_password, normalize_login
+        store = Store(a.db)
+        login = normalize_login(a.login)
+        if not login:
+            print("Укажите логин — часть адреса до «@».", file=sys.stderr)
             return 2
-        try:
-            acc = Accounts(Store(a.db)).save(a.login, a.name, a.role, pw)
-        except AuthError as e:
-            print(str(e), file=sys.stderr)
+        rows = store.q("SELECT * FROM accounts WHERE lower(login)=?", (login,))
+        if not rows and not a.role:
+            print("Новой учётной записи нужна роль: --role super_admin | project_admin | member.", file=sys.stderr)
             return 2
-        print(f"Учётная запись {acc['login']} ({acc['role']}) сохранена.")
+        temp = generate_temp_password()
+        fields = {"password_hash": hash_password(temp), "must_change_password": 1, "failed_attempts": 0,
+                  "locked_until": None, "temp_expires_at": (datetime.now() + timedelta(hours=24)).strftime("%Y-%m-%dT%H:%M:%S")}
+        if a.role:
+            fields["role"] = a.role
+        if rows:
+            uid = rows[0]["id"]
+            store.update("accounts", uid, **fields)
+        else:
+            uid = store.insert("accounts", login=login, full_name=a.name or login, active=1, confirmed=1, created_at=now(),
+                               **fields)
+        closed = 0
+        for s_row in store.q("SELECT id FROM sessions WHERE account_id=?", (uid,)):
+            store.delete("sessions", s_row["id"])
+            closed += 1
+        who = platform.node() + "\\" + (getpass.getuser() or os.environ.get("USERNAME", "?"))
+        CardQueue(store).open(None, "event", f"Временный пароль выдан командной строкой: {login}",
+                              {"message": f"Запустил {who}. Действует 24 часа, при входе обязательна смена. "
+                                          f"Завершено сессий: {closed}. Самого пароля здесь нет.", "source": "auth"})
+        print(f"Готово: {login}. Завершено сессий: {closed}.")
+        print(f"Временный пароль (показан один раз, нигде не записан): {temp}")
+        print("Пароль действует 24 часа. Передайте лично, не пересылайте. При входе система попросит задать свой.")
     elif a.cmd == "themes":
         print("\n".join(list_themes()))
     elif a.cmd == "todo":

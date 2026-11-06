@@ -30,37 +30,45 @@ def client(tmp_path, monkeypatch):
 
 # ---------------------------------------------------------------- вход по паролю
 def test_login_is_off_by_default_and_headers_work(client):
-    assert client.get("/api/auth/mode").json() == {"auth_required": False}
+    """Перевёрнуто 06.11.2026 (решение владелицы, файл 20, вопрос 5): режим входа ядра `/api/auth/mode` закрыт — режим
+    один, у слоя «Команды» (`/auth/mode`)."""
+    assert client.get("/api/auth/mode").status_code == 404
+    assert client.get("/auth/mode").json()["auth_required"] is False
     assert client.get("/api/monitoring/live", headers=SUPER).status_code == 200
 
 
-def test_turning_login_on_needs_super_admin_password(client):
-    bad = client.post("/api/auth/mode", json={"auth_required": True, "login": "admin", "password": "не тот"}, headers=SUPER)
-    assert bad.status_code == 403 and client.get("/api/auth/mode").json()["auth_required"] is False
-    ok = client.post("/api/auth/mode", json={"auth_required": True, "login": "admin", "password": PASSWORD}, headers=SUPER)
-    assert ok.json()["auth_required"] is True
-    # теперь заголовки роли не в счёт: без сессии — 401, публичные адреса открыты
+W = {"X-Requested-With": "erp-webapp"}
+
+
+def test_old_core_login_is_closed(client):
+    """Перевёрнуто 06.11.2026 (вопрос 5): прежде вход ядра `/api/auth/login` (8 знаков, 15 минут, без общего пароля) и
+    выключатель `/api/auth/mode` проверялись здесь. Через них участник с личным паролем и внешний обходили правила
+    входа — адреса закрыты. Ни с каким паролем и заголовком они не отвечают."""
+    for body in ({"login": "admin", "password": PASSWORD}, {"login": "нет-такого", "password": "x"}):
+        assert client.post("/api/auth/login", json=body, headers=CSRF).status_code in (404, 405)
+    for on in (True, False):
+        r = client.post("/api/auth/mode", json={"auth_required": on, "login": "admin", "password": PASSWORD}, headers=SUPER)
+        assert r.status_code in (404, 405)
+
+
+def test_core_api_needs_session_of_the_one_login(client):
+    """Вход включён — данные ядра только с сессией; сессию даёт единственный вход — слой «Команды» (суперадмину — личный
+    пароль)."""
+    client.app.state.accounts.set_auth_required(True, "тест")
     assert client.get(f"/api/projects/{client.pid}/tasks", headers=SUPER).status_code == 401
     assert client.get("/api/theme").status_code == 200
-    r = client.post("/api/auth/login", json={"login": "admin", "password": PASSWORD}, headers=CSRF)
-    assert r.status_code == 200 and r.json()["role"] == "super_admin"
-    me = client.get("/api/auth/me").json()
-    assert me["name"] == "Админ Супер" and me["auth_required"] is True
+    r = client.post("/auth/login", json={"login": "admin", "password": PASSWORD}, headers=W)
+    assert r.status_code == 200 and r.json()["user"]["access_role"] == "super_admin"
     assert client.get(f"/api/projects/{client.pid}/tasks").status_code == 200
 
 
-def test_login_needs_csrf_header_and_hides_which_part_is_wrong(client):
-    assert client.post("/api/auth/login", json={"login": "admin", "password": PASSWORD}).status_code == 403
-    a = client.post("/api/auth/login", json={"login": "нет-такого", "password": "x"}, headers=CSRF).json()["detail"]
-    b = client.post("/api/auth/login", json={"login": "admin", "password": "x"}, headers=CSRF).json()["detail"]
-    assert a == b == "Неверный логин или пароль."
-
-
 def test_five_wrong_passwords_lock_the_account(client):
+    """Перевёрнуто 06.11.2026 (вопрос 4): блокировка — по правилам слоя «Команды», 5 неудач и 2 минуты."""
+    client.app.state.accounts.set_auth_required(True, "тест")
     for _ in range(5):
-        client.post("/api/auth/login", json={"login": "admin", "password": "x"}, headers=CSRF)
-    r = client.post("/api/auth/login", json={"login": "admin", "password": PASSWORD}, headers=CSRF)
-    assert r.status_code == 401 and "заблокирована" in r.json()["detail"]
+        client.post("/auth/login", json={"login": "admin", "password": "x"}, headers=W)
+    r = client.post("/auth/login", json={"login": "admin", "password": PASSWORD}, headers=W)
+    assert r.status_code in (401, 429) and "2 минуты" in r.json()["detail"]
 
 
 def test_password_is_never_stored_in_clear(client):
@@ -68,19 +76,13 @@ def test_password_is_never_stored_in_clear(client):
     assert row["password_hash"].startswith("scrypt$") and PASSWORD not in row["password_hash"]
 
 
-def test_turning_login_off_needs_password(client):
-    client.post("/api/auth/mode", json={"auth_required": True, "login": "admin", "password": PASSWORD}, headers=SUPER)
-    client.post("/api/auth/login", json={"login": "admin", "password": PASSWORD}, headers=CSRF)
-    assert client.post("/api/auth/mode", json={"auth_required": False, "password": "x"}).status_code == 403
-    assert client.post("/api/auth/mode", json={"auth_required": False, "password": PASSWORD}).json()["auth_required"] is False
-
-
-def test_accounts_created_on_screen(client):
+def test_accounts_screen_is_closed(client):
+    """Перевёрнуто 06.11.2026 (вопрос 5): экран учётных записей «Мониторинга» закрыт — учётные записи ведёт «Команда»."""
+    assert client.get("/api/monitoring/accounts", headers=SUPER).status_code in (404, 405)
     r = client.post("/api/monitoring/accounts", json={"login": "ignatov", "full_name": "Игнатов Иван", "role": "member",
                                                       "password": "короткий"}, headers=SUPER)
-    assert r.status_code == 200 and any(a["login"] == "ignatov" for a in r.json())
-    assert client.post("/api/monitoring/accounts", json={"login": "x", "role": "member", "password": "123"},
-                       headers=SUPER).status_code == 422
+    assert r.status_code in (404, 405)
+    assert not client.app.state.store.q("SELECT id FROM accounts WHERE login='ignatov'")
 
 
 # ---------------------------------------------------------------- Мониторинг RealTime
@@ -231,5 +233,5 @@ def test_everything_is_super_admin_only(client):
     adm = {"X-User-Role": "project_admin"}
     for url in ("/api/monitoring/live", "/api/monitoring/awaiting-input", "/api/monitoring/system-messages",
                 "/api/monitoring/data-state", "/api/monitoring/static", "/api/settings/thresholds",
-                "/api/monitoring/decisions", "/api/monitoring/rules", "/api/monitoring/accounts"):
+                "/api/monitoring/decisions", "/api/monitoring/rules"):   # «accounts» закрыт 06.11.2026
         assert client.get(url, headers=adm).status_code == 403, url

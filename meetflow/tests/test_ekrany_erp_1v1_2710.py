@@ -119,8 +119,13 @@ def test_вход_общий_пароль_первый_вход_и_времен�
     assert r.status_code == 200 and r.json()["user"]["login"] == "vsidorova"
     assert c.get("/auth/first-login/people").json()["people"] == [p for p in c.get("/auth/first-login/people").json()["people"]
                                                                     if p["full_name"] != "Сидорова Вера"]
-    # «Выдать доступ» администратору — временный пароль один раз, со сменой при входе
-    g = c.post(f"/users/{c.ids['project_admin']}/access", json={"email": "ipetrov"}, headers=h())
+    # «Выдать доступ» — временный пароль один раз, со сменой при входе. Перевёрнуто 06.11.2026 (решение владелицы, файл 20,
+    # вопрос 2): личный пароль только у суперадмина — администратору отказ, как участнику; выдача — второму суперадмину.
+    отказ = c.post(f"/users/{c.ids['project_admin']}/access", json={"email": "ipetrov"}, headers=h())
+    assert отказ.status_code == 400 and "общему паролю" in отказ.json()["detail"]
+    второй = st.insert("accounts", login=None, full_name="Иванов Пётр", role="super_admin", password_hash="", active=1,
+                       confirmed=1)
+    g = c.post(f"/users/{второй}/access", json={"email": "ipetrov"}, headers=h())
     assert g.status_code == 200 and g.json()["temporary_password"] and g.json()["valid_hours"] == 24
     assert c.post("/auth/login", json={"login": "ipetrov", "password": "неверный"}, headers=W).status_code == 401
     ok = c.post("/auth/login", json={"login": "ipetrov", "password": g.json()["temporary_password"]}, headers=W)
@@ -617,13 +622,19 @@ def test_выключатели_и_сроки(env):
 def test_общий_пароль_закрывает_сессии_по_нему(env):
     c, h = env, env.h
     assert c.get("/project-status/shared-password", headers=h()).json()["is_set"] is False
+    from meetflow.web.erp.bezopasnost import hash_password
+    c.st.update("accounts", c.ids["super_admin"], password_hash=hash_password("Лично-Супера-0611"))
     cols = {r["name"] for r in c.st.q("PRAGMA table_info(sessions)")}
     vals = {"account_id": c.ids["member"], "token": "t-1", "via_shared": 1, "created_at": "2026-10-27T10:00:00",
             "expires_at": "2099-01-01T00:00:00"}
     sid = c.st.insert("sessions", **{k: v for k, v in vals.items() if k in cols})
-    assert c.post("/project-status/shared-password", json={"new_password": "123"}, headers=h()).status_code == 400
+    # 06.11.2026 (вопрос 9): смена общего пароля — с подтверждением личным паролем суперадмина
+    assert c.post("/project-status/shared-password", json={"new_password": "Север-Склад-27x"}, headers=h()).status_code == 400
+    assert c.post("/project-status/shared-password", json={"new_password": "123", "current_password": "Лично-Супера-0611"},
+                  headers=h()).status_code == 400
     r = c.post("/project-status/shared-password",
-               json={"new_password": "Север-Склад-27x", "repeat_password": "Север-Склад-27x"}, headers=h()).json()
+               json={"new_password": "Север-Склад-27x", "repeat_password": "Север-Склад-27x",
+                     "current_password": "Лично-Супера-0611"}, headers=h()).json()
     assert r["is_set"] and r["sessions_closed"] == 1 and c.st.get("sessions", sid) is None
 
 

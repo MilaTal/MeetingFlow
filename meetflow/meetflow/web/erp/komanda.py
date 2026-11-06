@@ -328,6 +328,10 @@ def mount(r: APIRouter, ctx: Ctx) -> None:
             store.delete("sessions", s["id"])
         return len(rows)
 
+    # Для приёма входа от портала (`portal_vhod.py`): та же сессия, что при входе по паролю, и закрытие всех сессий.
+    ctx.start_session, ctx.revoke_sessions = start_session, revoke_sessions
+    ctx.check_current = lambda u, password, ip, context: check_current(store.get("accounts", u["id"]), password, ip, context)
+
     def csrf(request: Request) -> None:
         if (request.headers.get("x-requested-with") or "").lower() not in ("erp-webapp", "meetflow"):
             raise HTTPException(403, "Запрос без защитного заголовка отклонён")
@@ -420,8 +424,15 @@ def mount(r: APIRouter, ctx: Ctx) -> None:
     @r.post("/auth/logout", status_code=204)
     def logout(request: Request, response: Response):
         csrf(request)
+        u = accounts.by_session(request.cookies.get(COOKIE))
         accounts.close_session(request.cookies.get(COOKIE))
         response.delete_cookie(COOKIE, path="/")
+        # Выход в любом месте закрывает всё (решение владелицы 06.11.2026, вопрос 8): все сессии человека здесь и сигнал
+        # порталу — он закроет портал и остальные системы. Портала нет (секрета нет) — как раньше, одна сессия.
+        from . import portal_vhod
+        if u and portal_vhod.enabled():
+            revoke_sessions(u["id"])
+            portal_vhod.notify_logout(u)
 
     @r.get("/auth/me")
     def me(request: Request):
@@ -440,6 +451,13 @@ def mount(r: APIRouter, ctx: Ctx) -> None:
     @r.post("/auth/change-password", status_code=204)
     def change_password(payload: ChangePasswordIn, request: Request):
         u = ctx.need_user(request)
+        # Только после настоящего входа (решение владелицы 06.11.2026, файл 21, вопрос 10): в тестовом режиме любой может
+        # выбрать себя суперадмином. Пока MeetFlow подключён к порталу, свой пароль меняется там; временный — здесь.
+        if not accounts.auth_required() or not accounts.by_session(request.cookies.get(COOKIE)):
+            raise HTTPException(403, "Смена пароля доступна только после входа по логину и паролю")
+        from . import portal_vhod
+        if portal_vhod.enabled() and not u.get("must_change_password"):
+            raise HTTPException(409, "Пароль меняется на портале единого входа")
         if (u.get("role") or "member") in SHARED_PASSWORD_ROLES:
             raise HTTPException(400, "Вы входите по общему паролю — его меняет только суперадмин")
         with key_lock(u.get("login") or f"id:{u['id']}"):
