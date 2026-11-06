@@ -167,10 +167,39 @@ def supported_due(due, window_text: str, meeting_date: str | None = None) -> str
         from .dates import lenient_date
         md = lenient_date(str(meeting_date))
         return f"{md.day:02d}.{md.month:02d}.{md.year}" if md else due.strip()
-    if toks and all((w if w.isdigit() else w[:5]) in said for w in toks):
+    # 06.11.2026 (записка `4b657fa`): сверяем со словами записи только ЗНАЧИМЫЕ слова фразы модели. Модель нередко
+    # нормализует запись («в записи "неделя", в ответе "через неделю"»), и требование служебного «через» отбрасывало
+    # верный срок целиком. Выдуманный срок по-прежнему не пройдёт: значимого слова (число, единица времени, месяц,
+    # день недели, «сегодня/завтра/послезавтра», «следующ…», «конц…») в записи нет — отказ.
+    значимые = [w for w in toks if _znachimoe_due(w)]
+    проверять = значимые or toks
+    if проверять and all((w if w.isdigit() else w[:5]) in said for w in проверять):
         wd = _word_date(due)
         if wd:        # D6: прозвучавший срок словами — тоже в формате владельца
             return _owner_format(wd[0], wd[1], wd[2] if wd[2] and str(wd[2]) in said else None, meeting_date,
                                  due.strip())
         return due.strip()
     return None
+
+
+_ZNACHIMYE_ОСНОВЫ = {
+    "день", "дня", "дней", "дню", "днем", "дне",          # единицы времени
+    "неделя", "недели", "неделю", "недель", "неделе",
+    "месяц", "месяца", "месяцев", "месяце",
+    "сегодня", "завтра", "послезавтра", "послезавтрашний",
+}
+_ZNACHIMYE_ПРИСТАВКИ = ("недел", "месяц", "сегодн", "завтра", "послезавтра", "следующ", "конц")
+
+
+def _znachimoe_due(слово: str) -> bool:
+    """Значимое слово срока: число, единица времени, месяц, день недели, «сегодня/завтра/послезавтра»,
+    «следующ…», «конц…». Служебные «через», «в течение», «за», «до», «к», «не позднее» значимыми не считаются."""
+    if слово.isdigit() or any(ch.isdigit() for ch in слово):
+        return True
+    if слово in _ZNACHIMYE_ОСНОВЫ or any(слово.startswith(п) for п in _ZNACHIMYE_ПРИСТАВКИ):
+        return True
+    if any(слово.startswith(м) for м in _MONTHS):
+        return True
+    return any(слово.startswith(д) for д in ("понедельник", "вторник", "сред", "четверг", "пятниц", "суббот",
+                                             "воскресен"))
+
