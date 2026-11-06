@@ -970,6 +970,7 @@ class MeetingPipeline:
                         дополнить_исполнителя(hit, who)
                     repeats += 1
                     continue  # повторный прогон той же встречи: эта задача уже заведена
+                срок_след: dict = {}
                 if d.due_date:            # срок — только если прозвучал рядом с цитатой (01/6)
                     said = supported_due(d.due_date, self._window(source.lines, g.quote or d.quote), meeting.get("date"))
                     proposed = d.due_date
@@ -1014,6 +1015,20 @@ class MeetingPipeline:
                         # не молча: задача без срока и карточка, как в Планёрке (владелец 12.10.26)
                         rep.due_dropped += 1
                         due_unconfirmed[id(d)] = proposed
+                # След черновика целиком (записка 7208bf3): правило сторожа, была ли дословная цитата и нашлась ли она
+                # в записи, что стало со сроком. Без этого «почему черновик со сроком не стал задачей» не видно:
+                # снятые черновики раньше не попадали в след вовсе. Текст — только в журнал вне git.
+                if self.tasks_trace_path:
+                    цитата = (g.quote or d.quote or "").strip()
+                    asr_journal.write(self.tasks_trace_path, meeting_id=meeting_id, путь="drafts", шаг="черновик",
+                                      принят=int(bool(g.accepted)), guard_rule=";".join(g.reasons)[:200],
+                                      цитата_есть=int(bool(цитата)),
+                                      цитата_найдена=int(bool(цитата) and any(ln.strip() and ln.strip() in цитата
+                                                                            for ln in source.lines)),
+                                      due_phrase=str(d.due_date or "")[:60],
+                                      due_final=str(срок_след.get("due_final") or "")[:40],
+                                      assignee_model=str(d.assignee or "")[:80],
+                                      цитата=цитата[:300])
                 if g.accepted:
                     planned.append((d, g))
                     existing.append((g.description, who))
