@@ -24,7 +24,6 @@ from pathlib import Path
 
 from ..core.types import SourceDoc, SourceKind
 from .base import ASRConnector, ConnectorError
-from . import asr_service
 from . import llm_routes
 from .shared import model_routes as _mr
 from .shared import recognition_lease
@@ -200,11 +199,6 @@ class WhisperLocalASR(ASRConnector):
                     else:
                         lines, duration, segment_meta = self._run(
                             self._load_point(ep["model"], ep.get("device", "auto")), path)
-                except asr_service.Отменено as e:
-                    # Остановка человеком или предел времени — не сбой точки: не выводим её на охлаждение и не
-                    # идём на следующую (иначе отменённый вызов немедленно повторился бы на той же или другой
-                    # точке). Файл остаётся в папке и берётся следующим проходом (06.11.2026).
-                    raise ConnectorError(f"cancelled: {e}") from e
                 except Exception as e:  # noqa: BLE001 — любой сбой точки ведёт на следующую
                     llm_routes.mark_down(name, cooldown, str(e))
                     errors.append(f"{name}: {str(e)[:150]}")

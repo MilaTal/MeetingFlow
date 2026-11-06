@@ -6781,17 +6781,6 @@ function renderMonitoringLive() {
   const проверитьСвязь = `<div class="hstack" style="margin-top:8px"><button class="btn-sm" id="probe-now-btn">Проверить связь</button>
     <span class="page-sub" style="margin:0">точки модели опрашиваются фоном раз в 60 секунд; кнопка — опросить сейчас</span></div>`;
   const folderSource = wf.folder_source ? ` Сейчас путь взят: ${esc(wf.folder_source)}.` : "";
-  // Идущий проход (06.11.2026): какой шаг, какой файл и сколько он уже длится — и кнопка остановки рядом.
-  // Раньше зависшее распознавание записи убиралось только перезапуском сервера, а он начинал запись с нуля.
-  const шагПрохода = wf.scan_step ? `шаг «${esc(wf.scan_step)}»` : "обход папки";
-  const минутШага = Number(wf.step_seconds) > 0 ? Math.round(Number(wf.step_seconds) / 60) : 0;
-  const проходПоПапке = wf.scan_in_progress ? `
-    <div class="hstack" style="margin-top:8px">
-      <button class="btn-sm" id="watch-cancel-btn">Остановить проход</button>
-      <span class="page-sub" style="margin:0">идёт проход: ${шагПрохода}${wf.current_file ? ` · ${esc(wf.current_file)}` : ""}${
-        минутШага ? ` · ${минутШага} мин` : ""}${wf.stalled ? " · долго без движения" : ""}. Остановка прерывает распознавание:
-        файл остаётся в папке и берётся следующим проходом, сервер перезапускать не нужно.</span>
-    </div>` : "";
   // Частота обхода папки — рядом со строкой ввода пути и ЗАДАЁТСЯ ЗДЕСЬ ЖЕ, как путь (владелец
   // 09.10.26: сначала «выведи в мониторинг переменную…», затем «сделай блок ввода значения для обхода
   // папки активной строкой — чтобы сразу с монитора можно было задавать значение, как путь к файлу
@@ -6817,7 +6806,7 @@ function renderMonitoringLive() {
     <div class="mon-folder-form">
       <input type="text" id="watch-folder-input" value="${esc(wf.folder || "")}" placeholder="Папка-приёмник записей не задана — укажите полный путь" autocomplete="off">
       <button class="btn-sm" id="watch-folder-btn">Сменить папку</button>
-    </div>${интервал}${проходПоПапке}
+    </div>${интервал}
     <div class="page-sub" style="margin:6px 0 0">Меняется в два шага: сначала показываем, что в папке лежит и что заберёт первый проход,
       потом просим повторить путь. Так сделано не из вредности — поллер обходит папку целиком и уносит забранное в подпапку
       «обработано», поэтому опечатка в пути дорого стоит. Пустое поле — выключить папку.${folderSource}</div>`;
@@ -6917,20 +6906,6 @@ function renderMonitoringLive() {
     } catch (err) { toast(err.message, true); btn.disabled = false; }
   });
   document.getElementById("watch-folder-btn")?.addEventListener("click", () => changeWatchFolder());
-  // Остановка идущего прохода (06.11.2026): ведёт себя как «Сменить папку» — сервер сам решает, что останавливать,
-  // и отвечает словами, если прохода нет (кнопка не выглядит сломанной).
-  document.getElementById("watch-cancel-btn")?.addEventListener("click", async (e) => {
-    const btn = e.currentTarget;
-    btn.disabled = true;
-    try {
-      const res = await api("/project-status/watch-folder/cancel", { method: "POST" });
-      toast(res.cancelled ? (res.detail || "Проход остановлен") : (res.detail || "Проход не идёт"));
-      await loadAndRenderMonitoring(renderMonitoringLive);
-    } catch (err) {
-      toast(err.message, true);
-      btn.disabled = false;
-    }
-  });
   // Интервал обхода — прямое действие, без пароля и подтверждения: в отличие от пути, ошибка здесь
   // ничего не разрушает (поллер пройдёт папку раньше или позже) и правится тем же полем (владелец 09.10.26).
   document.getElementById("watch-interval-btn")?.addEventListener("click", async (e) => {

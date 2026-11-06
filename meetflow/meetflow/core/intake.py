@@ -124,9 +124,6 @@ class IntakeService:
         self._scanning: dict[int, dict[str, Any]] = {}
         # сборки, поставленные проходом и не дождавшиеся: id строки очереди → (проект, встреча, файл, где файл сейчас)
         self._pending: dict[int, tuple[int, int, str, Path | None]] = {}
-        # проекты, у которых человек попросил остановить идущий проход (06.11.2026): флаг ставит маршрут отмены,
-        # проход заканчивается после текущего файла, а идущий вызов распознавания прерывается сразу
-        self._отмена: set[int] = set()
 
     def _beat(self, project_id: int, step: str, file: str | None = None) -> None:
         cur = self._scanning.get(project_id)
@@ -162,25 +159,10 @@ class IntakeService:
         return self.interval_default, "по умолчанию"
 
     # ------------------------------------------------------------ проход
-    def cancel_pass(self, project_id: int, кем: str = "человек") -> dict[str, Any]:
-        """Остановить идущий проход (06.11.2026). Идущий вызов распознавания прерывается сразу — файл остаётся
-        в папке и берётся следующим проходом; проход заканчивается после текущего файла, ничего не теряя.
-        Проход не идёт — не ошибка: так и отвечаем, чтобы кнопка не выглядела сломанной."""
-        from ..connectors import asr_service
-        if self._scanning.get(project_id) is None:
-            return {"cancelled": False, "detail": "проход сейчас не идёт — останавливать нечего"}
-        self._отмена.add(project_id)
-        вызовов = asr_service.отменить_все(кем)
-        self._beat(project_id, "остановка прохода", None)
-        return {"cancelled": True, "calls": вызовов,
-                "detail": ("распознавание прервано — файл остался в папке" if вызовов
-                           else "проход остановится после текущего файла")}
-
     def scan_project(self, project_id: int, today=None) -> dict[str, Any]:
         path = self.folder(project_id)
         if not path:
             return {"status": "off"}
-        self._отмена.discard(project_id)     # просьба остановить действует на один проход, а не на все следующие
         self._scanning[project_id] = {"started": now(), "step": "обход папки", "file": None,
                                       "pulse": time.monotonic()}
         try:
@@ -217,7 +199,7 @@ class IntakeService:
                 # ловит конвейер по отпечатку текста (ingest -> duplicate)
                 fi = self._intakes[project_id] = FolderIntake(path, set(), today)
         result: dict[str, Any] = {"at": now(), "folder": path, "ingested": [], "held": [], "rejected": [],
-                                  "waiting": [], "no_date": [], "duplicates": [], "cancelled": []}
+                                  "waiting": [], "no_date": [], "duplicates": []}
         try:
             scan = fi.scan()
         except ConnectorError as e:
@@ -233,10 +215,6 @@ class IntakeService:
         from . import proekt_zapisi as pz
         другие = pz.папки_других(self.s, project_id)
         for item in scan.ready:
-            if project_id in self._отмена:
-                # дальше не берём: человек остановил проход, остальные файлы ждут следующего (06.11.2026)
-                result["cancelled"].append({"file": item.path.name, "detail": "проход остановлен человеком"})
-                break
             if pz.под_другим(item.path, другие):
                 continue                     # подпапка — приёмник другого проекта: её обходит тот проект
             # Проект записи (27.10.2026): подпапка проекта или подпроекта — он; корень общей папки — по названию в имени
@@ -304,17 +282,13 @@ class IntakeService:
                         self._after_build(project_id, mid, item.path.name, moved, rep)
             elif st == "held":
                 result["held"].append(item.path.name)          # ждёт на месте
-            elif st == "cancelled":
-                # распознавание прервано (человек или предел времени): файл остался в папке, проход закончен
-                result["cancelled"].append({"file": item.path.name, "detail": (res.get("reason") or "")[:300]})
-                break
             else:
                 result["rejected"].append(item.path.name)
                 self.pipe.cards.open(project_id, "technical", f"Файл из папки не принят: {item.path.name}",
                                      {"reason": res.get("reason", "")})
-        result["status"] = "cancelled" if result["cancelled"] else "ok"
+        result["status"] = "ok"
         self.s.set_setting("watch_last_scan", result, project_id)
-        if any(result[k] for k in ("ingested", "held", "rejected", "duplicates", "no_date", "cancelled")):
+        if any(result[k] for k in ("ingested", "held", "rejected", "duplicates", "no_date")):
             self.s.set_setting("watch_last_useful_scan", result, project_id)
         return result
 
