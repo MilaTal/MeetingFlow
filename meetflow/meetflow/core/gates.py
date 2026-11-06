@@ -278,4 +278,13 @@ class TaskGate:
             elif как == ПОД_ВОПРОСОМ:
                 reasons.append("third_person_retelling")
 
+        # Правило владелицы 16.10 и 20.10 (записка c9d9591): вопрос-просьба и отрицание внутри содержания — обычная
+        # задача без карточки. Эти два кода не должны попадать в причины, иначе accepted = False и задачи нет.
+        без_отсева = {"question_not_assignment", "negation_in_quote"}
+        if reasons and set(reasons) <= без_отсева:
+            reasons = []
+        # условие в цитате — не отсев, а «под вопросом» с карточкой (правило 20.10, записка c9d9591)
+        if reasons == ["condition_not_assignment"]:
+            reasons = []
+            pending = pending or {"reason": "condition", "marks": []}
         return GateResult(not reasons, reasons, person, quote or "", desc, pending if not reasons else None)

@@ -37,8 +37,10 @@ def test_gate_unknown_full_name_is_new_person():
 
 
 def test_gate_holds_question():
+    # Перевёрнут 07.11.2026 (записка c9d9591, правило владелицы 16.10 и 20.10): вопрос-просьба — обычная задача
+    # без карточки. Было: «question_not_assignment» в причинах и отсев.
     g = GATE.check(TaskDraft("обновить спецификации", "Игнатов Иван", line_no=5), SRC)
-    assert "question_not_assignment" in g.reasons
+    assert g.accepted and not g.reasons and g.pending is None
 
 
 def test_gate_duplicate_same_person_only():
