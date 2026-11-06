@@ -2964,8 +2964,10 @@ function показатьХодСборки(id, { findingsId, btnId, since, queu
 function перерисоватьЭкранВстречи(id) {
   const route = (location.hash || "").replace(/^#/, "");
   // Одна страница встречи (05.11.2026): «Проверить сейчас» в карточке хода сборки не должна возвращать прежний экран.
-  if (route.startsWith(`meetings/${id}/protocol`)) return renderMeetingReader(id, "protocol");
-  if (route.startsWith(`meetings/${id}/planprep`)) return renderMeetingReader(id, "plan");
+  // Д2.5 (решение владелицы 05.11.2026): номер встречи сравнивается целиком — иначе #meetings/16 подходил под
+  // проверку встречи №1 и показывал её протокол.
+  if (route.startsWith(`meetings/${id}/protocol`) && /^meetings\/\d+(\/|\?|$)/.test(route)) return renderMeetingReader(id, "protocol");
+  if (route.startsWith(`meetings/${id}/planprep`) && /^meetings\/\d+(\/|\?|$)/.test(route)) return renderMeetingReader(id, "plan");
   return renderMeetingReader(id);
 }
 
