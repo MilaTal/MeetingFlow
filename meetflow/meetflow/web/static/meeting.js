@@ -153,6 +153,14 @@ async function renderMeetingReader(id, запрошеннаяВкладка) {
     api(`/meetings/${id}/sources`).catch(() => []), api(`/meetings/${id}/materials`).catch(() => []),
     api("/meetings"), api(`/tasks?meeting_id=${id}`),
   ]);
+  // Д2.1 (решение владелицы 05.11.2026): открытие встречи ставит проект вкладки. При «Все проекты» выбор
+  // остаётся, а проект встречи называется в шапке. Перерисовки нет — данные уже загружены по встрече.
+  const проектВстречи = Number(встреча.project_id || 0);
+  if (проектВстречи && выбранныйПроект() !== 0 && Number(выбранныйПроект()) !== проектВстречи) {
+    localStorage.setItem("currentProjectId", String(проектВстречи));
+    sessionStorage.setItem("currentProjectId", String(проектВстречи));
+    записатьПроектВАдрес(проектВстречи);
+  }
   const генерация = canPrepare() ? await api(`/meetings/${id}/generation`).catch(() => ({})) : {};
   const ответДоговорённостей = протокол.available
     ? await api(`/agreements?meeting_id=${id}`).catch(() => ({ items: [], mode: "shadow" })) : null;
