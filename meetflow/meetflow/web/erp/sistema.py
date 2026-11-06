@@ -319,6 +319,11 @@ def mount(r: APIRouter, ctx: Ctx) -> None:
                   ws.get("interval_source") or "", "переменная окружения" if "переменн" in (ws.get("interval_source") or "") else "по умолчанию"),
               "poll_every_var": "MEETFLOW_WATCH_INTERVAL_SEC", "poll_every_min": 10, "poll_every_max": 86400,
               "poll_every_value_setting": store.get_setting("watch_interval", pid) if pid else None,
+              # идущий проход и его шаг (06.11.2026): видно, что именно делается и сколько это уже длится,
+              # а кнопка «Остановить проход» рядом — чтобы не перезапускать сервер ради зависшего распознавания
+              "scan_in_progress": bool(ws.get("scan_in_progress")), "scan_step": ws.get("scan_step") or "",
+              "current_file": ws.get("current_file") or "", "step_seconds": ws.get("step_seconds"),
+              "stalled": bool(ws.get("stalled")),
               "poll_every_note": "" if pid else "выберите проект вверху левой панели — у каждого проекта своя папка"}
         cards_open = store.q("SELECT kind, COUNT(*) AS n FROM cards WHERE status='open' AND kind NOT IN ('technical','event') GROUP BY kind")
         n_open = sum(x["n"] for x in cards_open)
@@ -648,6 +653,18 @@ def mount(r: APIRouter, ctx: Ctx) -> None:
         pid = need_pid(request)
         store.set_setting("watch_interval", body.seconds, pid, ctx.name(u))
         return {"seconds": body.seconds}
+
+    @r.post("/project-status/watch-folder/cancel")
+    def watch_cancel(request: Request):
+        """Остановить идущий проход папки-приёмника (06.11.2026). Раньше зависшее распознавание убиралось только
+        перезапуском сервера, а он начинал запись с нуля; теперь вызов прерывается, файл остаётся в папке и берётся
+        следующим проходом."""
+        u = ctx.need_super(request)
+        pid = need_pid(request)
+        res = ctx.intake.cancel_pass(pid, ctx.name(u))
+        if res.get("cancelled"):
+            ctx.sys_msg("Проход папки-приёмника остановлен", f"{ctx.name(u)}: {res.get('detail') or ''}", "watch_folder")
+        return res
 
     @r.post("/project-status/recognition/resume")
     def resume(body: ResumeIn, request: Request):

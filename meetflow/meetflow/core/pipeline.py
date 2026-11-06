@@ -577,6 +577,13 @@ class MeetingPipeline:
                 doc = c.read(data or b"", filename)
         except ConnectorError as e:
             msg = str(e)
+            if msg.startswith("cancelled"):
+                # Распознавание остановлено человеком или пределом времени (06.11.2026): файл не «не принят» —
+                # он остаётся в папке и берётся следующим проходом. Карточка — событие, не технический сбой.
+                _, _, text = msg.partition(":")
+                self.cards.open(project_id, "event", f"Распознавание записи «{filename}» остановлено",
+                                {"file": filename, "причина": text.strip()}, meeting_id)
+                return {"status": "cancelled", "reason": msg}
             if msg.startswith(("held_recording", "waiting_tools")):
                 kind, _, text = msg.partition(":")
                 self.cards.open(project_id, kind, f"Запись «{filename}»: {text.strip()}", {"file": filename},
