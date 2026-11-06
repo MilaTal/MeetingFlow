@@ -1603,11 +1603,12 @@ function выбранныйПроект() {
   const v = Number(sessionStorage.getItem("currentProjectId") || localStorage.getItem("currentProjectId") || 0);
   return Number.isFinite(v) && v > 0 ? v : 0;
 }
-function записатьПроектВАдрес(id) {
+function записатьПроектВАдрес(id, вИсторию) {
   const части = location.hash.split("?");
   const параметры = new URLSearchParams(части[1] || "");
   параметры.set("p", String(id));
-  history.replaceState(null, "", части[0] + "?" + параметры.toString());
+  const адрес = части[0] + "?" + параметры.toString();
+  if (вИсторию) history.pushState(null, "", адрес); else history.replaceState(null, "", адрес);
 }
 function названиеСистемы() {
   const id = выбранныйПроект();
@@ -1628,10 +1629,17 @@ async function загрузитьПроекты() {
   // сохранённый проект пропал (архив, удалён) — первый проект, а не пустой экран; проектов нет — «Все проекты».
   // «Общие встречи» стоят первой строкой (Доработка 2, 28.10.2026), но по умолчанию берётся первый настоящий проект, как прежде
   const первый = (_проекты.find(x => !x.general) || _проекты[0] || {}).id || 0;
+  // Д1.3 (решение владелицы 05.11.2026): пропавший проект не подменяется молча первым — «Все проекты» и сообщение.
   if (выбранныйПроект() && !_проекты.some(x => x.id === выбранныйПроект())) {
-    localStorage.setItem("currentProjectId", String(первый));
+    sessionStorage.setItem("currentProjectId", "0");
+    localStorage.setItem("currentProjectId", "0");
+    записатьПроектВАдрес(0);
+    toast("Выбранный проект больше недоступен — открыты все проекты");
   }
-  if (localStorage.getItem("currentProjectId") === null && _проекты.length) localStorage.setItem("currentProjectId", String(первый));
+  // Первый вход без сохранённого выбора — «Все проекты» всем ролям (поле проекта у человека не заводим).
+  if (localStorage.getItem("currentProjectId") === null) localStorage.setItem("currentProjectId", "0");
+  // Старые адреса без p получают его здесь, без записи в историю (Д1.1).
+  if (!new URLSearchParams(location.hash.split("?")[1] || "").has("p")) записатьПроектВАдрес(выбранныйПроект());
   const $s = document.getElementById("project-select");
   if ($s) {
     // проект, под ним его подпроекты с отступом (справочник проектов, 27.10.2026); выбор проекта — вместе с подпроектами
@@ -1754,7 +1762,7 @@ function выбратьПроект(id) {
   const v = Number(id) || 0;
   localStorage.setItem("currentProjectId", String(v));
   sessionStorage.setItem("currentProjectId", String(v));
-  записатьПроектВАдрес(v);
+  записатьПроектВАдрес(v, true);        // смена проекта — запись в историю: «Назад» вернёт и экран, и проект
   const $s = document.getElementById("project-select");
   if ($s) $s.value = String(v);
   рисоватьПроекты();
