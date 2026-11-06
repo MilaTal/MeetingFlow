@@ -37,6 +37,11 @@ echo %date% %time%>"%LOCK%\time"
 echo [%date% %time%] обёртка 8005 стартовала, PID %MYID% >>"%LOG%"
 
 set "CODE3=0"
+rem BOM у run_dev.ps1: PowerShell 5.1 читает .ps1 без BOM как ANSI и падает на кириллице (записка 9065fb3).
+rem Проверяем первые три байта; нет BOM и есть не-ASCII — возвращаем BOM на месте, строка в журнал.
+powershell -NoProfile -Command "$p='\SD2\GROUPS\Technical\AI Projects\MeetFlow\meetflow\scripts
+un_dev.ps1'; if (Test-Path $p) { $b=[IO.File]::ReadAllBytes($p); $bom = $b.Length -ge 3 -and $b[0] -eq 0xEF -and $b[1] -eq 0xBB -and $b[2] -eq 0xBF; $non=$false; foreach ($x in $b) { if ($x -ge 0x80) { $non=$true; break } }; if (-not $bom -and $non) { [IO.File]::WriteAllBytes($p, ([byte[]](0xEF,0xBB,0xBF) + $b)); Write-Output 'вернул BOM run_dev.ps1' } }">>"%LOG%" 2>&1
+
 :loop
 echo [%date% %time%] запуск сервера >>"%LOG%"
 powershell -NoProfile -WindowStyle Hidden -ExecutionPolicy Bypass -File "\\SD2\GROUPS\Technical\AI Projects\MeetFlow\meetflow\scripts\run_dev.ps1" -Theme it_product -Port 8005 -Db data\meetflow.db -BindHost 0.0.0.0 >>"%LOG%" 2>&1

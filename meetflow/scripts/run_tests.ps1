@@ -1,4 +1,4 @@
-# Локальный прогон всех тестов (make на машине нет). Запуск из корня framework:
+﻿# Локальный прогон всех тестов (make на машине нет). Запуск из корня framework:
 #   powershell -ExecutionPolicy Bypass -File scripts\run_tests.ps1 [-Marker security]
 param([string]$Marker = "")
 $env:PYTHONIOENCODING = "utf-8"
