@@ -50,7 +50,14 @@ def mount(app: FastAPI, **parts) -> Ctx:
             чужой = (request.headers.get("x-project-id") or "").strip()
             if м and чужой not in ("", "0"):
                 встреча = ctx.store.get("meetings", int(м.group(1)))
-                if встреча and str(встреча.get("project_id")) != чужой:
-                    return JSONResponse({"detail": "Встреча принадлежит другому проекту — откройте её из своего проекта"}, 409)
+                if встреча:
+                    проект_встречи = встреча.get("project_id")
+                    if проект_встречи is None:
+                        # Общая встреча (без проекта): с ней работают вкладки «Общие встречи» и «Все проекты»,
+                        # вкладка проекта — нет (записка 06.11.2026).
+                        общие = ctx.store.q("SELECT id FROM projects WHERE COALESCE(general,0)=1 LIMIT 1")
+                        проект_встречи = общие[0]["id"] if общие else None
+                    if проект_встречи is not None and str(проект_встречи) != чужой:
+                        return JSONResponse({"detail": "Встреча принадлежит другому проекту — откройте её из своего проекта"}, 409)
         return await call_next(request)
     return ctx
