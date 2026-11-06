@@ -289,5 +289,5 @@ class TaskGate:
         if "condition_not_assignment" in reasons:
             # условие снимаем при любом наборе причин (записка 2e800de): остальные причины, если есть, решают сами
             reasons = [r for r in reasons if r != "condition_not_assignment"]
-            pending = pending or {"reason": "condition", "marks": []}
+            pending = pending or {"reason": "condition", "candidates": [], "marks": []}
         return GateResult(not reasons, reasons, person, quote or "", desc, pending if not reasons else None)
