@@ -1596,8 +1596,18 @@ function conflictsRef() {
 // план, статус), при «Все проекты» просят выбрать проект.
 let _проекты = [];
 function выбранныйПроект() {
-  const v = Number(localStorage.getItem("currentProjectId") || 0);
+  // Д1 (решение владелицы 05.11.2026): проект принадлежит вкладке и адресу — параметр p в адресе главнее,
+  // затем sessionStorage вкладки, localStorage только подсказывает значение новой вкладке.
+  const изАдреса = new URLSearchParams(location.hash.split("?")[1] || "").get("p");
+  if (изАдреса !== null && изАдреса !== "" && Number.isFinite(Number(изАдреса)) && Number(изАдреса) >= 0) return Number(изАдреса);
+  const v = Number(sessionStorage.getItem("currentProjectId") || localStorage.getItem("currentProjectId") || 0);
   return Number.isFinite(v) && v > 0 ? v : 0;
+}
+function записатьПроектВАдрес(id) {
+  const части = location.hash.split("?");
+  const параметры = new URLSearchParams(части[1] || "");
+  параметры.set("p", String(id));
+  history.replaceState(null, "", части[0] + "?" + параметры.toString());
 }
 function названиеСистемы() {
   const id = выбранныйПроект();
@@ -1743,6 +1753,8 @@ function нуженПроект(заголовок) {
 function выбратьПроект(id) {
   const v = Number(id) || 0;
   localStorage.setItem("currentProjectId", String(v));
+  sessionStorage.setItem("currentProjectId", String(v));
+  записатьПроектВАдрес(v);
   const $s = document.getElementById("project-select");
   if ($s) $s.value = String(v);
   рисоватьПроекты();
