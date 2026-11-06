@@ -286,8 +286,6 @@ class TaskGate:
         if reasons:
             reasons = [r for r in reasons if r not in без_отсева]
         # условие в цитате — не отсев, а «под вопросом» с карточкой (правило 20.10, записка c9d9591)
-        if "condition_not_assignment" in reasons:
-            # условие снимаем при любом наборе причин (записка 2e800de): остальные причины, если есть, решают сами
-            reasons = [r for r in reasons if r != "condition_not_assignment"]
-            pending = pending or {"reason": "condition", "candidates": [], "marks": []}
+        # ВНИМАНИЕ (записка 6ae8c75): условие пока оставлено как было — причины дают «под вопросом» через
+        # существующий механизм. Свой pending с пустыми candidates давал карточку «Кто из них» без списка.
         return GateResult(not reasons, reasons, person, quote or "", desc, pending if not reasons else None)
