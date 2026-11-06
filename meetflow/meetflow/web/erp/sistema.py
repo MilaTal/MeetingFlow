@@ -320,6 +320,11 @@ def mount(r: APIRouter, ctx: Ctx) -> None:
                   ws.get("interval_source") or "", "переменная окружения" if "переменн" in (ws.get("interval_source") or "") else "по умолчанию"),
               "poll_every_var": "MEETFLOW_WATCH_INTERVAL_SEC", "poll_every_min": 10, "poll_every_max": 86400,
               "poll_every_value_setting": store.get_setting("watch_interval", pid) if pid else None,
+              # идущий проход и его подшаг (06.11.2026): «разделение по голосам: идёт 45 мин из ~68» — вместо
+              # слова «завис», которое на длинной записи ничего не значило
+              "scan_in_progress": bool(ws.get("scan_in_progress")), "scan_step": ws.get("scan_step") or "",
+              "current_file": ws.get("current_file") or "", "step_seconds": ws.get("step_seconds"),
+              "stalled": bool(ws.get("stalled")), "substep": ws.get("substep") or {},
               "poll_every_note": "" if pid else "выберите проект вверху левой панели — у каждого проекта своя папка"}
         cards_open = store.q("SELECT kind, COUNT(*) AS n FROM cards WHERE status='open' AND kind NOT IN ('technical','event') GROUP BY kind")
         n_open = sum(x["n"] for x in cards_open)

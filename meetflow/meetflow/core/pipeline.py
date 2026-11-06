@@ -16,6 +16,7 @@
 """
 from __future__ import annotations
 
+import hashlib
 import inspect
 import json
 import os
@@ -38,12 +39,13 @@ from .people import Team
 from .prompts import PromptBuilder, chunks, parse_json, profile
 from .registry import CardQueue, OperatorMemory, TaskRegistry
 from . import deadline
-from . import asr_journal, plan as plan_mod, voice_step
+from . import asr_journal, hod, plan as plan_mod, voice_step
 from . import petlya_raspoznavaniya as petlya, polnota_rasshifrovki as polnota
 from . import korotkiy_protokol, schet_zadach, tablica_zadach, tekst_po_zapisi
 from . import iskazheniya_nazvaniy, slovar_whisper, ukrupnenie_sborka
 from . import obedinenie as obedinenie_mod     # объединение и мусор (Доработка 1, 29.10.2026)
 from . import vtoroy_sudya                      # второй судья в тень (записка 05.11.2026)
+from . import svedenie_ten                     # сведение кодом в тень, вариант C (слово владелицы 06.11.2026)
 from .team_sync import sync_people
 from ..connectors.team_shared import team_shared_state
 from .dates import due_text, lenient_date
@@ -56,6 +58,21 @@ from .text import coverage, jaccard, same_word, stems, words
 from .units import UnitsExtractor
 from .units import apply as apply_units
 from .types import Person, SourceDoc, SourceKind, TaskDraft, TaskStatus
+
+
+def _отпечаток_файла(path: Path | None) -> str | None:
+    """SHA-256 файла записи: по нему повторный проход находит уже сохранённую расшифровку (06.11.2026).
+    Читаем кусками — запись бывает в сотни мегабайт."""
+    if path is None:
+        return None
+    try:
+        хэш = hashlib.sha256()
+        with open(path, "rb") as ф:
+            for кусок in iter(lambda: ф.read(4 * 1024 * 1024), b""):
+                хэш.update(кусок)
+        return хэш.hexdigest()
+    except OSError:
+        return None
 
 
 def _as_of(rows: list[dict], meeting_date: str | None) -> list[dict]:
@@ -98,6 +115,7 @@ class RunReport:
     ukrupnenie: str = ""        # «укрупнение задач: …» — итог сборки (как ERP 25–26.10.2026, перенос 27.10.2026)
     obedinenie: str = ""        # «объединение и мусор: мусор 1; дополнено 2» — итог сборки (Доработка 1, 29.10.2026)
     obedinenie_log: list = field(default_factory=list)   # решения по пунктам: что, пункт, причина
+    svedenie_ten: str = ""      # «тень: групп 2, объединено бы 5, сомнений 1, снято 0» — вариант C (06.11.2026)
     participants: str = ""      # «участники кодом: N по голосам» — итог сборки (27.10.2026)
 
 
@@ -289,6 +307,10 @@ class MeetingPipeline:
         # Текст формулировки и цитаты не пишем. Файл вне git: папка data/ в .gitignore.
         self.tasks_trace_path = (Path(journal_path).with_name("tasks_trace.jsonl")
                                  if journal_path else None)
+        # Журнал тени сведения (вариант C, слово владелицы 06.11.2026): что снял бы способ 1 — считает рядом с
+        # рабочей сборкой, задачи не снимает. Файл вне git: папка data/ в .gitignore.
+        self.svedenie_ten_path = (Path(journal_path).with_name(svedenie_ten.ИМЯ_ЖУРНАЛА)
+                                  if journal_path else None)
         self.prof = profile(getattr(generator, "profile", "generic"))
         self.pb = PromptBuilder(theme.get("prompts.domain_role", ""), self.prof)
         self._configure_connectors()
@@ -340,6 +362,18 @@ class MeetingPipeline:
         key = (id(self.s), meeting_id)
         with self._locks_guard:
             return self._locks.setdefault(key, threading.Lock())
+
+    def _сохранённая_расшифровка(self, meeting_id: int, отпечаток: str | None) -> dict | None:
+        """Расшифровка этой записи, сохранённая прошлым проходом (06.11.2026). Берём только недоделанную: голоса
+        «готово» — значит запись уже разобрана целиком, повторять её незачем."""
+        if not отпечаток:
+            return None
+        for строка in self.s.q("SELECT * FROM sources WHERE meeting_id=? AND file_digest=? AND removed_at IS NULL "
+                               "ORDER BY id DESC LIMIT 1", (meeting_id, отпечаток)):
+            состояние = str(строка.get("voice_state") or "")
+            if состояние != "готово":
+                return строка
+        return None
 
     def _is_own_protocol(self, project_id: int, text: str) -> bool:
         """Свой протокол, присланный обратно (.md или выгрузка Word). Шапка без пометок (13.10.26),
@@ -417,6 +451,9 @@ class MeetingPipeline:
             "model": meta.get("model") or "", "device": meta.get("device") or "",
             "media_seconds": meta.get("media_seconds"), "segments": len(meta.get("segment_lines") or []),
             "text_chars": len(doc.text or ""),
+            # сколько ответа ждали от точки распознавания (06.11.2026): без этого числа нельзя отделить «Транс»
+            # от разделения по голосам — при разборе записи с тендерами его пришлось оценивать по времени шага
+            "asr_seconds": meta.get("elapsed_seconds"),
         }
         # петли распознавания и доля распознанного — в журнал распознавания (как ERP, 26.10.2026)
         if meta.get("asr_loops"):
@@ -554,22 +591,35 @@ class MeetingPipeline:
         c = self.plugins.resolve_source(filename)
         if c is None:
             return {"status": "rejected", "reason": f"Формат файла «{filename}» не поддерживается."}
+        # Расшифровка сохраняется ДО голосов (06.11.2026). Раньше источник писался только после разделения по
+        # голосам, и любая остановка на этом шаге начинала запись с нуля: 06.11 так потеряли 2,5 часа. Теперь по
+        # отпечатку файла видно, что текст уже есть, — «Транс» второй раз не зовём, идём сразу в голоса.
+        отпечаток = _отпечаток_файла(path) if isinstance(c, ASRConnector) and path is not None else None
+        сохранено = self._сохранённая_расшифровка(meeting_id, отпечаток) if отпечаток else None
         try:
             if isinstance(c, ASRConnector):
                 if path is None:
                     return {"status": "rejected", "reason": "Для записи нужен путь к файлу."}
-                # словарь проектов в подсказке распознавания — по выключателю «Параметров системы» (как ERP)
-                сборка = slovar_whisper.подсказка_сборка(self.s, project_id)
-                if сборка.текст and hasattr(c, "initial_prompt"):
-                    c.initial_prompt = сборка.текст
-                try:
-                    doc = c.transcribe(path)
-                finally:
-                    if hasattr(c, "initial_prompt"):
-                        c.initial_prompt = ""
-                if doc.meta.get("asr_prompt_sent"):
-                    doc.meta.update(сборка.meta())
-                    doc.meta["asr_project_vocab"] = bool(сборка.словарь_вошло)
+                if сохранено:
+                    doc = SourceDoc(сохранено["name"], SourceKind.TRANSCRIPT, сохранено["text"],
+                                    json.loads(сохранено["meta"] or "{}"))
+                    doc.meta["продолжение"] = "расшифровка взята из сохранённой, сервис распознавания не вызывался"
+                else:
+                    # словарь проектов в подсказке распознавания — по выключателю «Параметров системы» (как ERP)
+                    сборка = slovar_whisper.подсказка_сборка(self.s, project_id)
+                    if сборка.текст and hasattr(c, "initial_prompt"):
+                        c.initial_prompt = сборка.текст
+                    # подшаг для прибора «завис» (06.11.2026): видно, что идёт распознавание, и сколько оно идёт
+                    hod.ход.подшаг("распознавание записи")
+                    try:
+                        doc = c.transcribe(path)
+                    finally:
+                        if hasattr(c, "initial_prompt"):
+                            c.initial_prompt = ""
+                        hod.ход.сбросить()
+                    if doc.meta.get("asr_prompt_sent"):
+                        doc.meta.update(сборка.meta())
+                        doc.meta["asr_project_vocab"] = bool(сборка.словарь_вошло)
             elif isinstance(c, VisionConnector):
                 doc = c.describe(data or b"", filename)
             else:
@@ -585,20 +635,35 @@ class MeetingPipeline:
             return {"status": "rejected", "reason": msg}
         if doc.meta.get("own_output") or self._is_own_protocol(project_id, doc.text):
             return {"status": "rejected", "reason": "Это выгрузка самой системы — она не может быть источником встречи."}
+        sid = 0
         if isinstance(c, ASRConnector):
-            # Петли распознавания — сразу после распознавания, до голосов и до сохранения (как ERP, 26.10.2026):
-            # повторы сверх двух убираются, строки и их времена остаются; доля убранного больше 1 % — карточка.
-            self._petli(project_id, meeting_id, doc)
-            # Голоса — до сохранения и до удаления записи: разделению и отрывкам нужен звук. Сбой шага не
+            if сохранено:
+                sid = int(сохранено["id"])          # строка уже есть: расшифровка сохранилась в прошлый раз
+            else:
+                # Петли распознавания — сразу после распознавания, до голосов (как ERP, 26.10.2026): повторы сверх
+                # двух убираются, строки и их времена остаются; доля убранного больше 1 % — карточка.
+                self._petli(project_id, meeting_id, doc)
+                # Текст «Транса» — в базу сразу, до голосов: остановка на голосах больше не теряет расшифровку
+                sid = self.s.insert("sources", meeting_id=meeting_id, name=doc.name, kind=doc.kind.value,
+                                    text=doc.text, digest=doc.content_digest, created_at=now(), local_asr=1,
+                                    file_digest=отпечаток, voice_state="ожидают голоса",
+                                    meta=json.dumps(doc.meta, ensure_ascii=False))
+            # Голоса — после сохранения текста и до удаления записи: разделению и отрывкам нужен звук. Сбой шага не
             # отменяет распознанный текст, причина уходит в журнал и карточку.
-            self._voice_step(project_id, meeting_id, path, doc, filename)
+            try:
+                self._voice_step(project_id, meeting_id, path, doc, filename)
+            finally:
+                причина = str(doc.meta.get("voice_error") or "")
+                self.s.update("sources", sid, meta=json.dumps(doc.meta, ensure_ascii=False),
+                              voice_state=("сбой: " + причина[:300]) if причина else "готово")
         dup = self.s.q("SELECT id FROM sources WHERE meeting_id=? AND digest=? AND removed_at IS NULL",
-                       (meeting_id, doc.content_digest))
+                       (meeting_id, doc.content_digest)) if not sid else []
         if dup:
             return {"status": "duplicate", "source_id": dup[0]["id"]}
-        sid = self.s.insert("sources", meeting_id=meeting_id, name=doc.name, kind=doc.kind.value, text=doc.text,
-                            digest=doc.content_digest, created_at=now(), local_asr=int(isinstance(c, ASRConnector)),
-                            meta=json.dumps(doc.meta, ensure_ascii=False))
+        if not sid:
+            sid = self.s.insert("sources", meeting_id=meeting_id, name=doc.name, kind=doc.kind.value, text=doc.text,
+                                digest=doc.content_digest, created_at=now(), local_asr=int(isinstance(c, ASRConnector)),
+                                meta=json.dumps(doc.meta, ensure_ascii=False))
         media = doc.meta.get("media_path")
         if media and not doc.meta.get("keep_media"):
             try:  # запись удаляется только после сохранения расшифровки
@@ -892,6 +957,13 @@ class MeetingPipeline:
                     continue
                 g = gate.check(d, source, existing)
                 who = g.assignee.label if g.assignee else ""
+                # След исполнителя (записка 06.11.2026): что вернула модель и какое правило сняло имя. Бесплатно, и
+                # без этого разбивка «почему исполнителя нет» делается только чтением записи по каждой задаче.
+                if self.tasks_trace_path:
+                    asr_journal.write(self.tasks_trace_path, meeting_id=meeting_id, путь="drafts", шаг="исполнитель",
+                                      assignee_model=str(d.assignee or "")[:120],
+                                      assignee_final=who[:120],
+                                      assignee_dropped_by=";".join(g.reasons)[:200] if not who else "")
                 if g.quote and (hit := already_set(g.quote, who, g.description)) is not None:
                     if hit > 0:
                         hit_kept(hit)
@@ -902,27 +974,39 @@ class MeetingPipeline:
                     said = supported_due(d.due_date, self._window(source.lines, g.quote or d.quote), meeting.get("date"))
                     proposed = d.due_date
                     kind = None
+                    срок_след = {"due_phrase": d.due_date, "due_supported": said}
                     md = lenient_date(meeting.get("date"))
                     if md is not None:
                         # относительный срок — в дату от даты встречи; «к следующей встрече» — маркер без даты
-                        # (решение владелицы 20.10.2026); фраза из записи важнее даты модели (общий deadline.py)
+                        # (решение владелицы 20.10.2026); фраза из записи важнее даты модели (deadline.py из ERP,
+                        # 06.11.2026: файл перенесён 1 в 1, поэтому `marker=True` передаём здесь — в ERP он по умолчанию выкл.)
                         win = self._window(source.lines, g.quote or d.quote)
                         if said is not None and lenient_date(said) is None:
-                            dl = deadline.resolve(said, md)
+                            dl = deadline.resolve(said, md, deadline.дата_модели(said), marker=True)
+                            срок_след.update(due_resolved=(f"{dl.due:%d.%m.%Y}" if dl.due else ""),
+                                             due_issue=dl.issue or "")
                             if dl.due is not None:
                                 said, kind = f"{dl.due:%d.%m.%Y}", dl.kind
                             elif dl.kind == deadline.NEXT_MEETING:
                                 said, kind = None, deadline.NEXT_MEETING
+                            else:
+                                # код не перевёл фразу («неделя», «за 2 дня»): не оставляем слово в сроке и не молчим —
+                                # задача без срока и карточка «срок под вопросом» (записка 06.11.2026, п. 3)
+                                said = None
                         elif said is None:
-                            heard = {(x, k) for x, k, _p in deadline._candidates(win, md)}
+                            heard = {(x, k) for x, k, _p in deadline._candidates(win, md, marker=True)}
                             if len({x for x, _k in heard}) == 1:
                                 x, kind = next(iter(heard))
                                 said = f"{x:%d.%m.%Y}" if x is not None else None
                         if said is not None and kind is None:
-                            same = [k for x, k, _p in deadline._candidates(win, md) if x == lenient_date(said)]
+                            same = [k for x, k, _p in deadline._candidates(win, md, marker=True) if x == lenient_date(said)]
                             kind = same[0] if same else None
                         if said is not None and lenient_date(said) == md:
                             kind = deadline.TODAY
+                    срок_след["due_final"] = said or ""
+                    if self.tasks_trace_path:
+                        asr_journal.write(self.tasks_trace_path, meeting_id=meeting_id, путь="drafts", шаг="срок",
+                                          **срок_след)
                     d = replace(d, due_date=said)
                     if kind is not None:
                         due_kinds[id(d)] = kind
@@ -1003,6 +1087,26 @@ class MeetingPipeline:
                 rep.obedinenie_log = об["журнал"]
             except Exception as exc:  # noqa: BLE001
                 self.step_failed(project_id, meeting_id, "Объединение и мусор", exc)
+
+            # Тень сведения (вариант C, слово владелицы 06.11.2026): способ 1 — все задачи всех путей и прежние
+            # задачи встречи через `укрупнить` — считает рядом с рабочей сборкой и пишет числа в журнал. Задачи не
+            # снимаются: «ошибочно снятых 0» жёстко. Числа за неделю — 13.11.2026 одной таблицей.
+            if svedenie_ten.включена():
+                try:
+                    проект_встречи_имя = (self.s.get("projects", project_id) or {}).get("name") or ""
+                    все = [{"description": g.description or d.description, "quote": g.quote or d.quote or "",
+                            "responsible": (g.assignee.label if g.assignee else ""), "project": проект_встречи_имя}
+                           for d, g in planned]
+                    все += [{"description": r["description"] or "", "quote": r.get("quote") or "",
+                             "responsible": r.get("assignee") or "", "project": проект_встречи_имя}
+                            for r in self.s.q("SELECT description, quote, assignee FROM tasks WHERE "
+                                              "source_meeting_id=? AND status='active'", (meeting_id,))]
+                    счёт = svedenie_ten.посчитать(все, запись=source.text)
+                    rep.svedenie_ten = svedenie_ten.строка_итога(счёт)
+                    svedenie_ten.записать(self.svedenie_ten_path, meeting_id, счёт,
+                                          чем="сборка" if self.svedenie_ten_path else "")
+                except Exception as exc:  # noqa: BLE001 — тень не должна ронять сборку
+                    rep.svedenie_ten = f"тень не посчиталась: {type(exc).__name__}: {str(exc)[:200]}"
 
             # строки, похожие на внедрённую инструкцию, не становятся основанием закрытия (01/12)
             inj_lines = {i for i, ln in enumerate(source.lines) if looks_like_injection(ln)}

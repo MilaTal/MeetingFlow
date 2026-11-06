@@ -57,7 +57,9 @@ def test_фронт_erp_целиком_светлая_тема_и_выбор_п�
         assert label in html, label
     assert 'id="project-select"' in html and "Все проекты" in html
     js = (STATIC / "app.js").read_text(encoding="utf-8")
-    assert 'headers["X-Project-Id"] = String(выбранныйПроект());' in js
+    # 06.11.2026 (Д2.6): проект можно переопределить на один запрос — «✓» уходит с проектом задачи, даже если
+    # человек успел сменить проект. Прежняя строка осталась хвостом выражения, тест перевёрнут, не удалён.
+    assert 'headers["X-Project-Id"] = String(opts.проект ?? выбранныйПроект());' in js
     assert "`Проект — ${п.label || п.name}`" in js and '"Все проекты компании"' in js
     css = (STATIC / "styles.css").read_text(encoding="utf-8")
     # светлая основа ERP; палитры и тёмная тема MeetFlow возвращены 4af9cfa («Оформление» после переноса фронта ERP)

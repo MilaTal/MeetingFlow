@@ -869,8 +869,10 @@ async function _apiЗапрос(path, opts = {}) {
   if ((opts.method || "GET") !== "GET") headers["X-Requested-With"] = "erp-webapp";
   // Режим тестирования (вход выключен): личность — выбор в списке, как раньше.
   if (!authRequired && me) headers["X-User-Id"] = String(me.id);
-  // Многопроектность MeetFlow (разрешённое отличие от ERP, 27.10.2026): выбранный проект — заголовком, 0 — «Все проекты»
-  headers["X-Project-Id"] = String(выбранныйПроект());
+  // Многопроектность MeetFlow (разрешённое отличие от ERP, 27.10.2026): выбранный проект — заголовком, 0 — «Все проекты».
+  // `opts.проект` — для отложенных действий (Д2.6, 06.11.2026): «✓» через 2 с уходит с проектом задачи, даже если
+  // человек успел переключить проект.
+  headers["X-Project-Id"] = String(opts.проект ?? выбранныйПроект());
   if (opts.json) {
     headers["Content-Type"] = "application/json";
     opts.body = JSON.stringify(opts.json);
@@ -885,7 +887,7 @@ async function _apiЗапрос(path, opts = {}) {
   let res;
   for (let i = 0; i < attempts; i++) {
     try {
-      res = await fetch(path, { method, headers, body: opts.body });
+      res = await fetch(path, { method, headers, body: opts.body, ...(opts.keepalive ? { keepalive: true } : {}) });
       break;
     } catch (netErr) {
       if (i < attempts - 1) { await new Promise(r => setTimeout(r, 1000 * (i + 1))); continue; }
@@ -1655,6 +1657,13 @@ async function загрузитьПроекты() {
   if (localStorage.getItem("currentProjectId") === null) localStorage.setItem("currentProjectId", "0");
   // Старые адреса без p получают его здесь, без записи в историю (Д1.1).
   if (!new URLSearchParams(location.hash.split("?")[1] || "").has("p")) записатьПроектВАдрес(выбранныйПроект());
+  // Адрес главнее памяти вкладки (Д2.3, 06.11.2026): ссылка «открыть в реестре» приходит с проектом задачи (`&p=`),
+  // и вкладка переключается на него — иначе реестр открылся бы в прежнем проекте, а задача в нём не нашлась бы.
+  const пИзАдреса = new URLSearchParams(location.hash.split("?")[1] || "").get("p");
+  if (пИзАдреса !== null && пИзАдреса !== "" && Number(пИзАдреса) !== Number(sessionStorage.getItem("currentProjectId") || 0)) {
+    sessionStorage.setItem("currentProjectId", String(Number(пИзАдреса)));
+    localStorage.setItem("currentProjectId", String(Number(пИзАдреса)));
+  }
   const $s = document.getElementById("project-select");
   if ($s) {
     // проект, под ним его подпроекты с отступом (справочник проектов, 27.10.2026); выбор проекта — вместе с подпроектами
@@ -1772,9 +1781,45 @@ function нуженПроект(заголовок) {
   return true;
 }
 // Смена текущего проекта — одна точка для выбора вверху левой панели и для выбора на «Подготовке встречи» при «Все проекты»
-// (решение владелицы 28.10.2026): запомнить, выставить в #project-select, обновить шапку и перерисовать страницу
-function выбратьПроект(id) {
+// (решение владелицы 28.10.2026): запомнить, выставить в #project-select, обновить шапку и перерисовать страницу.
+// Д2.2 (06.11.2026): смена проекта со страницы встречи уводит в «Реестр встреч» нового проекта — встреча принадлежит
+// своему проекту, и оставаться на ней в чужом проекте нельзя (сервер ответил бы 409 на любое изменение). Если в форме
+// есть несохранённый ввод — сначала спрашиваем: уход его потеряет.
+function наЭкранеВстречи() {
+  return /^meetings\/\d+(\/|\?|$)/.test(location.hash.replace(/^#/, ""));
+}
+
+function естьНесохранённыйВвод() {
+  const поля = document.querySelectorAll("#main input, #main textarea, #main select");
+  return [...поля].some((el) => {
+    if (el.type === "hidden" || el.disabled || el.readOnly) return false;
+    const значение = String(el.value ?? "").trim();
+    return значение !== "" && значение !== String(el.defaultValue ?? "");
+  });
+}
+
+async function выбратьПроект(id) {
   const v = Number(id) || 0;
+  if (наЭкранеВстречи() && v !== Number(выбранныйПроект())) {
+    if (естьНесохранённыйВвод()) {
+      const уйти = await confirmDialog("В форме есть несохранённый ввод — при смене проекта он пропадёт. "
+                                       + "Перейти в «Реестр встреч» нового проекта?", "Перейти");
+      if (!уйти) {
+        const $s = document.getElementById("project-select");
+        if ($s) $s.value = String(выбранныйПроект());       // выбор в списке возвращаем назад: проект не менялся
+        return;
+      }
+    }
+    localStorage.setItem("currentProjectId", String(v));
+    sessionStorage.setItem("currentProjectId", String(v));
+    записатьПроектВАдрес(v, true);
+    const $s = document.getElementById("project-select");
+    if ($s) $s.value = String(v);
+    рисоватьПроекты();
+    показатьНазваниеПроекта();
+    location.hash = "#meetings";     // встреча чужого проекта закрывается: открываем реестр нового проекта
+    return;
+  }
   localStorage.setItem("currentProjectId", String(v));
   sessionStorage.setItem("currentProjectId", String(v));
   записатьПроектВАдрес(v, true);        // смена проекта — запись в историю: «Назад» вернёт и экран, и проект
@@ -2681,16 +2726,20 @@ function wireTaskDoneCell(cell) {
   const btn = cell.querySelector(".task-done");
   if (!btn) return;
   const taskId = btn.dataset.id;
-  btn.addEventListener("click", () => startDelayedDone(taskId, btn));
+  // проект строки запоминаем в момент щелчка (Д2.6, 06.11.2026): отметка уходит через 2 с, и если за это время сменить
+  // проект, запрос всё равно должен попасть в проект задачи — иначе сервер ответит 409 и отметка пропадёт
+  const проект = выбранныйПроект();
+  btn.addEventListener("click", () => startDelayedDone(taskId, btn, проект));
 }
 
-function startDelayedDone(taskId, btn) {
+function startDelayedDone(taskId, btn, проект) {
   startUndoCountdown({
     anchor: btn,
     text: (n) => `Выполнено через ${n}с`,
     onCommit: async () => {
       try {
-        await api(`/tasks/${taskId}/status`, { method: "PATCH", json: { new_status: "done" } });
+        await api(`/tasks/${taskId}/status`, { method: "PATCH", json: { new_status: "done" },
+                                               проект: проект ?? выбранныйПроект(), keepalive: true });
         toast("Статус обновлён");
         await погаситьСтроку(btn);
         render();
@@ -6800,6 +6849,17 @@ function renderMonitoringLive() {
   const проверитьСвязь = `<div class="hstack" style="margin-top:8px"><button class="btn-sm" id="probe-now-btn">Проверить связь</button>
     <span class="page-sub" style="margin:0">точки модели опрашиваются фоном раз в 60 секунд; кнопка — опросить сейчас</span></div>`;
   const folderSource = wf.folder_source ? ` Сейчас путь взят: ${esc(wf.folder_source)}.` : "";
+  // Идущий проход (06.11.2026): какой подшаг, сколько идёт и сколько ему ещё примерно. Раньше на записи длиннее
+  // ~25 минут писалось «завис», хотя разделение по голосам просто шло своим ходом: по этому слову дважды
+  // перезапустили сервер и потеряли 2,5 часа распознавания. Теперь «завис» значит «работа не двигается».
+  const подшаг = wf.substep && wf.substep.подшаг ? wf.substep : null;
+  const минутОт = (сек) => (Number(сек) > 0 ? Math.round(Number(сек) / 60) : 0);
+  const проходПоПапке = wf.scan_in_progress ? `
+    <div class="page-sub" style="margin-top:8px">Идёт проход: ${подшаг
+      ? `${esc(подшаг.подшаг)} — ${минутОт(подшаг.секунд)} мин${подшаг.прогноз_сек ? ` из ~${минутОт(подшаг.прогноз_сек)}` : ""}`
+      : `${esc(wf.scan_step || "обход папки")}${минутОт(wf.step_seconds) ? ` — ${минутОт(wf.step_seconds)} мин` : ""}`}${
+      wf.current_file ? ` · ${esc(wf.current_file)}` : ""}${wf.stalled ? " · долго без движения — проверьте точку распознавания" : ""}${
+      подшаг && подшаг.pid ? ` · процесс ${esc(String(подшаг.pid))}` : ""}. Останавливать сервер во время прохода нельзя: шаг начнётся с нуля.</div>` : "";
   // Частота обхода папки — рядом со строкой ввода пути и ЗАДАЁТСЯ ЗДЕСЬ ЖЕ, как путь (владелец
   // 09.10.26: сначала «выведи в мониторинг переменную…», затем «сделай блок ввода значения для обхода
   // папки активной строкой — чтобы сразу с монитора можно было задавать значение, как путь к файлу
@@ -6825,7 +6885,7 @@ function renderMonitoringLive() {
     <div class="mon-folder-form">
       <input type="text" id="watch-folder-input" value="${esc(wf.folder || "")}" placeholder="Папка-приёмник записей не задана — укажите полный путь" autocomplete="off">
       <button class="btn-sm" id="watch-folder-btn">Сменить папку</button>
-    </div>${интервал}
+    </div>${интервал}${проходПоПапке}
     <div class="page-sub" style="margin:6px 0 0">Меняется в два шага: сначала показываем, что в папке лежит и что заберёт первый проход,
       потом просим повторить путь. Так сделано не из вредности — поллер обходит папку целиком и уносит забранное в подпапку
       «обработано», поэтому опечатка в пути дорого стоит. Пустое поле — выключить папку.${folderSource}</div>`;

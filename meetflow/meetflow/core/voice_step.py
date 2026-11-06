@@ -21,7 +21,7 @@ import subprocess
 import tempfile
 from pathlib import Path
 
-from . import diarize, otdelnyy_process, voice_contrib, voice_review, voice_rule
+from . import diarize, hod, otdelnyy_process, voice_contrib, voice_review, voice_rule
 
 DEFAULT_LABEL = "Говорящий"
 
@@ -128,13 +128,18 @@ def process(wav_path: str | Path, text: str, meta: dict, *, meeting_id: int, mee
     base = base_path or os.environ.get("VOICE_BASE_PATH")
     settings = settings or voice_rule.nastroyki()
     work_wav = _prepare_wav(wav_path)
+    длительность = float(meta.get("media_seconds") or 0)
     try:
+        # Подшаги для прибора «завис» (06.11.2026): видно, какая именно работа идёт и сколько ей осталось
+        hod.ход.подшаг("разделение по голосам", прогноз_сек=длительность * hod.ДОЛЯ_ОЖИДАНИЯ or None)
         segments, info = diarize.diarize(work_wav)          # отдельный процесс внутри
         if not segments:
             raise VoiceStepError("разделение не нашло кусков речи")
 
         # Отпечатки окон считаем один раз: по ним и опознаём, и пополняем базу (ERP делает так же).
+        hod.ход.подшаг("отпечатки голосов", прогноз_сек=длительность * 0.15 or None)
         embedded = otdelnyy_process.выполнить(voice_contrib.embed_segments, work_wav, segments)
+        hod.ход.подшаг("подписи по голосам")
         names: dict[str, str] = {}
         identified: dict = {}
         base_info: dict = {}
@@ -186,5 +191,6 @@ def process(wav_path: str | Path, text: str, meta: dict, *, meeting_id: int, mee
                             "path": info.get("path")},
         }
     finally:
+        hod.ход.сбросить()
         if work_wav != wav_path:
             shutil.rmtree(work_wav.parent, ignore_errors=True)
