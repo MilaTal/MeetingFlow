@@ -26,6 +26,7 @@ from pathlib import Path
 from typing import Any
 
 from ..connectors.base import ConnectorError
+from . import hod
 from ..connectors.watch_folder import (DONE_DIR, MARKER, SKIP_WORDS, STOPPED_DIR, FolderIntake, check_folder_path, is_marker,
                                        single_date)
 from .store import now
@@ -128,6 +129,10 @@ class IntakeService:
     def _beat(self, project_id: int, step: str, file: str | None = None) -> None:
         cur = self._scanning.get(project_id)
         if cur is not None:
+            # «Шаг идёт с» — от начала шага, а не от последней отметки: на длинном шаге отметка одна, и время
+            # «шаг идёт 2 минуты» на 68-минутном разделении голосов было неправдой (06.11.2026)
+            if cur.get("step") != step or cur.get("step_started") is None:
+                cur["step_started"] = time.monotonic()
             cur.update(step=step, file=file, pulse=time.monotonic())
 
     # ------------------------------------------------------------ настройки
@@ -328,17 +333,25 @@ class IntakeService:
         info = {"folder": path, "interval": iv, "interval_source": iv_src, "worker": self.running,
                 "last_scan": last, "last_useful_scan": self.s.get_setting("watch_last_useful_scan", project_id),
                 "autorun": автозапуск_включён(self.s, project_id)}
-        # «завис» (как в ERP): идущий проход без пульса дольше трёх интервалов и порога шага; между проходами —
-        # последний проход старше трёх интервалов. Идущий длинный проход (распознавание, сборка) — не «завис».
+        # «завис» — по работе, а не по времени (06.11.2026): пока идёт шаг, смотрим подшаг из `hod` — дочерний
+        # процесс разделения по голосам жив и его процессорное время растёт. Раньше признак считался по времени с
+        # единственной отметки в начале шага, и на записи длиннее ~25 минут проход выглядел зависшим, хотя работал
+        # (из-за этого 06.11 дважды перезапустили сервер и потеряли 2,5 часа распознавания).
         info["stalled"] = False
         cur = self._scanning.get(project_id)
         info["scan_in_progress"] = cur is not None
         if cur is not None:
             info.update(scan_started_at=cur["started"], scan_step=cur["step"], current_file=cur["file"],
-                        step_seconds=int(time.monotonic() - cur["pulse"]))
+                        step_seconds=int(time.monotonic() - cur.get("step_started", cur["pulse"])))
+            подшаг = hod.ход.снимок()
+            if подшаг.get("подшаг"):
+                info["substep"] = подшаг
         if path and self.running:
             if cur is not None:
-                info["stalled"] = info["step_seconds"] > max(3 * iv, STALL_STEP_SEC)
+                if info.get("substep"):
+                    info["stalled"] = hod.ход.завис(info["substep"])
+                else:
+                    info["stalled"] = info["step_seconds"] > max(3 * iv, STALL_STEP_SEC)
             elif last and last.get("at"):
                 try:
                     age = (datetime.now() - datetime.fromisoformat(last["at"])).total_seconds()

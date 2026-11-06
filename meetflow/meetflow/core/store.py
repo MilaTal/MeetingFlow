@@ -57,7 +57,10 @@ SCHEMA: dict[str, dict[str, str]] = {
                 "text": "TEXT", "digest": "TEXT", "removed_at": "TEXT", "removed_reason": "TEXT",
                 "created_at": "TEXT", "local_asr": "INTEGER DEFAULT 0",
                 # сведения распознавания: точка, модель, устройство, времена реплик, говорящие (26.10.2026)
-                "meta": "TEXT DEFAULT '{}'"},   # расшифровка нашим распознаванием
+                "meta": "TEXT DEFAULT '{}'",   # расшифровка нашим распознаванием
+                # отпечаток файла записи и состояние голосов (06.11.2026): расшифровка сохраняется до голосов,
+                # повторный проход по тому же файлу берёт её и идёт сразу в голоса
+                "file_digest": "TEXT DEFAULT ''", "voice_state": "TEXT DEFAULT ''"},
     "people": {"id": "INTEGER PRIMARY KEY", "project_id": "INTEGER", "full_name": "TEXT",
                "role": "TEXT DEFAULT ''", "department": "TEXT DEFAULT ''", "aliases": "TEXT DEFAULT '[]'",
                "external": "INTEGER DEFAULT 0", "confirmed": "INTEGER DEFAULT 1",

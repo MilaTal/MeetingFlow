@@ -267,6 +267,26 @@ def карточки_сторож_старт(pipe) -> None:
     поток.start()
 
 
+def осиротевшие_при_старте(pipe) -> list[dict]:
+    """Дети прошлых запусков (06.11.2026). `Stop-Process` по процессу сервера не убивает дочерний процесс spawn:
+    он продолжает считать и отнимает процессор у следующего прохода. 06.11 таких нашлось три — с 26.10, с 13:31 и
+    с 15:32: 1,2 ГБ памяти и 95 тысяч секунд процессорного времени. Список своих детей пишется при каждом старте
+    шага (`core/hod.py`), поэтому при запуске видно, кого подбирать, и чужой процесс не задевается."""
+    from ..core import hod
+    try:
+        остановленные = hod.остановить_сирот()
+    except Exception as exc:  # noqa: BLE001 — уборка не должна ронять старт сервера
+        print(f"MeetFlow: осиротевшие процессы не проверены — {exc}", file=sys.stderr, flush=True)
+        return []
+    if остановленные:
+        строка = ", ".join(f"{x['pid']} (с {str(x.get('начат') or '')[:16]})" for x in остановленные)
+        print(f"MeetFlow: остановлены осиротевшие процессы распознавания: {строка}", file=sys.stderr, flush=True)
+        pipe.cards.open(None, "event", "Остановлены осиротевшие процессы распознавания",
+                        {"процессы": остановленные,
+                         "зачем": "дети прошлых запусков продолжали считать и отнимали процессор"})
+    return остановленные
+
+
 def голоса_при_старте(pipe) -> str:
     """Голоса при запуске: нет папки моделей — строка в журнал и одна карточка сбоя (записка 05.11.2026).
 
@@ -379,6 +399,7 @@ def create_app(theme_name: str | None = None, db_path: str | None = None, journa
             backups.start()       # автокопия базы по расписанию
             карточки_сторож_старт(pipe)   # карточки исполнителя старше 7 дней — раз в час, как в ERP
             голоса_при_старте(pipe)       # нет папки моделей — строка в журнал и одна карточка, а не тишина
+            осиротевшие_при_старте(pipe)  # дети прошлых запусков продолжают считать — остановить (06.11.2026)
         elif watch_on:
             pipe.cards.open(None, "event", "Второй экземпляр MeetFlow на той же базе — забор из папки и автокопия "
                             "в нём выключены", {"why": "первый экземпляр работает: его процесс жив и порт слушает; "
@@ -488,7 +509,34 @@ def create_app(theme_name: str | None = None, db_path: str | None = None, journa
 
     @app.get("/health")
     def health():
-        return {"ok": True, "theme": theme.id}
+        """Живо ли и можно ли останавливать. `busy` — идёт шаг записи или сборка (06.11.2026): перезапускать
+        сервер во время распознавания нельзя — шаг начинается с нуля, и на длинной записи это часы работы.
+        Порядок перезапуска: сначала `/health`, при `busy` — ждать конца шага."""
+        что = _busy(intake)
+        return {"ok": True, "theme": theme.id, "busy": bool(что), "busy_что": что}
+
+
+    def _busy(intake_service) -> dict:
+        """Что сейчас идёт: проход папки-приёмника с подшагом и временем либо сборка в очереди."""
+        for проект in store.q("SELECT project_id FROM settings WHERE key='watch_folder' AND value != 'null'"):
+            pid = проект["project_id"]
+            try:
+                st = intake_service.state(pid)
+            except Exception:  # noqa: BLE001 — /health не должен падать из-за приёмника
+                continue
+            if not st.get("scan_in_progress"):
+                continue
+            подшаг = st.get("substep") or {}
+            return {"что": "проход папки-приёмника", "project_id": pid, "шаг": st.get("scan_step") or "",
+                    "файл": st.get("current_file") or "",
+                    "секунд": st.get("step_seconds"), "подшаг": подшаг.get("подшаг") or "",
+                    "подшаг_секунд": подшаг.get("секунд"), "прогноз_сек": подшаг.get("прогноз_сек"),
+                    "завис": bool(st.get("stalled"))}
+        идёт = store.q("SELECT meeting_id, started_at FROM build_queue WHERE status='running' ORDER BY id")
+        if идёт:
+            return {"что": "сборка протокола", "meeting_id": идёт[0]["meeting_id"],
+                    "с": идёт[0]["started_at"]}
+        return {}
 
     @app.get("/api/theme")
     def get_theme():
