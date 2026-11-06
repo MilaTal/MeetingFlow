@@ -19,7 +19,8 @@ ERP_PREFIXES = ("/auth", "/users", "/meetings", "/tasks", "/badges", "/units", "
                 "/recognition-settings", "/review-notes", "/voice", "/meeting-topics", "/projects-list")
 OPEN_PATHS = {"/auth/mode", "/auth/login", "/auth/logout", "/auth/first-login", "/auth/first-login/people",
               # портал единого входа (этап 2, 06.11.2026): приём кода — до входа; обратный канал проверяет секрет сам
-              "/auth/portal", "/auth/portal/logout", "/auth/portal/accounts"}
+              "/auth/portal", "/auth/portal/logout", "/auth/portal/accounts",
+              "/auth/portal/passwords"}
 
 
 def mount(app: FastAPI, **parts) -> Ctx:

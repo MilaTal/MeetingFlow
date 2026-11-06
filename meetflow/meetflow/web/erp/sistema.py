@@ -45,6 +45,7 @@ class Days(InModel):
 class SharedPw(InModel):
     new_password: str = Field(max_length=200)
     repeat_password: str = Field(default="", max_length=200)
+    current_password: str = Field(default="", max_length=200)   # личный пароль суперадмина — с 06.11.2026 обязателен
 
 
 class SystemProjectIn(InModel):
@@ -518,12 +519,20 @@ def mount(r: APIRouter, ctx: Ctx) -> None:
         ctx.need_super(request)
         rows = store.q("SELECT updated_at FROM settings WHERE key='shared_password_hash' AND project_id IS NULL")
         h = store.get_setting("shared_password_hash")
-        return {"is_set": bool(h), "set_at": ru_date(rows[0]["updated_at"]) if rows and h else ""}
+        from . import portal_vhod
+        return {"is_set": bool(h), "set_at": ru_date(rows[0]["updated_at"]) if rows and h else "",
+                "on_portal": portal_vhod.enabled()}
 
     @r.post("/project-status/shared-password")
     def set_shared(body: SharedPw, request: Request):
         u = ctx.need_super(request)
+        from . import portal_vhod
         from .bezopasnost import hash_password, validate_new_password
+        # Пароли живут на портале (решение владелицы 06.11.2026, вопрос 1): пока MeetFlow к нему подключён, общий пароль
+        # меняется там. Подтверждение личным паролем суперадмина (вопрос 9) — неверное идёт в счётчик пяти неудач.
+        if portal_vhod.enabled():
+            raise HTTPException(409, "Общий пароль меняется на портале единого входа")
+        ctx.check_current(u, body.current_password, request.client.host if request.client else "", "смена общего пароля")
         if not body.new_password:
             raise HTTPException(400, "Введите новый общий пароль")
         if body.repeat_password and body.repeat_password != body.new_password:

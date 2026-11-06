@@ -39,7 +39,7 @@ from .obshchee import SHARED_PASSWORD_ROLES, Ctx
 
 SYSTEM = "meetflow"
 TIMEOUT = 2.0
-OPEN = ("/auth/portal", "/auth/portal/logout", "/auth/portal/accounts")
+OPEN = ("/auth/portal", "/auth/portal/logout", "/auth/portal/accounts", "/auth/portal/passwords")
 
 
 class _NoRedirect(urllib.request.HTTPRedirectHandler):
@@ -48,6 +48,18 @@ class _NoRedirect(urllib.request.HTTPRedirectHandler):
 
 
 _OPENER = urllib.request.build_opener(urllib.request.ProxyHandler({}), _NoRedirect)
+
+
+class PortalPasswordsIn(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    shared_hash: str | None = Field(default=None, max_length=300)
+    super_admins: list[dict] = Field(default_factory=list, max_length=500)
+
+
+def _is_scrypt(value: str | None) -> bool:
+    parts = (value or "").split("$")
+    return len(parts) == 6 and parts[0] == "scrypt"
 
 
 class PortalLogoutIn(BaseModel):
@@ -157,6 +169,30 @@ def mount(r: APIRouter, ctx: Ctx) -> None:
         _check_secret(request)
         u = find_account(payload.login)
         return {"closed": ctx.revoke_sessions(u["id"]) if u else 0}
+
+    @r.post("/auth/portal/passwords")
+    def portal_passwords(payload: PortalPasswordsIn, request: Request):
+        """Пароли живут на портале, портал раздаёт тот же хэш (решение владелицы 06.11.2026, вопрос 1): общий пароль и
+        личные суперадминов. Сменился общий — выходят вошедшие по общему; личный — все сессии суперадмина."""
+        _check_secret(request)
+        result = {"shared": False, "super_admins": 0}
+        if payload.shared_hash is not None:
+            if not _is_scrypt(payload.shared_hash):
+                raise HTTPException(400, "Не хэш пароля")
+            if payload.shared_hash != store.get_setting("shared_password_hash"):
+                store.set_setting("shared_password_hash", payload.shared_hash, None, "портал единого входа")
+                for s in store.q("SELECT id FROM sessions WHERE COALESCE(via_shared,0)=1"):
+                    store.delete("sessions", s["id"])
+                result["shared"] = True
+        for item in payload.super_admins:
+            u = find_account((item or {}).get("login"))
+            value = (item or {}).get("hash")
+            if u is None or u.get("role") != "super_admin" or not _is_scrypt(value) or u.get("password_hash") == value:
+                continue
+            store.update("accounts", u["id"], password_hash=value, must_change_password=0, temp_expires_at=None)
+            ctx.revoke_sessions(u["id"])
+            result["super_admins"] += 1
+        return result
 
     @r.get("/auth/portal/accounts")
     def portal_accounts(request: Request):

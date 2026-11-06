@@ -16,7 +16,7 @@ import re
 import secrets
 
 SCRYPT_N, SCRYPT_R, SCRYPT_P = 2 ** 14, 8, 1
-MIN_PASSWORD_LENGTH = 10
+MIN_PASSWORD_LENGTH = 5   # решение владелицы 06.11.2026 (было 10)
 # Логин — часть адреса до «@» (решение владельца 05.10.26). Раньше требовался полный email вида
 # name@company.ru: администратор, вносящий команду, знает логины людей, но не обязан помнить домен, и
 # ввод «ipetrukevich» отвергался с требованием адреса. Теперь просят ровно то, что человек знает.
@@ -88,20 +88,12 @@ _COMMON_PASSWORD_PARTS = ("qwerty", "password", "welcome", "letmein", "admin", "
 
 
 def validate_new_password(password: str, login: str | None = None) -> str | None:
-    if len(password) < MIN_PASSWORD_LENGTH:
-        return f"Пароль слишком короткий — минимум {MIN_PASSWORD_LENGTH} символов"
-    if password.isdigit():
-        return "Пароль не должен состоять только из цифр"
-    local = login_local_part(login)
-    if local and password.lower() == local:
-        return "Пароль не должен совпадать с логином"
-    lowered = password.lower()
-    if any(bad in lowered for bad in _COMMON_PASSWORD_PARTS):
-        return "Слишком распространённый пароль — придумайте другой"
-    if len(local) >= 4 and local in password.lower():
-        return "Пароль не должен содержать логин — придумайте другой"
-    if len(set(password)) < 4:
-        return "Пароль слишком простой — используйте больше разных символов"
+    """Правило владелицы 06.11.2026 (файл 20, вопрос 4): одно во всех системах и для всех паролей — не короче 5 знаков,
+    без проверки сложности. Прежние проверки (10 знаков, «только цифры», логин в пароле, распространённые пароли) сняты."""
+    if len(password or "") < MIN_PASSWORD_LENGTH:
+        return f"Пароль слишком короткий — минимум {MIN_PASSWORD_LENGTH} знаков"
+    if len(password) > 200:
+        return "Пароль слишком длинный — не больше 200 знаков"
     return None
 
 

@@ -23,7 +23,8 @@ from fastapi import HTTPException, Request
 from ...core.store import Store, now
 
 ADMIN_ROLES = {"project_admin", "super_admin"}
-SHARED_PASSWORD_ROLES = {"member", "director"}
+# Решение владелицы 06.11.2026 (файл 20, вопрос 2): личный пароль только у суперадмина, администраторы входят по общему.
+SHARED_PASSWORD_ROLES = {"member", "director", "project_admin"}
 РОЛЬ_СЛОВАМИ = {"super_admin": "суперадмин", "project_admin": "администратор", "director": "директор",
                 "member": "участник"}
 COOKIE = "mf_session"

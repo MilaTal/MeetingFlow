@@ -330,6 +330,7 @@ def mount(r: APIRouter, ctx: Ctx) -> None:
 
     # Для приёма входа от портала (`portal_vhod.py`): та же сессия, что при входе по паролю, и закрытие всех сессий.
     ctx.start_session, ctx.revoke_sessions = start_session, revoke_sessions
+    ctx.check_current = lambda u, password, ip, context: check_current(store.get("accounts", u["id"]), password, ip, context)
 
     def csrf(request: Request) -> None:
         if (request.headers.get("x-requested-with") or "").lower() not in ("erp-webapp", "meetflow"):
@@ -450,6 +451,13 @@ def mount(r: APIRouter, ctx: Ctx) -> None:
     @r.post("/auth/change-password", status_code=204)
     def change_password(payload: ChangePasswordIn, request: Request):
         u = ctx.need_user(request)
+        # Только после настоящего входа (решение владелицы 06.11.2026, файл 21, вопрос 10): в тестовом режиме любой может
+        # выбрать себя суперадмином. Пока MeetFlow подключён к порталу, свой пароль меняется там; временный — здесь.
+        if not accounts.auth_required() or not accounts.by_session(request.cookies.get(COOKIE)):
+            raise HTTPException(403, "Смена пароля доступна только после входа по логину и паролю")
+        from . import portal_vhod
+        if portal_vhod.enabled() and not u.get("must_change_password"):
+            raise HTTPException(409, "Пароль меняется на портале единого входа")
         if (u.get("role") or "member") in SHARED_PASSWORD_ROLES:
             raise HTTPException(400, "Вы входите по общему паролю — его меняет только суперадмин")
         with key_lock(u.get("login") or f"id:{u['id']}"):

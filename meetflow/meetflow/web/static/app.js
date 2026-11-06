@@ -6231,10 +6231,13 @@ async function настроитьОбщийПароль() {
   const $состояние = document.getElementById("shared-password-state");
   const $кнопка = document.getElementById("settings-shared-password");
   if (!$состояние || !$кнопка) return;
+  // Решения владелицы 06.11.2026: личный пароль только у суперадмина, все остальные — по общему; пароли живут на портале
+  // единого входа — пока система к нему подключена, общий пароль меняется там, а здесь только строка состояния.
   const показать = (s) => {
-    $состояние.textContent = s.is_set ? `задан ${s.set_at || ""} — участникам; администраторы входят по личному`
-      : "не задан — участники войти не могут";
+    $состояние.textContent = (s.is_set ? `задан ${s.set_at || ""} — всем, кроме суперадмина` : "не задан — войти по общему паролю никто не может")
+      + (s.on_portal ? "; меняется на портале единого входа" : "");
     $кнопка.textContent = s.is_set ? "Сменить" : "Задать";
+    $кнопка.hidden = !!s.on_portal;
   };
   try { показать(await api("/project-status/shared-password")); } catch (e) { $кнопка.hidden = true; return; }
   $кнопка.addEventListener("click", () => {
@@ -6243,13 +6246,14 @@ async function настроитьОбщийПароль() {
         После смены прежний пароль перестаёт действовать, все, кто вошёл по общему паролю, выйдут из системы и войдут уже по новому.</div>
       <div class="field"><label for="shared-new">Новый общий пароль <span class="req">*</span></label><input type="password" id="shared-new" autocomplete="new-password"></div>
       <div class="field"><label for="shared-new2">Повторите <span class="req">*</span></label><input type="password" id="shared-new2" autocomplete="new-password"></div>
+      <div class="field"><label for="shared-mine">Ваш личный пароль — подтверждение <span class="req">*</span></label><input type="password" id="shared-mine" autocomplete="current-password"></div>
     `, async (ov) => {
       // Без подтверждения личным паролем суперадмина (решение владелицы 19.10.2026): новый и повтор; проверки — как в Планёрке
       const новый = ov.querySelector("#shared-new").value, повтор = ov.querySelector("#shared-new2").value;
       if (!новый) throw new Error("Введите новый общий пароль");
       if (новый !== повтор) throw new Error("Пароли не совпадают");
       const ответ = await api("/project-status/shared-password", { method: "POST",
-        json: { new_password: новый, repeat_password: повтор } });
+        json: { new_password: новый, repeat_password: повтор, current_password: ov.querySelector("#shared-mine").value } });
       показать(ответ);
       toast(`Общий пароль сохранён. Вышли из системы: ${ответ.sessions_closed}`);
     });

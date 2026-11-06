@@ -143,3 +143,43 @@ def test_выход_в_meetflow_закрывает_всё_и_сообщает_п
     env.cookies.set("mf_session", первая)
     assert env.post("/auth/logout", headers=W).status_code == 204
     assert _сессии(env, env.ids["member"]) == 0 and сообщено == ["vsidorova"]
+
+
+# ---------------------------------------------------------------- пакет 2б: пароли живут на портале, команда set-password
+from meetflow.web.erp.bezopasnost import hash_password, verify_password   # noqa: E402
+
+
+def test_портал_раздаёт_общий_и_личный_суперадмина(env):
+    общий, личный = hash_password("общий-0611"), hash_password("лично-0611")
+    тело = {"shared_hash": общий, "super_admins": [{"login": "aorlova", "hash": личный}, {"login": "vsidorova", "hash": личный}]}
+    assert env.post("/auth/portal/passwords", json=тело, headers={"Authorization": "Bearer wrong"}).status_code == 401
+    r = env.post("/auth/portal/passwords", json=тело, headers=ПОРТАЛ)
+    assert r.status_code == 200 and r.json() == {"shared": True, "super_admins": 1}       # участнику личный не ложится
+    assert env.st.get_setting("shared_password_hash") == общий
+    assert verify_password("лично-0611", env.st.get("accounts", env.ids["super"])["password_hash"])
+    assert not verify_password("лично-0611", env.st.get("accounts", env.ids["member"])["password_hash"] or None)
+    env.режим(True)
+    assert env.post("/auth/login", json={"login": "vsidorova", "password": "общий-0611"}, headers=W).status_code == 200
+    env.cookies.clear()
+    assert env.post("/auth/login", json={"login": "aorlova", "password": "лично-0611"}, headers=W).status_code == 200
+    assert env.post("/auth/portal/passwords", json=тело, headers=ПОРТАЛ).json() == {"shared": False, "super_admins": 0}
+    assert env.post("/auth/portal/passwords", json={"shared_hash": "открытый"}, headers=ПОРТАЛ).status_code == 400
+
+
+def test_set_password_выдаёт_временный_и_роль_только_явно(tmp_path, capsys):
+    from meetflow.__main__ import main
+    from meetflow.core.store import Store
+    db = str(tmp_path / "cli.db")
+    Store(db)
+    assert main(["set-password", "--login", "newbie", "--db", db]) == 2                  # новой записи нужна роль
+    assert main(["set-password", "--login", "Newbie@company.ru", "--name", "Новиков Н.", "--role", "member", "--db", db]) == 0
+    вывод = capsys.readouterr().out
+    временный = вывод.split("нигде не записан): ", 1)[1].split()[0]
+    st = Store(db)
+    u = st.q("SELECT * FROM accounts WHERE login='newbie'")[0]
+    assert u["role"] == "member" and u["must_change_password"] == 1 and u["temp_expires_at"]
+    assert verify_password(временный, u["password_hash"])
+    assert main(["set-password", "--login", "newbie", "--db", db]) == 0                  # существующей роль не меняется
+    assert Store(db).q("SELECT role FROM accounts WHERE login='newbie'")[0]["role"] == "member"
+    журнал = " ".join(r["title"] + r["payload"] for r in Store(db).q("SELECT title, payload FROM cards"))
+    assert "Временный пароль выдан командной строкой: newbie" in журнал and временный not in журнал
