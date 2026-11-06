@@ -328,6 +328,9 @@ def mount(r: APIRouter, ctx: Ctx) -> None:
             store.delete("sessions", s["id"])
         return len(rows)
 
+    # Для приёма входа от портала (`portal_vhod.py`): та же сессия, что при входе по паролю, и закрытие всех сессий.
+    ctx.start_session, ctx.revoke_sessions = start_session, revoke_sessions
+
     def csrf(request: Request) -> None:
         if (request.headers.get("x-requested-with") or "").lower() not in ("erp-webapp", "meetflow"):
             raise HTTPException(403, "Запрос без защитного заголовка отклонён")
@@ -420,8 +423,15 @@ def mount(r: APIRouter, ctx: Ctx) -> None:
     @r.post("/auth/logout", status_code=204)
     def logout(request: Request, response: Response):
         csrf(request)
+        u = accounts.by_session(request.cookies.get(COOKIE))
         accounts.close_session(request.cookies.get(COOKIE))
         response.delete_cookie(COOKIE, path="/")
+        # Выход в любом месте закрывает всё (решение владелицы 06.11.2026, вопрос 8): все сессии человека здесь и сигнал
+        # порталу — он закроет портал и остальные системы. Портала нет (секрета нет) — как раньше, одна сессия.
+        from . import portal_vhod
+        if u and portal_vhod.enabled():
+            revoke_sessions(u["id"])
+            portal_vhod.notify_logout(u)
 
     @r.get("/auth/me")
     def me(request: Request):
