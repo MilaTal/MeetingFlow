@@ -1,4 +1,4 @@
-﻿# Запуск сервера MeetFlow. Порты 8000/8001 заняты Проектом ERP и Планёркой, новые фронты — с 8010 (владелец 09.10.26).
+# Запуск сервера MeetFlow. Порты 8000/8001 заняты Проектом ERP и Планёркой, новые фронты — с 8010 (владелец 09.10.26).
 #
 # Модели по умолчанию нет (правило владельца 13.10.26, ответ 15.10.26):
 #   -Llm routes      (умолчание) модели назначает супер-администратор в «Моделях» (data\models.json); пока не
@@ -51,3 +51,5 @@ if ($needKey -and -not $env:OPENROUTER_API_KEY) {
 }
 Set-Location (Split-Path $PSScriptRoot -Parent)
 python -m meetflow serve --theme $Theme --db $Db --port $Port --host $BindHost
+# Код выхода python — наружу (записка 57a2983, 06.11.2026): по коду 3 обёртка ждёт 60 с, а не 5
+if ($null -ne $LASTEXITCODE) { exit $LASTEXITCODE }
