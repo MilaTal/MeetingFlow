@@ -76,11 +76,13 @@ def test_409_остальные_пути(tmp_path, метод, путь):
     assert r.status_code == 409, (метод, адрес, r.status_code, r.text[:120])
 
 
-def test_общая_встреча_из_вкладки_проекта_409(tmp_path):
+def test_общая_встреча_не_блокируется_из_любой_вкладки(tmp_path):
+    # Записка 06.11.2026: общая встреча — самый частый рабочий путь; лучше пропустить лишнее, чем запереть её.
     c, st, p1, p2, _mid = _env(tmp_path)
     mid = st.insert("meetings", project_id=None, date="2026-11-05", label="Общая")
-    r = c.post(f"/meetings/{mid}/prepare-minutes?rebuild=1", headers=c.h(p1))
-    assert r.status_code == 409 and "другому проекту" in r.text
+    for pid in (p1, p2, 0):
+        r = c.post(f"/meetings/{mid}/prepare-minutes?rebuild=1", headers=c.h(pid))
+        assert r.status_code != 409, r.text
 
 
 def test_общая_встреча_из_общих_и_всех_проектов_проходит(tmp_path):

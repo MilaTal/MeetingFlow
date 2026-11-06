@@ -52,13 +52,11 @@ def mount(app: FastAPI, **parts) -> Ctx:
                 встреча = ctx.store.get("meetings", int(м.group(1)))
                 if встреча:
                     проект_встречи = встреча.get("project_id")
-                    if проект_встречи is None:
-                        # Общая встреча (без проекта): с ней работают вкладки «Общие встречи» и «Все проекты»,
-                        # вкладка проекта — нет (записка 06.11.2026).
-                        общая = ctx.store.q("SELECT id FROM projects WHERE id=? AND COALESCE(general,0)=1", (чужой,))
-                        if not общая:
-                            return JSONResponse({"detail": "Встреча принадлежит другому проекту — откройте её из своего проекта"}, 409)
-                    elif str(проект_встречи) != чужой:
+                    # Общая встреча — та, что лежит в служебном «Общие встречи» (признак general): пропускаем
+                    # из любой вкладки, иначе запираем самый частый рабочий путь (записка 06.11.2026).
+                    общая = проект_встречи is None or bool(ctx.store.q(
+                        "SELECT id FROM projects WHERE id=? AND COALESCE(general,0)=1", (str(проект_встречи),)))
+                    if not общая and str(проект_встречи) != чужой:
                         return JSONResponse({"detail": "Встреча принадлежит другому проекту — откройте её из своего проекта"}, 409)
         return await call_next(request)
     return ctx
