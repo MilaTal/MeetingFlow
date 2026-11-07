@@ -15,6 +15,11 @@ MeetFlow (`accounts`). Отличие одно: в MeetFlow нет связки 
 Обратный канал портала — только с секретом: `POST /auth/portal/logout` закрывает все сессии человека (вопрос 8),
 `GET /auth/portal/accounts` — у кого логин и какая роль (вопрос 3: суперадмин любой системы — суперадмин портала).
 
+Стрелка «← Единый вход» (решение владелицы 07.11.2026, вид 1 — только стрелка) — как в ERP и Планёрке: портал добавляет
+к адресу приёма свой адрес (`home`), после успешного обмена кода он запоминается в cookie `portal_home` (только то же имя
+машины), выход в системе её снимает; сам рисунок — один файл портала, MeetFlow отдаёт его со своего адреса
+`GET /auth/portal/vozvrat.js`, index.html подключает его строкой, место — `data-portal-back` над названием.
+
 Настройки — в `.env.local` MeetFlow, в git не попадают: `PORTAL_SECRET` (у портала — `PORTAL_SECRET_MEETFLOW`),
 `PORTAL_INTERNAL_URL` (по умолчанию http://127.0.0.1:8010). Нет секрета — приёма нет, прямой вход работает как раньше.
 """
@@ -25,11 +30,13 @@ import json
 import os
 import sqlite3
 import threading
+import time
 import urllib.error
 import urllib.request
+from urllib.parse import quote, urlsplit
 
 from fastapi import APIRouter, HTTPException, Request
-from fastapi.responses import RedirectResponse
+from fastapi.responses import RedirectResponse, Response
 from pydantic import BaseModel, ConfigDict, Field
 
 from ...connectors.team_shared import shared_path
@@ -39,7 +46,10 @@ from .obshchee import SHARED_PASSWORD_ROLES, Ctx
 
 SYSTEM = "meetflow"
 TIMEOUT = 2.0
-OPEN = ("/auth/portal", "/auth/portal/logout", "/auth/portal/accounts", "/auth/portal/passwords")
+OPEN = ("/auth/portal", "/auth/portal/logout", "/auth/portal/accounts", "/auth/portal/passwords", "/auth/portal/vozvrat.js")
+HOME_COOKIE = "portal_home"                     # адрес портала для стрелки «Единый вход» (07.11.2026)
+ARROW_TTL = 300.0
+_ARROW = {"text": "", "at": 0.0}
 
 
 class _NoRedirect(urllib.request.HTTPRedirectHandler):
@@ -132,6 +142,48 @@ def notify_logout(account: dict) -> None:
                      name="portal-logout-notify").start()
 
 
+def portal_home(request: Request, home: str) -> str | None:
+    """Адрес портала из `home`, если ему можно верить: http(s), без логина, пути и параметров, то же имя машины."""
+    if not home or len(home) > 300:
+        return None
+    try:
+        parts = urlsplit(home)
+        host, _port = parts.hostname, parts.port
+    except ValueError:
+        return None
+    if parts.scheme not in ("http", "https") or not host or parts.username or parts.password:
+        return None
+    if parts.path not in ("", "/") or parts.query or parts.fragment or host != request.url.hostname:
+        return None
+    return f"{parts.scheme}://{parts.netloc}/"
+
+
+def _remember_home(response: Response, request: Request, home: str) -> None:
+    value = portal_home(request, home)
+    if value:
+        response.set_cookie(HOME_COOKIE, quote(value, safe=""), path="/", samesite="lax")
+
+
+def forget_home(response: Response) -> None:
+    response.delete_cookie(HOME_COOKIE, path="/")
+
+
+def arrow_text() -> str:
+    """Файл стрелки с портала; портала нет или он молчит — пусто. Держится `ARROW_TTL` секунд."""
+    if not enabled():
+        return ""
+    now = time.monotonic()
+    if _ARROW["at"] and now - _ARROW["at"] < ARROW_TTL:
+        return _ARROW["text"]
+    try:
+        with _OPENER.open(urllib.request.Request(_portal_url() + "/vozvrat.js"), timeout=TIMEOUT) as resp:
+            body = resp.read(65536).decode("utf-8") if resp.status == 200 else ""
+    except (urllib.error.URLError, OSError, ValueError, UnicodeDecodeError):
+        body = _ARROW["text"]
+    _ARROW.update(text=body, at=now)
+    return body
+
+
 def mount(r: APIRouter, ctx: Ctx) -> None:
     store = ctx.store
 
@@ -145,8 +197,13 @@ def mount(r: APIRouter, ctx: Ctx) -> None:
             return None
         return u
 
+    @r.get("/auth/portal/vozvrat.js")
+    def arrow_script():
+        return Response(arrow_text(), media_type="application/javascript; charset=utf-8",
+                        headers={"Cache-Control": "no-cache"})
+
     @r.get("/auth/portal")
-    def accept_code(request: Request, code: str = ""):
+    def accept_code(request: Request, code: str = "", home: str = ""):
         if not enabled() or not code or len(code) > 200:
             return RedirectResponse("/", status_code=303)
         person = _portal_call("/api/sso/exchange", {"system": SYSTEM, "code": code})
@@ -156,12 +213,15 @@ def mount(r: APIRouter, ctx: Ctx) -> None:
         if u is None:
             return RedirectResponse("/", status_code=303)
         if not ctx.accounts.auth_required():
-            return RedirectResponse(f"/?portal_user={u['id']}", status_code=303)
+            response = RedirectResponse(f"/?portal_user={u['id']}", status_code=303)
+            _remember_home(response, request, home)
+            return response
         if not person.get("verified"):
             return RedirectResponse("/", status_code=303)
         response = RedirectResponse("/", status_code=303)
         ctx.start_session(u, request, response, via_shared=(u.get("role") or "member") in SHARED_PASSWORD_ROLES,
                           remember=False)
+        _remember_home(response, request, home)
         return response
 
     @r.post("/auth/portal/logout")

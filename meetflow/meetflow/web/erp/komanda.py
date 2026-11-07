@@ -427,6 +427,8 @@ def mount(r: APIRouter, ctx: Ctx) -> None:
         u = accounts.by_session(request.cookies.get(COOKIE))
         accounts.close_session(request.cookies.get(COOKIE))
         response.delete_cookie(COOKIE, path="/")
+        from . import portal_vhod as _pv
+        _pv.forget_home(response)   # стрелка «Единый вход» — только пока вошёл через портал (07.11.2026)
         # Выход в любом месте закрывает всё (решение владелицы 06.11.2026, вопрос 8): все сессии человека здесь и сигнал
         # порталу — он закроет портал и остальные системы. Портала нет (секрета нет) — как раньше, одна сессия.
         from . import portal_vhod
