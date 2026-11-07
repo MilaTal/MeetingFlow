@@ -1681,7 +1681,7 @@ async function загрузитьПроекты() {
 // «Переименовать» (прямо в строке) и «Удалить» (встречи проекта уходят в «Общие встречи», ничего не теряется). Больше
 // восьми проектов верхнего уровня — показываются первые восемь, остальные — по «Ещё N». Выбор строки — тот же, что был у
 // выпадающего списка: `выбратьПроект`.
-const ПРОЕКТОВ_ВИДНО = 8;
+const ПРОЕКТОВ_ВИДНО = 4;   // слово владелицы 08.11.2026: список проектов скрывается после четырёх
 let _проектыРаскрыты = false;
 function рисоватьПроекты() {
   const $l = document.getElementById("project-list");
@@ -1701,7 +1701,7 @@ function рисоватьПроекты() {
         style="padding-left:${8 + 14 * (п.level || 0)}px">${п.level ? "– " : ""}${esc(п.name)}</button>
       ${супер && !п.general && п.id ? `<button type="button" class="pl-more" aria-label="Действия с проектом «${esc(п.name)}»" aria-haspopup="menu">…</button>` : ""}</div>`;
   $l.innerHTML = общие.map(строка).join("") + видимые.map(строка).join("") +
-    (скрыто > 0 ? `<button type="button" class="pl-extra" data-act="more">Ещё ${скрыто}</button>` : "") +
+    (скрыто > 0 ? `<button type="button" class="pl-extra" data-act="more">Показать ещё</button>` : "") +
     строка({ id: 0, name: "Все проекты" }) +
     (супер ? `<button type="button" class="pl-extra" data-act="new">+ Новый проект</button>` : "");
   $l.querySelectorAll(".pl-row").forEach(р => {
