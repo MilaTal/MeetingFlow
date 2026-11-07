@@ -425,7 +425,8 @@ def mount(r: APIRouter, ctx: Ctx) -> None:
         extra, args = ctx.scope_sql(request, "m.project_id")
         rows = store.q("SELECT m.id, m.date, m.label, COUNT(u.id) AS n FROM meetings m JOIN units u ON u.meeting_id=m.id "
                        "WHERE m.deleted_at IS NULL" + extra + " GROUP BY m.id ORDER BY m.date DESC", args)
-        return [{"id": x["id"], "date": x["date"], "label": x.get("label"), "units": x["n"]} for x in rows]
+        from ...core.nazvanie_vstrechi import для_показа
+        return [{"id": x["id"], "date": x["date"], "label": для_показа(x.get("label")), "units": x["n"]} for x in rows]
 
     @r.get("/meetings/{mid}/units")
     def meeting_units(mid: int):

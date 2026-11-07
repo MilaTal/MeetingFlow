@@ -490,7 +490,7 @@ async function renderPrep() {
   };
   const $warn = document.getElementById("prep-date-warn");
   const показатьЗанято = (занятая) => {
-    $warn.innerHTML = `На ${esc(fmtRuDate(занятая.date))} уже есть встреча${занятая.label && !занятая.auto ? ` «${esc(занятая.label)}»` : ""} — ${занятая.has_plan ? "план собран" : "плана пока нет"}. <button type="button" class="link" id="prep-open-existing">Открыть её</button>`;
+    $warn.innerHTML = `На ${esc(fmtRuDate(занятая.date))} уже есть встреча${cleanLabel(занятая.label) && !занятая.auto ? ` «${esc(cleanLabel(занятая.label))}»` : ""} — ${занятая.has_plan ? "план собран" : "плана пока нет"}. <button type="button" class="link" id="prep-open-existing">Открыть её</button>`;
     $warn.hidden = false;
     document.getElementById("prep-open-existing").addEventListener("click", () => открытьЕё(занятая));
   };

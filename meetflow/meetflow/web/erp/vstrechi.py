@@ -20,6 +20,7 @@ from fastapi import APIRouter, File, Form, HTTPException, Request, UploadFile
 from fastapi.responses import JSONResponse, Response
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
+from ...core.nazvanie_vstrechi import для_показа
 from ...core.store import now
 from .obshchee import Ctx, iso_dt, loads, ru_date, to_date, today_iso
 
@@ -200,7 +201,7 @@ def mount(r: APIRouter, ctx: Ctx) -> None:
     def meeting_out(m: dict, full: bool = True) -> dict:
         has_min = bool(m.get("protocol_md"))
         b = building(m["id"]) if full else {"running": False}
-        out = {"id": m["id"], "date": (m.get("date") or "")[:10], "label": m.get("label") or None,
+        out = {"id": m["id"], "date": (m.get("date") or "")[:10], "label": для_показа(m.get("label")),
                "status": m.get("status") or "scheduled", "has_minutes": has_min,
                "second_same_day": bool(m.get("second_same_day")), "created_at": iso_dt(m.get("created_at")) or "",
                "processed_at": iso_dt(m.get("protocol_built_at")), "model_used": None,
@@ -228,7 +229,7 @@ def mount(r: APIRouter, ctx: Ctx) -> None:
         return out
 
     def describe(m: dict) -> dict:
-        return {"id": m["id"], "date": (m.get("date") or "")[:10], "label": m.get("label"),
+        return {"id": m["id"], "date": (m.get("date") or "")[:10], "label": для_показа(m.get("label")),
                 "auto": m.get("label") == AUTO_LABEL, "has_plan": bool(m.get("plan_md")),
                 "plan_generated_at": iso_dt(m.get("plan_built_at")), "has_minutes": bool(m.get("protocol_md")),
                 "materials": len(sources_of(m["id"], True))}
@@ -277,7 +278,7 @@ def mount(r: APIRouter, ctx: Ctx) -> None:
             if busy and not payload.second_same_day:
                 m0 = busy[0]
                 plan = "план собран" if m0.get("plan_md") else "плана пока нет"
-                name = f" «{m0['label']}»" if m0.get("label") else ""
+                name = f" «{для_показа(m0.get('label'))}»" if для_показа(m0.get("label")) else ""
                 return refuse(409, f"На {ru_date(day)} уже есть встреча №{m0['id']}{name} — {plan}. Откройте её. Вторая "
                                    "встреча в тот же день — только с отметкой «Вторая встреча в этот день».", m0)
             mid = store.insert("meetings", project_id=pid, date=day, label=(payload.label or "").strip() or None,

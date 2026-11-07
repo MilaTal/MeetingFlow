@@ -654,8 +654,10 @@ def create_app(theme_name: str | None = None, db_path: str | None = None, journa
         else:
             rows = store.q("SELECT m.id, m.date, m.label, m.protocol_built_at, m.project_id, p.name AS project_name "
                            "FROM meetings m LEFT JOIN projects p ON p.id=m.project_id ORDER BY m.date DESC, p.name")
+        from ..core.nazvanie_vstrechi import для_показа
         for r in rows:
             r["has_protocol"] = bool(r.pop("protocol_built_at"))
+            r["label"] = для_показа(r.get("label"))      # без «из папки-приёмника:» (слово владелицы 08.11.2026)
         return rows
 
     @app.post("/api/projects/{pid}/meetings")

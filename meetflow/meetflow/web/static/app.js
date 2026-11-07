@@ -3322,7 +3322,33 @@ function hashParts() {
 }
 
 // Название встречи без служебной подписи «Встреча ДД.ММ.ГГ» (она дублирует дату)
-function cleanLabel(label) { return label && !/^Встреча\s+\d/.test(label) ? label : ""; }
+// Слово владелицы 08.11.2026: «из папки-приёмника:» убрать полностью, технические знаки имени файла в название не
+// переносить — остаётся тема. Чистится только название, которое записал сам приём (с этой пометкой): расширение, даты и
+// время, rec/zoom/«копия», номера «(1)», подчёркивания и скобки. Ручное название не трогается.
+const МЕТКА_ПРИЁМНИКА = /^\s*(?:создана\s+)?из\s+папки[-\s]?приёмника\s*:?\s*/i;
+const _Н = "(?<![\\p{L}\\d])", _К = "(?![\\p{L}\\d])";
+const ТЕХ_СЛОВА = new RegExp(`${_Н}(?:rec|record|recording|audio|video|zoom|meeting|meet|telemost|запись|копия|copy|final)${_К}`, "giu");
+function темаИзПриёмника(текст) {
+  let s = String(текст || "");
+  s = s.replace(/\.(?:m4a|mp3|wav|mp4|ogg|oga|webm|flac|aac|txt|docx?|pdf|vtt|srt)$/i, "");
+  s = s.replace(new RegExp(`${_Н}\\d{4}[-_.]?\\d{2}[-_.]?\\d{2}${_К}`, "gu"), " ")          // 2026-11-05, 20261105
+       .replace(new RegExp(`${_Н}\\d{1,2}[._-]\\d{1,2}[._-]\\d{2,4}${_К}`, "gu"), " ")        // 05.11.2026
+       .replace(new RegExp(`${_Н}\\d{1,2}[-_.:]\\d{2}(?:[-_.:]\\d{2})?${_К}`, "gu"), " ")     // 10-30, 10_30_15
+       .replace(/GMT\s*[+-]?\s*\d*/gi, " ")
+       .replace(new RegExp(`${_Н}\\d{4,}${_К}`, "gu"), " ")                                   // длинные номера
+       .replace(/\(\d+\)/g, " ")
+       .replace(ТЕХ_СЛОВА, " ")
+       .replace(/[_#@=+~^;{}\[\]()]/g, " ")
+       .replace(/\s+/g, " ")
+       .replace(/^[\s.,:;\-–—]+|[\s.,:;\-–—]+$/g, "");
+  if (!/\p{L}{3}/u.test(s)) return "";
+  return s.charAt(0).toUpperCase() + s.slice(1);
+}
+function cleanLabel(label) {
+  if (!label) return "";
+  if (МЕТКА_ПРИЁМНИКА.test(label)) return темаИзПриёмника(label.replace(МЕТКА_ПРИЁМНИКА, ""));
+  return !/^Встреча\s+\d/.test(label) ? label : "";
+}
 
 // Подписи ссылок на протокол «есть / нет» (protocolLink) жили только в прежнем списке встреч — убраны с ним
 // (21.10.2026): у будущей встречи «создать протокол» сбивал с толку, в «Подготовке» теперь колонки «План встречи» и «Протокол».
@@ -3434,7 +3460,7 @@ async function renderUnitsBoard(rest) {
     byMonth[byMonth.length - 1][1].push(m);
   });
   const opt = (m) => `<option value="${m.id}"${m.id === id ? " selected" : ""}>${esc(fmtRuDate(m.date))} · единиц ${m.units}${
-    m.label && !/^Встреча\s/.test(m.label) ? " — " + esc(m.label) : ""}</option>`;
+    cleanLabel(m.label) ? " — " + esc(cleanLabel(m.label)) : ""}</option>`;
   $main.innerHTML = `<div class="doc-head"><h1>Единицы встреч</h1>
       <span class="doc-head-meta">табло на время тестирования — видно только супер-админу</span></div>
     <div class="field" style="max-width:360px"><label for="units-meeting">Встреча</label>
