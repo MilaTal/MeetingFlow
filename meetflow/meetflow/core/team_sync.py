@@ -39,10 +39,18 @@ def sync_people(store: Store, project_id: int, voice_base_path: str | None = Non
         return 0
     have = {_norm(r["full_name"]): r for r in
             store.q("SELECT id, full_name FROM people WHERE project_id=?", (project_id,))}
+    # 07.11.2026 (записка ecbfc73): сравниваем не только полное ФИО, но и ключ «фамилия + имя». Иначе человек
+    # с отчеством в общей «Команде» и без отчества в проекте заводился двойником при каждом sync_all.
+    def _ключ(фио: str) -> str:
+        части = _norm(фио).split()
+        return " ".join(части[:2]) if len(части) >= 2 else _norm(фио)
+
+    have_ключ = {_ключ(r["full_name"]) for r in
+                 store.q("SELECT full_name FROM people WHERE project_id=?", (project_id,))}
     added = 0
     for p in people:
         name = " ".join(str(p.get("full_name") or "").split())
-        if not name or _norm(name) in have:
+        if not name or _norm(name) in have or _ключ(name) in have_ключ:
             continue
         store.insert("people", project_id=project_id, full_name=name,
                      role=str(p.get("role") or ""), department=str(p.get("department") or ""),
@@ -51,6 +59,7 @@ def sync_people(store: Store, project_id: int, voice_base_path: str | None = Non
                      organization=str(p.get("organization") or ""),
                      known_marks=json.dumps([], ensure_ascii=False))
         have[_norm(name)] = {"full_name": name}
+        have_ключ.add(_ключ(name))
         added += 1
     return added
 
@@ -58,7 +67,9 @@ def sync_people(store: Store, project_id: int, voice_base_path: str | None = Non
 def sync_all(store: Store, voice_base_path: str | None = None) -> dict[int, int]:
     """Обновить «Команду» всех проектов; {project_id: сколько добавлено}."""
     out = {}
-    for row in store.q("SELECT id FROM projects ORDER BY id"):
+    # 07.11.2026: только живые проекты — в архивные и удалённые люди не переносятся (иначе 241 строка
+    # в проекты-проверки, найденная на копии базы)
+    for row in store.q("SELECT id FROM projects WHERE COALESCE(archived,0)=0 AND COALESCE(deleted,0)=0 ORDER BY id"):
         n = sync_people(store, row["id"], voice_base_path)
         if n:
             out[row["id"]] = n
