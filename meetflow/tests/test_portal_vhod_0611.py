@@ -183,3 +183,52 @@ def test_set_password_выдаёт_временный_и_роль_только_�
     assert Store(db).q("SELECT role FROM accounts WHERE login='newbie'")[0]["role"] == "member"
     журнал = " ".join(r["title"] + r["payload"] for r in Store(db).q("SELECT title, payload FROM cards"))
     assert "Временный пароль выдан командной строкой: newbie" in журнал and временный not in журнал
+
+
+# ---------------------------------------------------------------- человек без логина — по ФИО (находка 08.11.2026)
+def _обмен_с_фио(env, monkeypatch, фио: str, verified: bool = False):
+    def обмен(path, body):
+        if path != "/api/sso/exchange":
+            return {"ok": True}
+        return {"uid": "u-x", "full_name": фио, "login": None, "verified": verified}
+    monkeypatch.setattr(portal_vhod, "_portal_call", обмен)
+
+
+def test_без_логина_находится_по_точному_фио(env, monkeypatch):
+    uid = env.st.insert("accounts", login="", full_name="Котельников Олег Петрович", role="member", password_hash="",
+                        active=1, confirmed=1, external=0)
+    _обмен_с_фио(env, monkeypatch, "Котельников Олег Петрович")
+    r = _код(env, "t-любой")
+    assert r.headers["location"] == f"/?portal_user={uid}"
+
+
+def test_без_логина_запись_без_отчества_одна(env, monkeypatch):
+    uid = env.st.insert("accounts", login="", full_name="Мухин Олег", role="member", password_hash="", active=1,
+                        confirmed=1, external=0)
+    _обмен_с_фио(env, monkeypatch, "Мухин Олег Андреевич")
+    assert _код(env, "t-любой").headers["location"] == f"/?portal_user={uid}"
+
+
+def test_без_логина_двое_подходящих_никого(env, monkeypatch):
+    for фио in ("Мухин Олег", "Мухин Олег Петрович"):
+        env.st.insert("accounts", login="", full_name=фио, role="member", password_hash="", active=1, confirmed=1,
+                      external=0)
+    _обмен_с_фио(env, monkeypatch, "Мухин Олег Андреевич")
+    assert _код(env, "t-любой").headers["location"] == "/"
+
+
+def test_без_логина_внешний_и_отключённый_не_находятся(env, monkeypatch):
+    env.st.insert("accounts", login="", full_name="Внешний Пётр Ильич", role="member", password_hash="", active=1,
+                  confirmed=1, external=1)
+    _обмен_с_фио(env, monkeypatch, "Внешний Пётр Ильич")
+    assert _код(env, "t-любой").headers["location"] == "/"
+
+
+def test_без_логина_с_паролем_портала_открывает_сессию(env, monkeypatch):
+    uid = env.st.insert("accounts", login="", full_name="Семёнова Ирина Павловна", role="member", password_hash="",
+                        active=1, confirmed=1, external=0)
+    _обмен_с_фио(env, monkeypatch, "Семенова Ирина Павловна", verified=True)
+    env.режим(True)
+    r = _код(env, "c-любой")
+    assert r.headers["location"] == "/" and "mf_session" in r.headers.get("set-cookie", "")
+    assert _сессии(env, uid) == 1

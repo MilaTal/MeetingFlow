@@ -197,6 +197,26 @@ def mount(r: APIRouter, ctx: Ctx) -> None:
             return None
         return u
 
+    def find_by_name(full_name: str | None) -> dict | None:
+        """Человек от портала без логина в MeetFlow (находка сессии портала 08.11.2026: логины у людей MeetFlow почти
+        не заведены, переход с портала никого не открывал). Ищем по ФИО из общей «Команды» — то же правило, что у списка
+        `/auth/portal/accounts`: точное совпадение (е = ё) и единственная действующая внутренняя запись. Если в MeetFlow
+        записано без отчества — подходит, только когда такая запись одна и других людей с этой фамилией и именем нет
+        (правило одинаковых имён, записка d20cf466). Двое и больше — никого: спорное имя не подставляется (03.10.2026)."""
+        key = _name_key(full_name)
+        if not key:
+            return None
+        rows = [u for u in store.q("SELECT * FROM accounts") if u.get("active", 1) and not u.get("external")]
+        exact = [u for u in rows if _name_key(u.get("full_name")) == key]
+        if exact:
+            return exact[0] if len(exact) == 1 else None
+        words = key.split()
+        if len(words) >= 3:
+            same = [u for u in rows if _name_key(u.get("full_name")).split()[:2] == words[:2]]
+            if len(same) == 1 and len(_name_key(same[0].get("full_name")).split()) == 2:
+                return same[0]
+        return None
+
     @r.get("/auth/portal/vozvrat.js")
     def arrow_script():
         return Response(arrow_text(), media_type="application/javascript; charset=utf-8",
@@ -209,7 +229,7 @@ def mount(r: APIRouter, ctx: Ctx) -> None:
         person = _portal_call("/api/sso/exchange", {"system": SYSTEM, "code": code})
         if not person or not isinstance(person.get("uid"), str):
             return RedirectResponse("/", status_code=303)
-        u = find_account(person.get("login"))
+        u = find_account(person.get("login")) or find_by_name(person.get("full_name"))
         if u is None:
             return RedirectResponse("/", status_code=303)
         if not ctx.accounts.auth_required():
