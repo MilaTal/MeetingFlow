@@ -32,12 +32,17 @@ def test_отрицание_внутри_содержания_обычная_з�
 
 
 def test_вопрос_рядом_с_другим_замечанием_код_снят():
-    g = _проверить("Подготовить отчёт по браку, можешь?", "подготовить отчёт")
+    # цитата — вопрос и отчёт о сделанном сразу: код вопроса снят, но остаётся другое замечание
+    g = _проверить("Отчёт подписан, можешь проверить?", "проверить отчёт")
     assert "question_not_assignment" not in g.reasons, "код вопроса снимается при любом наборе причин"
+    assert g.reasons, "другое замечание остаётся — тест различает поведение"
+    assert not g.accepted, "с другим замечанием задача не принимается молча"
 
 
 def test_условие_под_вопросом_и_без_пустого_списка_кандидатов():
     g = _проверить("Если успеем, проверим остатки на складе", "проверить остатки на складе")
+    assert not g.accepted, "условие — «под вопросом», не обычная задача"
+    assert "condition_not_assignment" in g.reasons or g.pending is not None, "условие видно в причинах или карточке"
     assert g.pending is None or "candidates" in g.pending, "карточка без списка кандидатов запрещена"
 
 
@@ -46,11 +51,17 @@ def test_намерение_о_себе_отсев():
     assert "intent_not_assignment" in g.reasons
 
 
-def test_мелочь_отсев():
-    g = _проверить("Ну ладно, посмотрим", "ну ладно", кто=None)
-    assert "insignificant" in g.reasons or not g.accepted
+def test_мелочь_отсев(monkeypatch):
+    # проверяем проводку правила, а не вкус классификатора: если существенность сказала «отсеять»,
+    # сторож обязан вернуть именно insignificant и не принять задачу
+    from meetflow.core import sushchestvennost
+    monkeypatch.setattr(sushchestvennost, "решение", lambda текст: (sushchestvennost.ОТСЕЯТЬ, "проба"))
+    g = _проверить("Спасибо, всё понятно", "спасибо", кто="Петрова Анна")
+    assert "insignificant" in g.reasons, "мелочь отсеивается именно этим кодом"
+    assert not g.accepted
 
 
 def test_условие_не_роняет_сборку():
+    # раньше здесь падало KeyError candidates: у pending не было списка кандидатов
     g = _проверить("Если получится, обновим регламент", "обновить регламент")
-    assert isinstance(g.accepted, bool)
+    assert g.pending is None or isinstance(g.pending.get("candidates"), list), "список кандидатов — список"
