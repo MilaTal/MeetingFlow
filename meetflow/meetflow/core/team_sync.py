@@ -39,18 +39,34 @@ def sync_people(store: Store, project_id: int, voice_base_path: str | None = Non
         return 0
     have = {_norm(r["full_name"]): r for r in
             store.q("SELECT id, full_name FROM people WHERE project_id=?", (project_id,))}
-    # 07.11.2026 (записка ecbfc73): сравниваем не только полное ФИО, но и ключ «фамилия + имя». Иначе человек
-    # с отчеством в общей «Команде» и без отчества в проекте заводился двойником при каждом sync_all.
-    def _ключ(фио: str) -> str:
-        части = _norm(фио).split()
-        return " ".join(части[:2]) if len(части) >= 2 else _norm(фио)
+    # 07.11.2026 (записки ecbfc73, 22ad64f): ключ — первые два слова «фамилия + имя». Если в проекте человек
+    # записан без отчества, а в общей «Команде» с отчеством — ДОПИСЫВАЕМ отчество в существующую запись, а не
+    # заводим двойника. Тёзки с разными отчествами не сливаются: у обоих по три слова и отчества разные — разные люди.
+    def _части(фио: str) -> list[str]:
+        return _norm(фио).split()
 
-    have_ключ = {_ключ(r["full_name"]) for r in
-                 store.q("SELECT full_name FROM people WHERE project_id=?", (project_id,))}
-    added = 0
+    в_проекте: dict[str, dict] = {}
+    for r in store.q("SELECT id, full_name FROM people WHERE project_id=?", (project_id,)):
+        ч = _части(r["full_name"])
+        if len(ч) >= 2:
+            в_проекте.setdefault(" ".join(ч[:2]), r)
+    added = updated = 0
     for p in people:
         name = " ".join(str(p.get("full_name") or "").split())
-        if not name or _norm(name) in have or _ключ(name) in have_ключ:
+        if not name:
+            continue
+        if _norm(name) in have:
+            continue
+        ч = _части(name)
+        если_есть = в_проекте.get(" ".join(ч[:2])) if len(ч) >= 2 else None
+        if если_есть is not None:
+            было = _части(если_есть["full_name"])
+            if len(было) == 2 and len(ч) >= 3:
+                # дописать отчество в существующую запись
+                store.update("people", если_есть["id"], full_name=name)
+                have[_norm(name)] = {"full_name": name}
+                updated += 1
+            # оба трёхсловные с разными отчествами — тёзки, это разные люди: не трогаем и не заводим
             continue
         store.insert("people", project_id=project_id, full_name=name,
                      role=str(p.get("role") or ""), department=str(p.get("department") or ""),
@@ -59,8 +75,10 @@ def sync_people(store: Store, project_id: int, voice_base_path: str | None = Non
                      organization=str(p.get("organization") or ""),
                      known_marks=json.dumps([], ensure_ascii=False))
         have[_norm(name)] = {"full_name": name}
-        have_ключ.add(_ключ(name))
+        if len(ч) >= 2:
+            в_проекте.setdefault(" ".join(ч[:2]), {"id": 0, "full_name": name})
         added += 1
+    print(f"MeetFlow: Команда проекта {project_id} — добавлено {added}, дописано отчеств {updated}", file=__import__("sys").stderr, flush=True)
     return added
 
 
