@@ -45,11 +45,16 @@ def sync_people(store: Store, project_id: int, voice_base_path: str | None = Non
     def _части(фио: str) -> list[str]:
         return _norm(фио).split()
 
+    def _ключ(фио: str) -> str:
+        # порядок слов не важен: «Иванов Пётр» и «Пётр Иванов» — один человек
+        ч = _части(фио)
+        return " ".join(sorted(ч[:2])) if len(ч) >= 2 else _norm(фио)
+
     в_проекте: dict[str, dict] = {}
     for r in store.q("SELECT id, full_name FROM people WHERE project_id=?", (project_id,)):
         ч = _части(r["full_name"])
         if len(ч) >= 2:
-            в_проекте.setdefault(" ".join(ч[:2]), r)
+            в_проекте.setdefault(_ключ(r["full_name"]), r)
     added = updated = 0
     for p in people:
         name = " ".join(str(p.get("full_name") or "").split())
@@ -58,7 +63,7 @@ def sync_people(store: Store, project_id: int, voice_base_path: str | None = Non
         if _norm(name) in have:
             continue
         ч = _части(name)
-        если_есть = в_проекте.get(" ".join(ч[:2])) if len(ч) >= 2 else None
+        если_есть = в_проекте.get(_ключ(name)) if len(ч) >= 2 else None
         if если_есть is not None:
             было = _части(если_есть["full_name"])
             if len(было) == 2 and len(ч) >= 3:
@@ -66,8 +71,12 @@ def sync_people(store: Store, project_id: int, voice_base_path: str | None = Non
                 store.update("people", если_есть["id"], full_name=name)
                 have[_norm(name)] = {"full_name": name}
                 updated += 1
-            # оба трёхсловные с разными отчествами — тёзки, это разные люди: не трогаем и не заводим
-            continue
+                continue
+            if len(было) >= 3 and len(ч) >= 3 and _norm(было[2]) == _norm(ч[2]):
+                continue          # тот же человек, уже есть
+            if len(было) == 2 and len(ч) == 2:
+                continue          # те же два слова в другом порядке — один человек
+            # разные отчества — тёзки: это разные люди, заводим второго отдельной записью
         store.insert("people", project_id=project_id, full_name=name,
                      role=str(p.get("role") or ""), department=str(p.get("department") or ""),
                      aliases=json.dumps([], ensure_ascii=False),
@@ -76,7 +85,7 @@ def sync_people(store: Store, project_id: int, voice_base_path: str | None = Non
                      known_marks=json.dumps([], ensure_ascii=False))
         have[_norm(name)] = {"full_name": name}
         if len(ч) >= 2:
-            в_проекте.setdefault(" ".join(ч[:2]), {"id": 0, "full_name": name})
+            в_проекте.setdefault(_ключ(name), {"id": 0, "full_name": name})
         added += 1
     print(f"MeetFlow: Команда проекта {project_id} — добавлено {added}, дописано отчеств {updated}", file=__import__("sys").stderr, flush=True)
     return added
