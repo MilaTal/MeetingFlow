@@ -20,6 +20,7 @@ import hashlib
 import inspect
 import json
 import os
+from datetime import timedelta
 import re
 import threading
 from dataclasses import dataclass, field, replace
@@ -986,6 +987,12 @@ class MeetingPipeline:
                         # (решение владелицы 20.10.2026); фраза из записи важнее даты модели (deadline.py из ERP,
                         # 06.11.2026: файл перенесён 1 в 1, поэтому `marker=True` передаём здесь — в ERP он по умолчанию выкл.)
                         win = self._window(source.lines, g.quote or d.quote)
+                        # Решение владелицы 07.11.2026: срок одним словом «неделя» без предлога — 7 дней от даты
+                        # встречи (03.11 -> 10.11). Дополняем фразу до «через неделю», чтобы не править файл ERP 1 в 1;
+                        # «за неделю», «на этой неделе», «неделю назад», «каждую неделю» сюда не попадают.
+                        голое = " ".join(str(said or "").lower().replace("ё", "е").split()).strip(" .,;:!?—-")
+                        if голое in ("неделя", "неделю", "одна неделя", "срок неделя"):
+                            said = f"{(md + timedelta(days=7)):%d.%m.%Y}"
                         if said is not None and lenient_date(said) is None:
                             dl = deadline.resolve(said, md, deadline.дата_модели(said), marker=True)
                             срок_след.update(due_resolved=(f"{dl.due:%d.%m.%Y}" if dl.due else ""),
