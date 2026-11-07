@@ -37,6 +37,8 @@ button { font: inherit; color: inherit; }
 .pj.on { background: var(--acc-soft); color: var(--acc); }
 .pj .chev { margin-left: auto; color: var(--ink-muted); font-size: 12px; transition: transform .2s; }
 .pj.on .chev { transform: rotate(90deg); color: var(--acc); }
+.pj.on.shut .chev { transform: none; }
+.pj .chev { padding: 2px 6px; border-radius: 6px; cursor: pointer; } .pj .chev:hover { background: var(--panel); }
 .pj .ini { width: 22px; height: 22px; border-radius: 6px; background: var(--panel2); color: var(--ink-2); font-size: 11.5px; display: grid; place-items: center; flex-shrink: 0; }
 .pj.on .ini { background: var(--acc-line); color: #fff; }
 .add { color: var(--ink-muted); font-size: 14px; padding: 6px 10px; }
@@ -87,7 +89,7 @@ button { font: inherit; color: inherit; }
 </div></div>
 
 <div class="note">
-  <div class="on" data-for="a"><b>А · Проект раскрывается — ровно ваша стрелка (рекомендую).</b> Список «Встречи по проектам» остаётся, как сейчас. Выбранный проект раскрывается на месте: его меню стоит прямо под ним, с отступом и линией слева, остальные проекты свёрнуты ниже. Нажмите другой проект — меню переедет к нему. Служебное (Команда, Разбор, Параметры) — ниже черты, оно не про проект.
+  <div class="on" data-for="a"><b>А · Проект раскрывается — ровно ваша стрелка (рекомендую).</b> Список «Встречи по проектам» остаётся, как сейчас. Выбранный проект раскрывается на месте: его меню стоит прямо под ним, с отступом и линией слева, остальные проекты свёрнуты ниже. Нажмите другой проект — меню переедет к нему. Повторное нажатие на стрелку выбранного проекта сворачивает его меню, ещё одно — разворачивает (замечание владелицы 08.11). Служебное (Команда, Разбор, Параметры) — ниже черты, оно не про проект.
     <ul><li>Плюс: связь «проект → его меню» видна сразу; список проектов всегда под рукой; ваши правки 08.11 («Показать ещё» после четырёх, подпись блока) сохраняются.</li><li>Минус: при выбранном проекте внизу списка меню сдвигает остальные проекты; при 10+ проектах список нужно сворачивать (уже есть «Показать ещё»).</li></ul></div>
   <div data-for="b"><b>Б · Две колонки.</b> Слева узкая полоса значков проектов (две буквы, как в мессенджерах), рядом — меню выбранного проекта с его названием сверху. Это и есть «меню второго плана» в чистом виде.
     <ul><li>Плюс: уровни разделены жёстко: полоса — какой проект, колонка — что в нём.</li><li>Минус: по двум буквам проект не узнать, нужна подсказка при наведении; ещё 64 px ширины.</li></ul></div>
@@ -130,7 +132,7 @@ const ICO = {
   act: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M9 7h10M9 12h10M9 17h10"/><path d="M4 7l1 1 2-2M4 12l1 1 2-2M4 17l1 1 2-2"/></svg>',
   info: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><circle cx="12" cy="12" r="8"/><path d="M12 11v5M12 8v.5"/></svg>',
 };
-let cur = 1, inside = true, sec = "Реестр встреч";
+let cur = 1, inside = true, sec = "Реестр встреч", open = true;
 function menu() {
   const it = (k, t) => `<div class="mi${sec === t ? " on" : ""}" data-sec="${t}">${ICO[k]}${t}</div>`;
   return it("reg", "Реестр встреч") + it("prep", "Подготовка встречи") + it("act", "Актуализировать задачи из реестра")
@@ -143,8 +145,8 @@ const BACK = '<div class="back">← Единый вход</div>';
 function render() {
   const p = PROJ[cur][1];
   document.querySelectorAll('[data-kind="a"]').forEach(el => el.innerHTML = BACK + '<div class="cap">Встречи по проектам</div>'
-    + PROJ.map(([i, n], k) => `<div class="pj${k === cur ? " on" : ""}" data-p="${k}"><span class="ini">${i}</span>${n}<span class="chev">▸</span></div>`
-      + (k === cur ? `<div class="nest">${menu()}</div>` : "")).join("") + '<div class="add">+ Новый проект</div>' + ADMIN);
+    + PROJ.map(([i, n], k) => `<div class="pj${k === cur ? " on" : ""}${k === cur && !open ? " shut" : ""}" data-p="${k}"><span class="ini">${i}</span>${n}<span class="chev" data-chev="${k}" title="${k === cur && open ? "Свернуть" : "Развернуть"}">▸</span></div>`
+      + (k === cur && open ? `<div class="nest">${menu()}</div>` : "")).join("") + '<div class="add">+ Новый проект</div>' + ADMIN);
   document.querySelectorAll('[data-kind="b"]').forEach(el => el.innerHTML = PROJ.map(([i, n], k) => `<div class="ini${k === cur ? " on" : ""}" data-p="${k}" title="${n}">${i}</div>`).join("") + '<div class="plus" title="Новый проект">+</div>');
   document.querySelectorAll('[data-kind="b2"]').forEach(el => el.innerHTML = BACK + `<div class="head"><small>Встречи по проекту</small><b>${p}</b></div>` + menu() + ADMIN);
   document.querySelectorAll('[data-kind="c"]').forEach(el => el.innerHTML = BACK + (inside
@@ -169,8 +171,10 @@ document.addEventListener("click", e => {
   }
   const pop = document.getElementById("pop");
   if (e.target.closest("[data-pop]")) { pop.classList.toggle("on"); return; }
+  const ch = e.target.closest("[data-chev]");
+  if (ch && +ch.dataset.chev === cur && ch.closest("#a")) { open = !open; render(); return; }
   const pj = e.target.closest("[data-p]");
-  if (pj) { cur = +pj.dataset.p; if (pj.dataset.in) inside = true; pop.classList.remove("on"); render(); return; }
+  if (pj) { if (+pj.dataset.p !== cur) open = true; cur = +pj.dataset.p; if (pj.dataset.in) inside = true; pop.classList.remove("on"); render(); return; }
   if (e.target.closest("[data-out]")) { inside = false; render(); return; }
   const s = e.target.closest("[data-sec]");
   if (s) { sec = s.dataset.sec; render(); return; }
