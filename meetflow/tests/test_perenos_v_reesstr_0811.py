@@ -20,7 +20,7 @@ def test_перенос_уводит_в_реестр_нового_проекта
 
 def test_версия_nav_поднята():
     html = (СТАТИКА / "index.html").read_text(encoding="utf-8")
-    assert 'nav.js?v=20261108mf72' in html
+    assert 'nav.js?v=20261108mf73' in html
 
 
 def test_перенос_вместе_с_задачами_на_сервере(store, project, meeting):

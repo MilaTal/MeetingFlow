@@ -28,4 +28,4 @@ def test_шапка_панели_двумя_строками():
 
 def test_версии_подняты():
     html = (СТАТИКА / "index.html").read_text(encoding="utf-8")
-    assert "app.js?v=20261108mf72" in html and "styles.css?v=20261108mf72" in html
+    assert "app.js?v=20261108mf73" in html and "styles.css?v=20261108mf73" in html

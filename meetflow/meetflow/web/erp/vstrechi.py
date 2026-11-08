@@ -264,6 +264,20 @@ def mount(r: APIRouter, ctx: Ctx) -> None:
         rows = live(store.q("SELECT * FROM meetings WHERE 1=1" + extra + " ORDER BY date DESC, id DESC", args))
         return [meeting_out(m) for m in rows]
 
+    @r.get("/meetings/search")
+    def search_meetings(request: Request, q: str = ""):
+        """Поиск встречи по имени для левой панели (слово владелицы 08.11.2026 «поиск по имени только»)."""
+        from ...core import poisk_vstrech
+        from ...core.nazvanie_vstrechi import для_показа
+        extra, args = ctx.scope_sql(request)
+        rows = live(store.q("SELECT * FROM meetings WHERE 1=1" + extra + " ORDER BY date DESC, id DESC", args))
+        out = []
+        for m in poisk_vstrech.отобрать(rows, q):
+            d = meeting_out(m)
+            d["label"] = для_показа(m.get("label"))      # без «из папки-приёмника:» и хвоста имени файла
+            out.append(d)
+        return out
+
     @r.post("/meetings", status_code=201)
     def create_meeting(payload: MeetingCreate, request: Request):
         ctx.need_user(request)
