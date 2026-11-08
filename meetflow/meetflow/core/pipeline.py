@@ -49,6 +49,7 @@ from . import vtoroy_sudya                      # второй судья в т�
 from . import svedenie_ten                     # сведение кодом в тень, вариант C (слово владелицы 06.11.2026)
 from . import vks_vtoroy_tekst                 # выгрузка ВКС вторым текстом сборки (записка 05.11.2026)
 from . import obekt_ryadom                     # объект рядом с поручением (пункт 8 плана, замер 05.11.2026)
+from . import pereskaz                         # пересказ ИИ — материал, не источник (слово владелицы 06.11.2026)
 from .team_sync import sync_people
 from ..connectors.team_shared import team_shared_state
 from .dates import due_text, lenient_date
@@ -713,6 +714,15 @@ class MeetingPipeline:
             return {"status": "rejected", "reason": msg}
         if doc.meta.get("own_output") or self._is_own_protocol(project_id, doc.text):
             return {"status": "rejected", "reason": "Это выгрузка самой системы — она не может быть источником встречи."}
+        if pereskaz.это_пересказ(filename, doc.text):
+            # Пересказ ИИ — материал, не источник (слово владелицы 06.11.2026): может быть ошибочным и выложен по
+            # ошибке; в сборку, задачи, карточки, поиск и сверку не идёт. Строка — в журнал сборки, файл остаётся
+            # материалом встречи и виден человеку в «Материалах». Вид «расшифровка» понижается до материала — иначе
+            # пересказ с таймкодами прошёл бы в сборку как запись.
+            doc.meta["pereskaz"] = pereskaz.ПОМЕТКА
+            if doc.kind == SourceKind.TRANSCRIPT:
+                doc.kind = SourceKind.OTHER
+            self.journal.write(purpose="pereskaz", meeting_id=meeting_id, file=filename)
         sid = 0
         if isinstance(c, ASRConnector):
             if сохранено:
@@ -877,8 +887,10 @@ class MeetingPipeline:
             from . import topics
             topics.сверить_со_сборкой(self.s, meeting, [s.get("text") for s in notes])
         if not transcripts and not notes:
+            # Пересказ ИИ в этот запасной путь не идёт: он материал, а не источник (слово владелицы 06.11.2026)
             notes = [s for s in srcs if s["kind"] == SourceKind.OTHER.value
-                     and not s["name"].endswith("(описание изображения)")]
+                     and not s["name"].endswith("(описание изображения)")
+                     and not pereskaz.помечен(s.get("meta"))]
         if not transcripts and not notes:
             rep.status, rep.detail = "no_sources", "У встречи нет читаемых источников — протокол не собирается."
             return rep
