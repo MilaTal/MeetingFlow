@@ -239,3 +239,22 @@ def test_без_исполнителя_разные_предметы_не_объ
     итог, _ = u.укрупнить([з("Подготовить КП по объекту Бухта-Север", кто=""),
                            з("Согласовать график отпусков отдела", кто="")])
     assert len(итог) == 2
+
+
+def test_спорные_пары_видны_в_счёте(monkeypatch):
+    """Счёт укрупнения отдаёт не только число сомнений, но и сами пары — их читают замер 13.11 и карточки."""
+    from meetflow.core import ukrupnenie_zadach as u
+
+    задачи = [{"description": "Подготовить график поставки труб", "responsible": "Петров Иван"},
+              {"description": "Согласовать график поставки труб", "responsible": "Петров Иван"}]
+    monkeypatch.setattr(u, "отложена", lambda t: False)
+    monkeypatch.setattr(u, "общее_семейство", lambda a, b, p=None: "")
+    monkeypatch.setattr(u, "проект", lambda t: "пилот")
+    monkeypatch.setattr(u, "один_исполнитель", lambda a, b, о=None: (True, ""))
+    monkeypatch.setattr(u, "срок", lambda t: "")
+    monkeypatch.setattr(u, "рядом", lambda a, b, запись="": True)
+    monkeypatch.setattr(u, "пара", lambda a, b, *арг, **кв: ("сомнение", "предмет 0.5"))
+    итог, счёт = u.укрупнить(задачи, "")
+    assert счёт["сомнений"] >= 1
+    assert счёт["сомнения_пары"] and счёт["сомнения_пары"][0]["причина"] == "предмет 0.5"
+    assert len(счёт["сомнения_пары"][0]["части"]) == 2
