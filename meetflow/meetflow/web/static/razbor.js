@@ -84,10 +84,14 @@ async function renderRazbor(rest) {
       <span class="tb-spacer"></span>
       <span class="page-sub" id="razbor-norm">Открыто <b>${д.total}</b> (норма ≤ ${д.norm})${д.over ? ' <span class="badge badge-warning">больше нормы</span>' : ""}${д.expires_tomorrow ? ` · истечёт завтра: <b>${д.expires_tomorrow}</b>` : ""}</span></div>
     <nav class="rz-views" id="razbor-views" aria-label="Виды разбора">${полоса}</nav>
-    ${строки.length ? `<div class="card card-output" id="razbor-tasks"><div class="rz-batch" id="rz-batch" hidden>
+    ${строки.length ? `<div class="card card-output" id="razbor-tasks"><div class="rz-tools">
+        <button class="btn-sm" id="rz-all" type="button">Выделить все</button>
+        <button class="btn-sm" id="rz-none" type="button">Снять выделение</button></div>
+      <div class="rz-batch" id="rz-batch" hidden>
         <span id="rz-batch-n"></span>
         <button class="btn-primary btn-sm" id="rz-batch-yes" type="button">В задачу — выбранные</button>
         <button class="btn-sm" id="rz-batch-no" type="button">Убрать — выбранные</button>
+        <button class="btn-sm rz-del" id="rz-batch-del" type="button">Удалить выбранное…</button>
         <span class="page-sub" id="rz-batch-hint"></span></div>
       <div class="table-scroll"><table class="agreements-table rz-table">
       <thead><tr><th></th><th>Встреча</th><th>Формулировка</th><th>Что это</th><th>Срок</th><th>Решение</th></tr></thead>
@@ -215,11 +219,12 @@ function пакетКарточекРазбора($list, строки) {
   $list.insertAdjacentHTML("beforebegin", `<div class="card rz-batch" id="rz-card-batch" hidden><span id="rz-card-n"></span>
     <button class="btn-primary btn-sm" id="rz-card-yes" type="button">Принять — выбранные</button>
     <button class="btn-sm" id="rz-card-no" type="button">Оставить как есть — выбранные</button>
+    <button class="btn-sm rz-del" id="rz-card-del" type="button">Удалить выбранное…</button>
     <span class="page-sub" id="rz-card-hint"></span></div>`);
   const выбранные = () => карточки.filter(к => к.querySelector(".rz-card-check")?.checked);
   const обновить = () => {
     const в = выбранные();
-    document.getElementById("rz-card-batch").hidden = в.length < 2;
+    document.getElementById("rz-card-batch").hidden = в.length < 1;
     const один = new Set(в.map(к => к.dataset.rzKey)).size === 1;
     document.getElementById("rz-card-n").textContent = `Выбрано карточек: ${в.length}`;
     document.getElementById("rz-card-yes").disabled = !один;
@@ -236,6 +241,7 @@ function пакетКарточекРазбора($list, строки) {
   };
   document.getElementById("rz-card-yes").addEventListener("click", пакет("to_task", "Принять"));
   document.getElementById("rz-card-no").addEventListener("click", пакет("drop", "Оставить как есть"));
+  document.getElementById("rz-card-del").addEventListener("click", пакет("delete", "Удалить выбранное"));
 }
 
 function навестиСтрокиРазбора() {
@@ -260,7 +266,7 @@ function навестиСтрокиРазбора() {
   const выбранные = () => [...$t.querySelectorAll("tr[data-rz-id]")].filter(tr => tr.querySelector(".rz-check")?.checked);
   const обновить = () => {
     const в = выбранные();
-    $bar.hidden = в.length < 2;
+    $bar.hidden = в.length < 1;                       // «Удалить выбранное» работает и с одной отметкой
     const один = new Set(в.map(tr => tr.dataset.rzKey)).size === 1;
     document.getElementById("rz-batch-n").textContent = `Выбрано: ${в.length}`;
     document.getElementById("rz-batch-yes").disabled = !один;
@@ -268,6 +274,15 @@ function навестиСтрокиРазбора() {
     document.getElementById("rz-batch-hint").textContent = один ? "" : "Пакетное решение — для строк одного вида одной встречи";
   };
   $t.querySelectorAll(".rz-check").forEach(ч => ч.addEventListener("change", обновить));
+  // «Выделить все / снять выделение» — по строкам текущего списка (вид и отбор уже применены)
+  document.getElementById("rz-all")?.addEventListener("click", () => {
+    $t.querySelectorAll(".rz-check").forEach(ч => { ч.checked = true; });
+    обновить();
+  });
+  document.getElementById("rz-none")?.addEventListener("click", () => {
+    $t.querySelectorAll(".rz-check").forEach(ч => { ч.checked = false; });
+    обновить();
+  });
   const пакет = (действие, слово) => async () => {
     const в = выбранные();
     if (!(await confirmDialog(`${слово} — ${в.length} строк одной встречи?`, слово))) return;
@@ -277,6 +292,7 @@ function навестиСтрокиРазбора() {
   };
   document.getElementById("rz-batch-yes")?.addEventListener("click", пакет("to_task", "В задачу"));
   document.getElementById("rz-batch-no")?.addEventListener("click", пакет("drop", "Убрать"));
+  document.getElementById("rz-batch-del")?.addEventListener("click", пакет("delete", "Удалить выбранное"));
 }
 
 // Подсветка говорящего после отрисовки «Разбора голосов» (26.10.2026). В ERP таблица адресов запомнила прежнюю функцию —

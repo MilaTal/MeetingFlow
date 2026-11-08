@@ -428,8 +428,11 @@ def mount(r: APIRouter, ctx: Ctx) -> None:
             "auto_backup": {"last_at": bfiles[0].get("at") if bfiles else None, "interval_hours": getattr(backups, "hours", None),
                             "keep_last": getattr(backups, "keep", None)},
             "under_question_mark": bool(store.get_setting("show_doubt_mark", None, True)),
-            "conflict_drop_unresolved_days": int(store.get_setting("card_cleanup_days", None, None)
-                                                 or ctx.theme.get("operator.card_cleanup_days", 3) or 3),
+            # Срок хранения строк «Разбора» — 10 дней (правки ERP/Планёрки 03–06.11, п. 11); своя настройка,
+            # затем прежняя общая чистка карточек, затем 10
+            "conflict_drop_unresolved_days": int(store.get_setting("conflict_drop_unresolved_days", None, None)
+                                                 or store.get_setting("card_cleanup_days", None, None)
+                                                 or 10),
             "under_question_expire_days": int(store.get_setting("card_cleanup_days", None, None)
                                               or ctx.theme.get("operator.card_cleanup_days", 3) or 3),
             "service_log_keep_days": int(store.get_setting("service_log_keep_days", None, 7) or 0),

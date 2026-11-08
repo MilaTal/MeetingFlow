@@ -20,7 +20,8 @@ from ...core.types import CardStatus, TaskStatus
 from .obshchee import Ctx, iso_dt, loads, ru_date, to_date
 
 NORM = 15
-DAYS = 7
+# Срок хранения строк «Разбора» — 10 дней (правки ERP/Планёрки 03–06.11, п. 11): было 7.
+DAYS = 10
 FIELD_OF = {"held_task": "ungrounded_task", "task_doubt": "ungrounded_task", "assign_person": "responsible",
             "confirm_person": "person", "due_unconfirmed": "due_date", "closing_candidate": "status",
             "mass_closing": "status", "review_finding": "review_finding", "member_note": "member_note",
@@ -347,8 +348,8 @@ def mount(r: APIRouter, ctx: Ctx) -> None:
     @r.post("/razbor/batch")
     def batch(payload: BatchIn, request: Request):
         u = ctx.need_admin(request)
-        if payload.action not in ("to_task", "drop"):
-            raise HTTPException(400, "Решения: «В задачу» или «Убрать»")
+        if payload.action not in ("to_task", "drop", "delete"):
+            raise HTTPException(400, "Решения: «В задачу», «Убрать» или «Удалить выбранное»")
         done, errors = 0, []
         keys = set()
         for i in payload.ids:
@@ -358,6 +359,15 @@ def mount(r: APIRouter, ctx: Ctx) -> None:
                     if not t:
                         raise ValueError("задачи нет")
                     keys.add(t.get("source_meeting_id"))
+                    if payload.action == "delete":
+                        # «Удалить выбранное»: строку убираем из «Разбора» — задача остаётся в реестре, но
+                        # пометки «под вопросом» у неё больше нет; открытые карточки сомнения закрываются.
+                        pipe.reg.clear_doubt(i, ctx.name(u), "убрано из «Разбора»")
+                        for c in store.q("SELECT id, payload FROM cards WHERE status='open' AND kind='task_doubt'"):
+                            if loads(c["payload"], {}).get("task_id") == i:
+                                store.delete("cards", c["id"])
+                        done += 1
+                        continue
                     if payload.action == "to_task":
                         pipe.reg.clear_doubt(i, ctx.name(u), "подтверждена в «Разборе»")
                     else:
@@ -372,6 +382,10 @@ def mount(r: APIRouter, ctx: Ctx) -> None:
                     if not pa:
                         raise ValueError("строки нет")
                     keys.add(pa.get("meeting_id"))
+                    if payload.action == "delete":
+                        store.delete("possible_assignments", i)   # строка-предложение уходит насовсем
+                        done += 1
+                        continue
                     if payload.action == "to_task":
                         vp.в_задачу(store, pipe.reg, pa, ctx.name(u))
                     else:
@@ -381,6 +395,10 @@ def mount(r: APIRouter, ctx: Ctx) -> None:
                     if not c or c["status"] != "open":
                         raise ValueError("карточка уже закрыта")
                     keys.add((c["kind"], c.get("meeting_id")))
+                    if payload.action == "delete":
+                        store.delete("cards", i)                       # карточка уходит из «Разбора» насовсем
+                        done += 1
+                        continue
                     decide_card(c, ConflictIn(action="accept" if payload.action == "to_task" else "reject"), u)
                 else:
                     raise HTTPException(400, "Неизвестный вид строки")
