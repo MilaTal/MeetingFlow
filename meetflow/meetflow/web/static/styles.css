@@ -1702,3 +1702,14 @@ mark.zapis-mark { background: var(--accent-soft); color: inherit; box-shadow: in
 .pl-svg { width: 16px; height: 16px; fill: none; stroke: currentColor; stroke-width: 1.6;
   stroke-linecap: round; stroke-linejoin: round; }
 .pl-row.pl-on .pl-ico { opacity: 1; }
+
+/* Выбранный проект: стрелка и вложенное меню (вариант А, 08.11.2026) */
+.pl-row { position: relative; }
+.pl-arrow { border: 0; background: none; color: var(--text-muted); cursor: pointer; padding: 2px 4px;
+  font-size: 12px; line-height: 1; }
+.pl-arrow:hover { color: var(--text); }
+.pl-nested { display: flex; flex-direction: column; margin: 2px 0 6px 34px; }
+.pl-nested[hidden] { display: none; }
+.pl-nested-item { padding: 4px 8px; border-radius: 6px; color: var(--text-muted); font-size: 13.5px;
+  text-decoration: none; }
+.pl-nested-item:hover { background: var(--field-bg); color: var(--text); }

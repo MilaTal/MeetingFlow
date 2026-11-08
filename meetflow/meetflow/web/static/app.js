@@ -1716,17 +1716,33 @@ function рисоватьПроекты() {
     : п.general
       ? '<svg class="pl-svg" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h16M4 12h16M4 17h16"/></svg>'
       : '<svg class="pl-svg" viewBox="0 0 24 24" aria-hidden="true"><path d="M3 7a2 2 0 012-2h4l2 2h8a2 2 0 012 2v8a2 2 0 01-2 2H5a2 2 0 01-2-2z"/></svg>';
+  // Вложенное меню проекта под выбранной строкой (вариант А, решение владелицы 08.11.2026): те же пункты, что в левом
+  // меню, но привязанные к проекту. Стрелка сворачивает и разворачивает; состояние помнится в памяти вкладки.
+  const свёрнут = () => sessionStorage.getItem("проектСвёрнут") === "1";
+  const менюПроектаСтрокой = (п) => `<div class="pl-nested"${свёрнут() ? " hidden" : ""}>
+      <a class="pl-nested-item" data-route="meetings" href="#meetings">Реестр встреч</a>
+      <a class="pl-nested-item" data-route="prep" href="#prep">Подготовка встречи</a>
+      <a class="pl-nested-item" data-route="agreements" href="#agreements">Договорённости по проекту</a>
+      <a class="pl-nested-item" data-route="status" href="#status">Статус проекта</a></div>`;
   const строка = (п) => `<div class="pl-row${п.id === тек ? " pl-on" : ""}" data-id="${п.id}">
+      ${п.id === тек && !п.general ? `<button type="button" class="pl-arrow" aria-expanded="${свёрнут() ? "false" : "true"}"
+        aria-label="Свернуть или развернуть меню проекта" title="Свернуть или развернуть меню проекта">${свёрнут() ? "▸" : "▾"}</button>` : ""}
       <button type="button" class="pl-name" role="option" aria-selected="${п.id === тек}" title="${esc(п.label || п.name)}"
         style="padding-left:${8 + 14 * (п.level || 0)}px"><span class="pl-ico">${значок(п)}</span>${esc(п.name)}</button>
       ${супер && !п.general && п.id ? `<button type="button" class="pl-more" aria-label="Действия с проектом «${esc(п.name)}»" aria-haspopup="menu">…</button>` : ""}</div>`;
-  $l.innerHTML = общие.map(строка).join("") + видимые.map(строка).join("") +
+  const сМеню = (п) => строка(п) + (п.id === тек && !п.general ? менюПроектаСтрокой(п) : "");
+  $l.innerHTML = общие.map(сМеню).join("") + видимые.map(сМеню).join("") +
     (скрыто > 0 ? `<button type="button" class="pl-extra" data-act="more">Показать ещё</button>` : "") +
     строка({ id: 0, name: "Все проекты" }) +
     (супер ? `<button type="button" class="pl-extra" data-act="new">+ Новый проект</button>` : "");
   $l.querySelectorAll(".pl-row").forEach(р => {
     р.querySelector(".pl-name").addEventListener("click", () => выбратьПроект(р.dataset.id));
     р.querySelector(".pl-more")?.addEventListener("click", (e) => { e.stopPropagation(); менюПроекта(р); });
+    р.querySelector(".pl-arrow")?.addEventListener("click", (e) => {
+      e.stopPropagation();
+      sessionStorage.setItem("проектСвёрнут", свёрнут() ? "0" : "1");
+      рисоватьПроекты();
+    });
   });
   $l.querySelector('[data-act="more"]')?.addEventListener("click", () => { _проектыРаскрыты = true; рисоватьПроекты(); });
   $l.querySelector('[data-act="new"]')?.addEventListener("click", (e) => полеПроекта(e.currentTarget, "", async (имя) => {
