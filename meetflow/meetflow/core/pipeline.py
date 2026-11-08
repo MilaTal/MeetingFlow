@@ -50,6 +50,7 @@ from . import svedenie_ten                     # сведение кодом в 
 from . import vks_vtoroy_tekst                 # выгрузка ВКС вторым текстом сборки (записка 05.11.2026)
 from . import obekt_ryadom                     # объект рядом с поручением (пункт 8 плана, замер 05.11.2026)
 from . import pereskaz                         # пересказ ИИ — материал, не источник (слово владелицы 06.11.2026)
+from . import protokol_poteri                  # потерянные при пересборке абзацы (вариант А, 08.11.2026)
 from .team_sync import sync_people
 from ..connectors.team_shared import team_shared_state
 from .dates import due_text, lenient_date
@@ -1668,8 +1669,18 @@ class MeetingPipeline:
                     self.cards.open(project_id, "suspicious_source", "В протоколе скрыт служебный текст системы",
                                     {"filter": "output"}, meeting_id)
                 built = now()
+                # Пересборка потеряла абзацы (вариант А, 08.11.2026): сравнение дословное и кодом, протокол не
+                # меняется — оператору карточка с прежним текстом, чтобы потеря не была молчаливой
+                прежний_протокол = meeting.get("protocol_md") or ""
                 self.s.update("meetings", meeting_id, protocol_md=protocol_md, protocol_built_at=built,
                               built_from=[s["name"] for s in srcs])
+                if прежний_протокол:
+                    потеряно = protokol_poteri.потерянные(прежний_протокол, protocol_md)
+                    if потеряно:
+                        ещё_не_сохранена = self.s.q(
+                            "SELECT COUNT(*) AS n FROM protocol_versions WHERE meeting_id=?", (meeting_id,))[0]["n"] + 1
+                        self.cards.open(project_id, "technical", protokol_poteri.заголовок(len(потеряно)),
+                                        protokol_poteri.данные(потеряно, ещё_не_сохранена), meeting_id)
                 # версия: прежняя остаётся в истории; модель — та, что написала текст (43, 47)
                 wrote = budget.answered.get("protocol") or budget.answered.get("extract_tasks") or []
                 if budget.answered.get("_external"):
