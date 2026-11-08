@@ -416,6 +416,35 @@ class MeetingPipeline:
             return ""
         return vks_vtoroy_tekst.кусок_по_времени(текст, min(времена), max(времена))
 
+    def _vks_polnota(self, project_id: int, meeting_id: int, mdate: str | None) -> int:
+        """Проверка полноты по выгрузке ВКС — кодом, без модели (записка 05.11.2026, п. 4).
+
+        Окна выгрузки по 2 минуты, где есть признаки поручения (кому-то сделать и срок или дата), а в протоколе и
+        реестре на это время нет ни задачи, ни пункта, дают карточку «возможна потерянная задача, время …». Задачу
+        из окна не заводят: слово в фразе не делает факта (правило отрицаний), решает человек."""
+        текст = getattr(self, "_второй_текст", "") or ""
+        if not текст:
+            return 0
+        задачи = self.s.q("SELECT source_quote FROM tasks WHERE source_meeting_id=?", (meeting_id,))
+        единицы = self.s.q("SELECT ts FROM units WHERE meeting_id=?", (meeting_id,))
+        времена = vks_vtoroy_tekst.времена_задач(задачи) + vks_vtoroy_tekst.времена_единиц(единицы)
+        окна = vks_vtoroy_tekst.потерянные_окна(текст, времена)
+        дата = ""
+        if mdate:
+            try:
+                дата = datetime.fromisoformat(str(mdate)[:10]).strftime("%d.%m.%Y")
+            except ValueError:
+                дата = str(mdate)[:10]
+        for окно in окна:
+            время = f"{окно.от // 60:02d}:{окно.от % 60:02d}–{окно.до // 60:02d}:{окно.до % 60:02d}"
+            self.cards.open(project_id, "held_task", f"Возможна потерянная задача, время {время}",
+                            {"description": vks_vtoroy_tekst.фраза_поручения(окно.текст()), "reasons": ["vks_window"],
+                             "quote": окно.текст()[:2000], "from": "выгрузка ВКС",
+                             "window": время, "meeting_date": дата}, meeting_id)
+        self.journal.write(purpose="vks_polnota", meeting_id=meeting_id, okon=len(окна),
+                           опор=len(времена), знаков=len(текст))
+        return len(окна)
+
     def _participants(self, meeting_id: int, meeting: dict) -> tuple[list[str], str]:
         """ФИО, опознанные по голосам в источниках встречи, и ведущий — для раздела «Участники».
 
@@ -1552,6 +1581,12 @@ class MeetingPipeline:
                                     f"Задача не вошла в пересборку, но правилась человеком: {(t['description'] or '')[:100]}",
                                     {"task_id": t["id"], "description": t["description"], "edits": edits,
                                      "when": res["when"]}, meeting_id)
+                # Проверка полноты по выгрузке ВКС — кодом, после того как задачи и единицы легли в базу
+                # (записка 05.11.2026, п. 4): окно без опоры в протоколе и реестре — карточка, не задача
+                try:
+                    self._vks_polnota(project_id, meeting_id, mdate)
+                except Exception as exc:  # noqa: BLE001 — проверка полноты не отменяет собранный протокол
+                    self.step_failed(project_id, meeting_id, "Проверка полноты по выгрузке ВКС", exc)
                 # Второй судья в тень: один вызов на сборку, пары своей встречи от 0,4; ничего не снимает
                 # и не меняет — только строка в `vtoroy_sudya.jsonl` (записка 05.11.2026).
                 vtoroy_sudya.прогнать(self, project_id, meeting_id, budget)
