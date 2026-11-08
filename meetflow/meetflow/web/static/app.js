@@ -1747,7 +1747,11 @@ function рисоватьПроекты() {
     строка({ id: 0, name: "Все проекты" }) +
     (супер ? `<button type="button" class="pl-extra" data-act="new">+ Новый проект</button>` : "");
   $l.querySelectorAll(".pl-row").forEach(р => {
-    р.querySelector(".pl-name").addEventListener("click", () => выбратьПроект(р.dataset.id));
+    р.querySelector(".pl-name").addEventListener("click", () => {
+      выбратьПроект(р.dataset.id);
+      // Слово владелицы 08.11.2026: при выборе проекта (и «Общих встреч») справа сразу открывается реестр задач.
+      if (!/^dashboard/.test(location.hash.replace(/^#/, ""))) location.hash = "#dashboard";
+    });
     р.querySelector(".pl-more")?.addEventListener("click", (e) => { e.stopPropagation(); менюПроекта(р); });
     р.querySelector(".pl-arrow")?.addEventListener("click", (e) => {
       e.stopPropagation();
