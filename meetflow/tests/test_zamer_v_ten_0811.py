@@ -74,3 +74,21 @@ def test_сравнение_можно_выключить(monkeypatch):
     assert svedenie_ten.сравнение_включено() is False
     счёт = svedenie_ten.посчитать([{"description": "Подготовить график", "responsible": "Петрова Анастасия"}], "")
     assert "сейчас_рядом" not in счёт
+
+
+def test_сравнение_пропускается_на_большом_наборе():
+    """200 задач: сравнение стоит ещё один перебор пар — пропускаем и говорим это числом."""
+    from meetflow.core import svedenie_ten
+
+    задачи = [{"description": f"Задача номер {i} по складу", "responsible": "Сидоров Пётр"} for i in range(200)]
+    счёт = svedenie_ten.посчитать(задачи, "", сравнение=True)
+    assert "сейчас_рядом" not in счёт
+    assert счёт["сравнение_пропущено"] == 200
+
+
+def test_сравнение_считается_на_небольшом_наборе():
+    from meetflow.core import svedenie_ten
+
+    задачи = [{"description": f"Задача номер {i} по складу", "responsible": "Сидоров Пётр"} for i in range(10)]
+    счёт = svedenie_ten.посчитать(задачи, "", сравнение=True)
+    assert "сейчас_рядом" in счёт and "сравнение_пропущено" not in счёт
