@@ -81,7 +81,10 @@ SCHEMA: dict[str, dict[str, str]] = {
     # версии протокола (находки стенда 43, 47; решение владельца 15.10.26): прежняя не затирается; model — модель,
     # которая написала текст (ответившая точка маршрута), а не настроенная основная
     "protocol_versions": {"id": "INTEGER PRIMARY KEY", "meeting_id": "INTEGER", "version": "INTEGER",
-                          "protocol_md": "TEXT", "model": "TEXT DEFAULT ''", "built_at": "TEXT"},
+                          "protocol_md": "TEXT", "model": "TEXT DEFAULT ''", "built_at": "TEXT",
+                          # итог сборки у каждой версии (правки ERP/Планёрки 03–06.11, п. 12): иначе «почему так
+                          # вышло» не воспроизводится — статус, вызовы, цена, шаги, задачи, источники
+                          "timings": "TEXT DEFAULT ''"},
     # очередь сборок (находки стенда 41, 19): одна за раз, по датам встреч; строка «идёт» — запись о начале
     "build_queue": {"id": "INTEGER PRIMARY KEY", "project_id": "INTEGER", "meeting_id": "INTEGER",
                     "meeting_date": "TEXT DEFAULT ''", "status": "TEXT", "reason": "TEXT DEFAULT ''",

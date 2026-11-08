@@ -872,7 +872,8 @@ def create_app(theme_name: str | None = None, db_path: str | None = None, journa
 
     @app.get("/api/meetings/{mid}/protocol/versions")
     def protocol_versions(mid: int, u: dict = Depends(admin)):
-        return store.q("SELECT id, version, model, built_at FROM protocol_versions WHERE meeting_id=? "
+        # итог сборки у каждой версии (правки ERP/Планёрки 03–06.11, п. 12): у ручных правок он свой
+        return store.q("SELECT id, version, model, built_at, timings FROM protocol_versions WHERE meeting_id=? "
                        "ORDER BY version DESC", (mid,))
 
     @app.post("/api/meetings/{mid}/protocol/edit")
@@ -884,7 +885,8 @@ def create_app(theme_name: str | None = None, db_path: str | None = None, journa
         last = store.q("SELECT MAX(version) AS v FROM protocol_versions WHERE meeting_id=?", (mid,))
         version = int((last[0]["v"] if last and last[0]["v"] is not None else 0) or 0) + 1
         store.insert("protocol_versions", meeting_id=mid, version=version, protocol_md=body.markdown,
-                     model="правка", built_at=now())
+                     model="правка", built_at=now(),
+                     timings=json.dumps({"source": "правка вручную", "version": version}, ensure_ascii=False))
         store.update("meetings", mid, protocol_md=body.markdown)
         return {"ok": True, "version": version}
 
@@ -897,7 +899,9 @@ def create_app(theme_name: str | None = None, db_path: str | None = None, journa
         last = store.q("SELECT MAX(version) AS v FROM protocol_versions WHERE meeting_id=?", (mid,))
         version = int((last[0]["v"] if last and last[0]["v"] is not None else 0) or 0) + 1
         store.insert("protocol_versions", meeting_id=mid, version=version, protocol_md=row[0]["protocol_md"],
-                     model=f"восстановлена версия {body.version}", built_at=now())
+                     model=f"восстановлена версия {body.version}", built_at=now(),
+                     timings=json.dumps({"source": f"восстановлена версия {body.version}", "version": version},
+                                        ensure_ascii=False))
         store.update("meetings", mid, protocol_md=row[0]["protocol_md"])
         return {"ok": True, "version": version}
 

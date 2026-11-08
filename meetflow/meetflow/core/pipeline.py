@@ -951,6 +951,7 @@ class MeetingPipeline:
         closing_cards: list = []          # (задача, цитата, почему[, описание])
         removals: list[tuple[int, str]] = []
         sections: dict[str, str] = {}
+        версия_id: int | None = None      # строка версии этого прогона — итог сборки пишется в неё в конце
         stopped: BudgetExceeded | None = None     # остановка по пределу: сделанное сохраняется (01/10)
         closing_mentioned = 0                     # «названо больше 60» — в журнал прогона, не в документ (13.10)
         limited = False                           # дополнение (единицы, проверка) остановлено пределом (01/8)
@@ -1676,8 +1677,9 @@ class MeetingPipeline:
                     self.cards.open(project_id, "event", f"Протокол встречи {meeting.get('date') or ''} собран внешней моделью",
                                     {"points": sorted(set(budget.answered["_external"]))}, meeting_id)
                 n = self.s.q("SELECT COUNT(*) AS n FROM protocol_versions WHERE meeting_id=?", (meeting_id,))[0]["n"]
-                self.s.insert("protocol_versions", meeting_id=meeting_id, version=n + 1, protocol_md=protocol_md,
-                              model=", ".join(dict.fromkeys(wrote)), built_at=built)
+                версия_id = self.s.insert("protocol_versions", meeting_id=meeting_id, version=n + 1,
+                                         protocol_md=protocol_md, model=", ".join(dict.fromkeys(wrote)),
+                                         built_at=built)
         except Exception as e:  # всё откатилось — реестр не наполовину
             rep.status, rep.detail = "error", "Сбой при сохранении — изменения не применены."
             self.cards.open(project_id, "technical", "Сбой сохранения прогона", {"error": type(e).__name__},
@@ -1746,6 +1748,11 @@ class MeetingPipeline:
                            **({"uchastniki": rep.participants} if rep.participants else {}),
                            answered_by={k: sorted(set(v)) for k, v in budget.answered.items() if not k.startswith("_")},
                            **self.tool_info)
+        # Итог сборки — к версии протокола (правки ERP/Планёрки 03–06.11, п. 12): у каждой версии свой, чтобы
+        # «почему так вышло» воспроизводилось. Пишется в конце: к этому месту итог уже сложился целиком.
+        if версия_id is not None:
+            self.s.update("protocol_versions", версия_id,
+                          timings=json.dumps(getattr(rep, "__dict__", {}), ensure_ascii=False, default=str)[:20000])
         return rep
 
     # ---------------------------------------------------------------- помощники
