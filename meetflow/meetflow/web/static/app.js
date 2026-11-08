@@ -3709,10 +3709,13 @@ async function renderMeetingProtocol(id, verdict, verdictFor) {
         ${draftVerdict ? `<span class="src-hint" style="color:var(--danger)">Протокол собран, но не сохранился — сохранить можно кнопкой над документом</span>` : ""}
         <span class="src-bar-spacer"></span>
         <span class="src-hint" id="prepare-minutes-hint"></span>
-        <button class="btn-primary" id="prepare-minutes-btn" disabled title="${hasMin ? "Новая версия станет текущей; прежняя версия не удаляется — остаётся в базе" : "Протокол сохранится с датой встречи, задачи и статусы применятся"}">${идётСборкаС ? "Генерирую…" : (hasMin ? "↻ Пересобрать протокол" : "Сформировать протокол")}</button>
+        <button class="btn-primary" id="prepare-minutes-btn" ${можноПересобрать ? "" : "hidden"} disabled title="${hasMin ? "Новая версия станет текущей; прежняя версия не удаляется — остаётся в базе" : "Протокол сохранится с датой встречи, задачи и статусы применятся"}">${идётСборкаС ? "Генерирую…" : (hasMin ? "↻ Пересобрать протокол" : "Сформировать протокол")}</button>
       </div>
     </div>` : "";
 
+  // «Пересобрать протокол» — только админ и суперадмин (слово владелицы 08.11.2026): у участника кнопки нет
+  // вовсе, а не «нажми и получи 403».
+  const можноПересобрать = isAdmin();
   $main.innerHTML = `
     ${meetingDocHead({ backHref, backLabel, meeting, active: "protocol", hasPlan: !!(planDoc && planDoc.available), hasMin,
         generatedAt: hasMin ? minutes.generated_at : null, exportUrl: hasMin ? `/meetings/${id}/minutes/export` : null,
