@@ -1751,8 +1751,9 @@ function рисоватьПроекты() {
   $l.querySelectorAll(".pl-row").forEach(р => {
     р.querySelector(".pl-name").addEventListener("click", () => {
       выбратьПроект(р.dataset.id);
-      // Слово владелицы 08.11.2026: при выборе проекта (и «Общих встреч») справа сразу открывается реестр задач.
-      if (!/^dashboard/.test(location.hash.replace(/^#/, ""))) location.hash = "#dashboard";
+      // Слово владелицы 08.11.2026 (уточнение по скриншоту): при переключении проекта и «Общих встреч» справа
+      // открывается вкладка «Реестр встреч», а не реестр задач — «куда-то потерялась задача».
+      if (!/^meetings/.test(location.hash.replace(/^#/, ""))) location.hash = "#meetings";
     });
     р.querySelector(".pl-more")?.addEventListener("click", (e) => { e.stopPropagation(); менюПроекта(р); });
     р.querySelector(".pl-arrow")?.addEventListener("click", (e) => {

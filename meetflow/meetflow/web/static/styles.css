@@ -1733,7 +1733,10 @@ mark.zapis-mark { background: var(--accent-soft); color: inherit; box-shadow: in
 .pl-nested-item:hover { background: var(--field-bg); color: var(--text); }
 
 /* Поиск проекта по имени в шапке блока (08.11.2026) */
-.pl-head { display: flex; align-items: center; gap: 8px; }
-.pl-search { flex: 1 1 auto; min-width: 0; font-size: 12.5px; padding: 3px 8px; border-radius: 6px;
+.pl-head { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 8px; }
+/* Панель узкая: заголовок и поле — двумя строками, иначе «Встречи по» и «Поиск про» обрезаются (скриншот
+   владелицы 08.11.2026). Поле — во всю ширину под заголовком. */
+.pl-head > span { flex: 1 1 100%; white-space: nowrap; }
+.pl-search { flex: 1 1 100%; min-width: 0; font-size: 12.5px; padding: 3px 8px; border-radius: 6px;
   border: 1px solid var(--reg-line); background: var(--field-bg); color: var(--text); }
 .pl-search::placeholder { color: var(--text-muted); }
