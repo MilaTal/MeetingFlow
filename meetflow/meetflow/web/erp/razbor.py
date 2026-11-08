@@ -112,7 +112,10 @@ def mount(r: APIRouter, ctx: Ctx) -> None:
                            candidates=[{"id": x.get("id"), "name": x.get("name"), "note": x.get("note") or ""}
                                        for x in p["candidates"]], task_description=p.get("description"))
         elif kind in ("assign_person", "department_mismatch"):
-            out.update(source="unconfirmed_person", current_value=p.get("named") or p.get("assignee") or p.get("name") or "",
+            # ключ карточки — `mention` (так его пишет конвейер); `named`/`assignee`/`name` оставлены для старых
+                       # карточек: прежде читался только `named`, и в «Разборе» имя было пустым у всех 26 из 26
+                       out.update(source="unconfirmed_person",
+                       current_value=p.get("mention") or p.get("named") or p.get("assignee") or p.get("name") or "",
                        identity="namesakes" if p.get("candidates") else None,
                        candidates=[{"id": x.get("id"), "name": x.get("name"), "note": x.get("note") or ""}
                                    for x in (p.get("candidates") or [])], no_contact=not p.get("candidates"))
