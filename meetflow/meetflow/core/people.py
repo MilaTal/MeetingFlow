@@ -103,6 +103,18 @@ class Team:
         exact = self._by_org(exact, org_toks or self._org_tokens(context)) if len(exact) > 1 else exact
         if len(exact) == 1 and len(toks) >= 2:
             return Match(exact[0], via="exact")
+        # Имя + отчество (слово на -вич/-вна/-чна) — корпоративный стиль: «Андрей Алексеевич» = Шаравин Андрей
+        # Алексеевич. Ищем человека, у которого в полном ФИО есть и имя, и отчество; единственный — это он
+        # (слово владелицы 08.11.2026; раньше отчество не участвовало вовсе).
+        отчества = [t for t in toks if len(t) > 4 and t.endswith(("вич", "вна", "чна", "ична"))]
+        if отчества:
+            имя_рядом = [t for t in toks if t not in отчества and len(t) > 1][:1]
+            if имя_рядом:
+                пара = [чел for чел in self.people
+                        if all(слово in чел.full_name.lower().replace("ё", "е")
+                               for слово in (имя_рядом[0], отчества[0]))]
+                if len(пара) == 1:
+                    return Match(пара[0], via="имя+отчество")
         full = [p for p in self.people if self._full_hit(p, toks)]
         if len(full) == 1:
             return Match(full[0], via="surname+name")
