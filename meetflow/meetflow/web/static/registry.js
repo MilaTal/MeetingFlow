@@ -223,6 +223,65 @@ function кнопкиПодВопросомHtml(t) {
   return `<span class="pod-acts"><a class="pod-razbor" href="#razbor/tasks" data-task="${t.id}" title="Подтвердить или снять — в «Разборе», вид «Задачи»">решить в «Разборе»</a></span>`;
 }
 
+// --- Массовые действия в реестре задач (пункт 5 плана 08.11.2026, задание владелицы 06.11 «удалить выделенное»):
+// колонка отметок первой, полоса при одной отметке и больше: «Пометить все» по текущему списку (только видимые строки),
+// «Снять выделение», «Удалить выделенное» — одно подтверждение, отсчёт с «Отменить» на всю пачку (как у галочки).
+// Право проверяет сервер (`/tasks/bulk-delete`), частичный отказ показывается числом.
+function полосаОтметокHtml() {
+  if (!isAdmin()) return "";
+  return `<div class="reg-bulk" id="reg-bulk" hidden>
+    <span class="reg-bulk-count" id="reg-bulk-count">Отмечено: 0</span>
+    <button type="button" class="btn-sm" id="reg-bulk-all">Пометить все</button>
+    <button type="button" class="btn-sm" id="reg-bulk-none">Снять выделение</button>
+    <button type="button" class="btn-sm reg-bulk-del" id="reg-bulk-del">Удалить выделенное</button>
+  </div>`;
+}
+
+function привязатьОтметки($list) {
+  const bar = document.getElementById("reg-bulk");
+  if (!bar) return;
+  const boxes = () => [...$list.querySelectorAll(".task-check")];
+  const обновить = () => {
+    const n = boxes().filter(b => b.checked).length;
+    bar.hidden = n === 0;
+    document.getElementById("reg-bulk-count").textContent = `Отмечено: ${n}`;
+    document.getElementById("reg-bulk-del").textContent = n ? `Удалить выделенное (${n})` : "Удалить выделенное";
+    const all = document.getElementById("reg-check-all");
+    if (all) all.checked = n > 0 && n === boxes().length;
+  };
+  boxes().forEach(b => b.addEventListener("change", обновить));
+  document.getElementById("reg-check-all")?.addEventListener("change", (e) => {
+    boxes().forEach(b => { b.checked = e.target.checked; });
+    обновить();
+  });
+  document.getElementById("reg-bulk-all").addEventListener("click", () => {
+    boxes().forEach(b => { b.checked = true; });   // «все» — только строки этого списка, с учётом отбора и вида
+    обновить();
+  });
+  document.getElementById("reg-bulk-none").addEventListener("click", () => {
+    boxes().forEach(b => { b.checked = false; });
+    обновить();
+  });
+  document.getElementById("reg-bulk-del").addEventListener("click", async () => {
+    const ids = boxes().filter(b => b.checked).map(b => Number(b.dataset.id));
+    if (!ids.length) return;
+    if (!(await confirmDialog(`Удалить насовсем задачи: ${ids.length}? Удаление необратимо — задачи и их история будут удалены.`,
+                              "Удалить выделенное"))) return;
+    startUndoCountdown({
+      anchor: document.getElementById("reg-bulk-del"),
+      text: (n) => `Удаляется ${ids.length} задач через ${n}с`,
+      onCommit: async () => {
+        try {
+          const r = await api("/tasks/bulk-delete", { method: "POST", json: { ids } });
+          toast(`Удалено: ${r.deleted}${r.refused ? `, отказано: ${r.refused}` : ""}`);
+          render();
+        } catch (e) { toast(e.message, true); }
+      },
+    });
+  });
+  обновить();
+}
+
 function реестрСтрока(t, i, closed, вид) {
   const due = taskDueText(t);
   const данные = `data-task-id="${t.id}" data-proj-id="${t.project_id || ""}" data-desc="${esc(t.description)}" data-resp="${esc(реестрОтветственный(t))}" data-status="${esc(t.status)}" data-due="${t.due_date ? esc(String(t.due_date).slice(0, 10).split("-").reverse().join(".")) : ""}"`;
@@ -235,6 +294,7 @@ function реестрСтрока(t, i, closed, вид) {
   if (closed) {
     return `
     <tr ${данные}>
+      ${isAdmin() ? `<td class="task-check-cell"><input type="checkbox" class="task-check" data-id="${t.id}" aria-label="Отметить задачу"></td>` : ""}
       <td class="task-num-cell"><span class="task-num">${i + 1}</span></td>
       <td class="task-desc-cell">${реестрОписание(t, true)}</td>
       <td class="task-resp-cell" data-label="Ответственный">${taskResponsibleHtml(t)}</td>
@@ -246,6 +306,7 @@ function реестрСтрока(t, i, closed, вид) {
   }
   return `
     <tr ${данные}>
+      ${isAdmin() ? `<td class="task-check-cell"><input type="checkbox" class="task-check" data-id="${t.id}" aria-label="Отметить задачу"></td>` : ""}
       <td class="task-num-cell"><span class="task-num">${i + 1}</span></td>
       <td class="task-desc-cell">${реестрОписание(t, false)}</td>
       <td class="task-resp-cell" data-label="Ответственный">${taskResponsibleHtml(t)}</td>
@@ -426,6 +487,7 @@ async function renderRegistry(опции = {}) {
       <div class="feed-sub">Задачи, в которых усомнился код. Они уже в реестре и стоят в «Все в работе» с пометкой «под вопросом».
         «Подтвердить» — задача остаётся в работе без пометки; «Снять» — задача снимается. Без решения за тот же срок, что у нерешённых карточек «Конфликтов», снимается сама.</div></div></div>
     <div class="live-chips" id="reg-chips" hidden></div>
+    ${полосаОтметокHtml()}
     <div id="reg-list" class="card card-output reg-card"><div class="empty-state">Загрузка…</div></div>` : `<div class="reg-top reg-top-poisk">
     <div class="live-views reg-live-views" aria-label="Актуализировать задачи из реестра">
       <div class="reg-search scr-search"><input type="search" id="reg-q" placeholder="Поиск: слова задачи, фамилия или проект" value="${esc(s.q)}" autocomplete="off" aria-label="Поиск по реестру задач"></div>
@@ -441,6 +503,7 @@ async function renderRegistry(опции = {}) {
     <div class="live-chips" id="reg-chips" hidden></div>
     <div id="reg-markers"></div>
     <div class="reg-closed-head" id="reg-closed-head" hidden><b>${РЕЕСТР_ЗАКРЫТЫЕ}</b> · <button type="button" class="link" id="reg-back">← к задачам в работе</button></div>
+    ${полосаОтметокHtml()}
     <div id="reg-list" class="card card-output reg-card"><div class="empty-state">Загрузка…</div></div>`;
 
   let активные = [], закрытые = null, найдено = null;
@@ -518,9 +581,10 @@ async function renderRegistry(опции = {}) {
     const админ = isAdmin();
     // Закрытые — одна таблица (решение владельца 13.10.26): № | Задача | Ответственный | Срок | Закрыта | Итог, по дате закрытия,
     // новые сверху; шапка серая. Активные — колонки старого реестра 8000 без «Статуса на дату».
+    const колонкаОтметок = админ ? `<th class="task-check-cell" title="Отметки для массовых действий"><input type="checkbox" id="reg-check-all" aria-label="Пометить все в этом списке"></th>` : "";
     const заголовокТаблицы = closed
-      ? `<thead><tr><th class="task-num-cell" title="Номер по порядку в этой таблице">№</th>${шапка("text", "Задача", "task-desc-cell")}${шапка("who", "Ответственный", "task-resp-cell")}<th class="task-due-cell" title="Срок выполнения">Срок</th>${шапка("closed", "Закрыта", "task-due-cell task-closed-cell", "Дата закрытия или снятия")}<th class="task-result-cell">Итог</th>${админ ? '<th class="task-act-cell"></th>' : ""}</tr></thead>`
-      : `<thead><tr><th class="task-num-cell" title="Номер по порядку в этой таблице">№</th>${шапка("text", "Описание", "task-desc-cell")}${шапка("who", "Ответственный", "task-resp-cell")}${шапка("due", "Срок", "task-due-cell", "Срок выполнения")}${шапка("comment", "Комментарии", "task-note-cell", "Комментарии и выполнение: последняя отметка и кнопка «Актуализировать»")}${админ ? '<th class="task-act-cell"></th><th class="task-act-cell"></th>' : ""}</tr></thead>`;
+      ? `<thead><tr>${колонкаОтметок}<th class="task-num-cell" title="Номер по порядку в этой таблице">№</th>${шапка("text", "Задача", "task-desc-cell")}${шапка("who", "Ответственный", "task-resp-cell")}<th class="task-due-cell" title="Срок выполнения">Срок</th>${шапка("closed", "Закрыта", "task-due-cell task-closed-cell", "Дата закрытия или снятия")}<th class="task-result-cell">Итог</th>${админ ? '<th class="task-act-cell"></th>' : ""}</tr></thead>`
+      : `<thead><tr>${колонкаОтметок}<th class="task-num-cell" title="Номер по порядку в этой таблице">№</th>${шапка("text", "Описание", "task-desc-cell")}${шапка("who", "Ответственный", "task-resp-cell")}${шапка("due", "Срок", "task-due-cell", "Срок выполнения")}${шапка("comment", "Комментарии", "task-note-cell", "Комментарии и выполнение: последняя отметка и кнопка «Актуализировать»")}${админ ? '<th class="task-act-cell"></th><th class="task-act-cell"></th>' : ""}</tr></thead>`;
     if (!list.length) {
       const почему = найдено && найдено.нужноУточнить ? (найдено.проблема || "Уточните запрос: в нём нет слов для поиска.")
         : (s.q || s.chips.length ? "По запросу задач нет." : closed ? "Завершённых задач нет." : страница ? "Задач под вопросом нет." : "Задач в этом виде нет.");
@@ -547,6 +611,7 @@ async function renderRegistry(опции = {}) {
       if (!фокус) collapseLongTable($list.querySelector("tbody"), ПРЕДЕЛ_РЕЕСТРА, страница ? "pod-tasks" : "reg-tasks", 0, страница ? false : null);
       wireTaskActions();
       привязатьСтроки($list);
+      привязатьОтметки($list);
       if (фокус) {
         const row = $list.querySelector(`tr[data-task-id="${фокус}"]`);
         if (row) { row.classList.add("reg-focus"); row.scrollIntoView({ block: "center" }); }

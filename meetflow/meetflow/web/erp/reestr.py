@@ -120,6 +120,11 @@ class TaskCreate(InModel):
         return _d(v)
 
 
+class BulkIdsIn(InModel):
+    """«Удалить выделенное»: номера задач, отмеченных на экране (не больше 500 за один запрос)."""
+    ids: list[int] = Field(default_factory=list, max_length=500)
+
+
 def _norm(s: str | None) -> str:
     return norm_yo.ключ(s or "") if hasattr(norm_yo, "ключ") else " ".join((s or "").lower().replace("ё", "е").split())
 
@@ -471,24 +476,55 @@ def mount(r: APIRouter, ctx: Ctx) -> None:
                          new_text=payload.description, fix=1)
         return fresh(tid, admin, request)
 
+    def _удалить_насовсем(tid: int) -> dict | None:
+        """Уборка при удалении задачи насовсем: карточки с её номером, связи единиц, история, строка. Общая для
+        одиночного «Удалить» и «Удалить выделенное» (пункт 5 плана 08.11.2026); нет задачи — None."""
+        t = store.get("tasks", tid)
+        if not t:
+            return None
+        for c in store.q("SELECT id, payload FROM cards WHERE payload LIKE ?", (f'%"task_id": {tid}%',)):
+            if loads(c["payload"], {}).get("task_id") == tid:
+                store.delete("cards", c["id"])
+        for u in store.q("SELECT id FROM units WHERE task_id=?", (tid,)):
+            store.update("units", u["id"], task_id=None)
+        for h in store.q("SELECT id FROM task_history WHERE task_id=?", (tid,)):
+            store.delete("task_history", h["id"])
+        store.delete("tasks", tid)
+        return t
+
     @r.delete("/tasks/{tid}", status_code=204)
     def delete_task(tid: int, request: Request, version: int | None = None):
         admin = ctx.need_admin(request)
         with lock:
             t = get_or_404(tid)
             take(t, version, ctx.name(admin))
-            for c in store.q("SELECT id, payload FROM cards WHERE payload LIKE ?", (f'%"task_id": {tid}%',)):
-                if loads(c["payload"], {}).get("task_id") == tid:
-                    store.delete("cards", c["id"])
-            for u in store.q("SELECT id FROM units WHERE task_id=?", (tid,)):
-                store.update("units", u["id"], task_id=None)
-            for h in store.q("SELECT id FROM task_history WHERE task_id=?", (tid,)):
-                store.delete("task_history", h["id"])
-            store.delete("tasks", tid)
+            _удалить_насовсем(tid)
             ctx.sys_msg(f"Задача №{tid} удалена из реестра насовсем",
                         f"Удалил: {ctx.name(admin)}. Формулировка: «{(t.get('description') or '')[:300]}». Встреча-источник: "
                         f"{t.get('source_meeting_id') or 'нет'}. Удаление необратимо.", "tasks")
         return Response(status_code=204)
+
+    @r.post("/tasks/bulk-delete")
+    def bulk_delete(payload: BulkIdsIn, request: Request):
+        """«Удалить выделенное»: одно подтверждение на пачку (пункт 5 плана 08.11.2026). Право проверяется здесь,
+        частичный отказ — числом: задачи, которой уже нет, в ответе считается `refused`, остальные удаляются."""
+        admin = ctx.need_admin(request)
+        ids = list(dict.fromkeys(int(i) for i in payload.ids))[:500]
+        удалены: list[int] = []
+        отказано = 0
+        with lock:
+            for tid in ids:
+                t = _удалить_насовсем(tid)
+                if t is None:
+                    отказано += 1
+                else:
+                    удалены.append(tid)
+            if удалены:
+                ctx.sys_msg(f"Удалены задачи насовсем: {len(удалены)}",
+                            f"Удалил: {ctx.name(admin)}. Номера: {', '.join('№' + str(i) for i in удалены[:100])}"
+                            f"{' и др.' if len(удалены) > 100 else ''}. Удаление необратимо; подтверждение было одно.",
+                            "tasks")
+        return {"deleted": len(удалены), "refused": отказано, "ids": удалены}
 
     @r.post("/tasks/{tid}/operational")
     def set_operational(tid: int, payload: OperationalIn, request: Request):
