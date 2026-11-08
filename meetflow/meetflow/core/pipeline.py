@@ -23,6 +23,7 @@ import os
 from datetime import timedelta
 import re
 import threading
+import time
 from dataclasses import dataclass, field, replace
 from datetime import datetime
 from pathlib import Path
@@ -1248,7 +1249,9 @@ class MeetingPipeline:
                              "responsible": r.get("assignee") or "", "project": проект_встречи_имя}
                             for r in self.s.q("SELECT description, source_quote, assignee FROM tasks WHERE "
                                               "source_meeting_id=? AND status='active'", (meeting_id,))]
+                    t0 = time.perf_counter()
                     счёт = svedenie_ten.посчитать(все, запись=source.text, сейчас=сейчас)
+                    счёт["секунд"] = round(time.perf_counter() - t0, 3)   # цена тени в сборке (13.11: честная цена)
                     rep.svedenie_ten = svedenie_ten.строка_итога(счёт)
                     svedenie_ten.записать(self.svedenie_ten_path, meeting_id, счёт,
                                           чем="сборка" if self.svedenie_ten_path else "")
