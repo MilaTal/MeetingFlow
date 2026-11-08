@@ -33,9 +33,10 @@ def test_порядок_и_подписи_блока_пользователей(
                          _блок_пользователей(), re.S):
         пункты.append((м.group(1), re.sub(r"<[^>]+>", "", м.group(2)).strip()) if м.group(1)
                       else ("группа", re.sub(r"<[^>]+>", "", м.group(3)).strip()))
-    assert пункты == [("meetings", "Реестр встреч"), ("prep", "Подготовка встречи"),
-                      ("dashboard", "Актуализировать задачи из реестра"), ("группа", "Инфо по проекту"),
-                      ("agreements", "Договорённости по проекту"), ("status", "Статус проекта")]
+    # перевёрнут 08.11.2026 (слово владелицы: «вторым блоком под чертой есть меню… он лишний и не понятный»): блока в
+    # общем меню нет — все его пункты скрыты (hidden); живут в меню проекта под его строкой (вариант А, mf59)
+    for м in re.finditer(r'<a class="nav-item nav-main[^"]*"[^>]*>|<div class="nav-group"[^>]*>', _блок_пользователей()):
+        assert "hidden" in м.group(0), м.group(0)[:90]
     под_чертой = HTML[HTML.index('id="nav-admin-hr"'):HTML.index('id="nav-sa-hr"')]
     assert 'data-route="prep"' not in под_чертой
     assert "if ($adminHr) $adminHr.hidden = !isAdmin();" in APP
