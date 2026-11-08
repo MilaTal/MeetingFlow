@@ -63,7 +63,8 @@ def test_кандидат_в_команде_и_второй(env):
 def test_это_он_только_по_команде_другой_человек_фио_команды(env):
     r = env.post("/api/monitoring/voice-review/apply", json={"ids": [1], "decision": "yes",
                                                             "name": "Неизвестный Человек"}, headers=SUPER)
-    assert r.status_code == 422 and "нет в «Команде» MeetFlow" in r.json()["detail"]
+    # перевёрнут 08.11.2026 (записка ffaa73e): система для людей называется «Встречи Невалаб»
+    assert r.status_code == 422 and "нет в «Команде» «Встреч Невалаб»" in r.json()["detail"]
     r = env.post("/api/monitoring/voice-review/apply", json={"ids": [1], "decision": "yes", "name": "Тихонов Денис",
                                                             "vybran": "pervyy"}, headers=SUPER)
     assert r.status_code == 200 and r.json()["vybran"] == "pervyy"

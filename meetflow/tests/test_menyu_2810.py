@@ -50,7 +50,11 @@ def test_выбор_проекта_над_меню():
     assert 'class="whoami-project nav-project"' in HTML
     # поведение прежнее: смена — через одну точку `выбратьПроект`, и у списка, и у строки блока
     assert 'getElementById("project-select")?.addEventListener("change", (e) => выбратьПроект(e.target.value));' in APP
-    assert 'р.querySelector(".pl-name").addEventListener("click", () => выбратьПроект(р.dataset.id));' in APP
+    # перевёрнут 08.11.2026 (пункт 1 плана, mf59): выбор проекта нажатием на строку стал многострочным —
+    # обработчик выбирает проект и сразу открывает реестр справа (слово владелицы 08.11.2026)
+    assert 'р.querySelector(".pl-name").addEventListener("click", () => {' in APP
+    assert "выбратьПроект(р.dataset.id);" in APP
+    assert 'location.hash = "#dashboard";' in APP
 
 
 def test_подготовка_при_всех_проектах_выбор_и_создать_проект():

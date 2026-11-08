@@ -77,7 +77,8 @@ def test_экран_и_word_собирают_полотно_нет(tmp_path):
     sup = {"X-User-Role": "super_admin"}
     экран = c.get(f"/api/meetings/{эта}/protocol", headers=sup).json()["markdown"]
     assert f"(№{a})" in экран
-    assert app.state.erp.shown(st.get("meetings", эта)["protocol_md"], куст).count("Ершов Пётр") == 3   # полотно
+    # перевёрнут 08.11.2026 (правило владелицы 06.11, пункт 3 плана): в таблице «Фамилия И.О.» без пробела
+    assert app.state.erp.shown(st.get("meetings", эта)["protocol_md"], куст).count("Ершов П.") == 3   # полотно
     assert "(№" not in st.get("meetings", эта)["protocol_md"]          # хранимый текст не тронут
 
 

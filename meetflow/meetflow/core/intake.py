@@ -354,13 +354,15 @@ class IntakeService:
 
     def _meeting_for(self, project_id: int, iso_date: str, имя: str = "") -> int:
         """Встреча дня. Несколько встреч одного дня различаются временем в именах файлов (записка 05.11.2026, п. 6):
-        выгрузка ВКС рядом с записью прикрепляется к встрече своей записи, а не к первой за день."""
+        выгрузка ВКС рядом с записью прикрепляется к встрече своей записи, а не к первой за день. Название — тема из
+        имени файла (пункт 2 плана, 08.11.2026), само имя файла — отдельным полем."""
         rows = self.s.q("SELECT id FROM meetings WHERE project_id=? AND date=? AND deleted_at IS NULL ORDER BY id",
                         (project_id, iso_date))
         for r in rows:
             if self._по_времени(r["id"], имя):
                 return r["id"]
-        return self.s.insert("meetings", project_id=project_id, date=iso_date, label="")
+        return self.s.insert("meetings", project_id=project_id, date=iso_date,
+                             label=тема_из_приёмника(имя) or None, file_name=имя)
 
     def _по_времени(self, mid: int, имя: str) -> bool:
         """Та же встреча по времени: время в имени нового файла против времён источников встречи. Нет времени хотя

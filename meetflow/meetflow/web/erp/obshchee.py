@@ -226,7 +226,9 @@ class Ctx:
         чужой = (request.headers.get("x-project-id") or "").strip()
         if чужой in ("", "0"):
             return
-        if str(m.get("project_id")) != чужой:
+        # Подпроект — тот же проект верхнего уровня (08.11.2026): встреча в «Склад – Приёмка» открывается из «Склада».
+        своя_семья = чужой.isdigit() and int(чужой) in self.family(self.root_of(m.get("project_id")))
+        if str(m.get("project_id")) != чужой and not своя_семья:
             raise HTTPException(409, "Встреча принадлежит другому проекту — откройте её из своего проекта")
 
     def task_or_404(self, tid: int) -> dict:

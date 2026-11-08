@@ -205,7 +205,10 @@ def test_transcript_ingested_into_meeting_by_date_and_moved(client, svc):
     assert r["ingested"] == ["Расшифровка 01.10.2026.txt"]
     assert (svc.d / "обработано" / "Расшифровка 01.10.2026.txt").exists()
     m = client.app.state.store.q("SELECT * FROM meetings WHERE project_id=?", (client.pid,))
-    assert m[0]["date"] == "2026-10-01" and m[0]["label"] == "из папки-приёмника"
+    # перевёрнут 08.11.2026 (пункт 2 плана, записка fa84c0d): название — тема из имени файла, а не служебная
+    # пометка «из папки-приёмника»; само имя файла хранится отдельным полем
+    assert m[0]["date"] == "2026-10-01" and m[0]["label"] == "Расшифровка"
+    assert m[0]["file_name"] == "Расшифровка 01.10.2026.txt"
 
 
 def test_no_date_reported_once_and_stays(client, svc):
