@@ -169,8 +169,10 @@ def test_удаление_пустой_отмена_с_планом_и_свод�
     c, h, st = env, env.h, env.st
     m1 = c.post("/meetings", json={"date": iso(3)}, headers=h()).json()["id"]
     assert c.get(f"/meetings/{m1}/delete-check", headers=h()).json()["can_delete"]
-    assert c.delete(f"/meetings/{m1}", headers=h("member")).status_code == 403
-    assert c.delete(f"/meetings/{m1}", headers=h()).json()["deleted"] is True
+    # с 08.11.2026 удаление доступно и участнику (слово владелицы «вернуть их»), мягкое и отменяемое
+    assert c.delete(f"/meetings/{m1}", headers=h("member")).json()["deleted"] is True
+    m1b = c.post("/meetings", json={"date": iso(3)}, headers=h()).json()["id"]
+    assert c.delete(f"/meetings/{m1b}", headers=h()).json()["deleted"] is True
     m2 = c.post("/meetings", json={"date": iso(4)}, headers=h()).json()["id"]
     st.update("meetings", m2, plan_md="План встречи", plan_built_at="2026-10-27T10:00:00")
     chk = c.get(f"/meetings/{m2}/delete-check", headers=h()).json()

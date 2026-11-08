@@ -96,7 +96,7 @@ async function renderProtocols() {
     const название = cleanLabel(m.label);
     // «…» — первой в строке (слово владелицы 06.11.2026): в конце строки её не видно, а кнопка нужна во всех строках
     return `<li><div class="proto-row" data-href="#meetings/${m.id}">
-        ${isAdmin() ? `<span class="reg-menu-wrap proto-more-wrap"><button type="button" class="pl-more proto-more" data-mid="${m.id}" aria-label="Действия со встречей ${esc(fmtRuDate(m.date))}" aria-haspopup="menu"${m.project_how ? ` title="${esc(m.project_how)}"` : ""}>…</button></span>` : ""}
+        ${canPrepare() ? `<span class="reg-menu-wrap proto-more-wrap"><button type="button" class="pl-more proto-more" data-mid="${m.id}" aria-label="Действия со встречей ${esc(fmtRuDate(m.date))}" aria-haspopup="menu"${m.project_how ? ` title="${esc(m.project_how)}"` : ""}>…</button></span>` : ""}
         <span class="proto-month">${esc(месяцЯчейка)}</span>
         <a class="proto-date" href="#meetings/${m.id}">${esc(fmtRuDate(m.date))}</a>
         ${название ? `<span class="proto-label">${esc(название)}</span>` : ""}
@@ -137,7 +137,10 @@ async function renderProtocols() {
 // обновить экран после действия (реестр, подготовка или страница встречи).
 function менюВстречи($кнопка, m, опции = {}) {
   document.querySelectorAll(".pl-menu").forEach(x => x.remove());
-  if (!m || !isAdmin()) return;
+  // С 08.11.2026 «…» видят все (слово владелицы «вернуть их»): переименовать, переместить и удалить — каждому
+  // вошедшему; остальные пункты (дата, подпроект, кто вёл, свести) — по-прежнему администратору. Сервер проверяет сам.
+  if (!m || !canPrepare()) return;
+  const админ = isAdmin();
   const все = опции.все || [];
   const перерисовать = опции.перерисовать || renderProtocols;
   const отменена = m.status === "cancelled";
@@ -150,18 +153,18 @@ function менюВстречи($кнопка, m, опции = {}) {
   // Дату меняют, только пока у встречи нет протокола и материалов: сервер отказывает, если есть протокол или источники.
   // 05.11.2026: причина видна до нажатия — пункт с числом материалов вместо кнопки, которая обещает и не делает.
   const материалов = Number(m.materials_count || 0);
-  if (!m.has_minutes && !отменена && !материалов)
+  if (админ && !m.has_minutes && !отменена && !материалов)
     пункты.push(`<button type="button" role="menuitem" data-edit-date="${m.id}" data-date="${esc(String(m.date).slice(0, 10))}">Изменить дату</button>`);
-  else if (!m.has_minutes && !отменена && материалов)
+  else if (админ && !m.has_minutes && !отменена && материалов)
     пункты.push(`<button type="button" role="menuitem" disabled title="Сначала удалите материалы встречи">Изменить дату нельзя: материалов ${материалов}</button>`);
   пункты.push('<button type="button" role="menuitem" data-act="move">Переместить в проект…</button>');
-  if (!отменена) пункты.push('<button type="button" role="menuitem" data-act="subproject">Подпроект…</button>');
-  пункты.push('<button type="button" role="menuitem" data-act="leader">Кто вёл</button>');
+  if (админ && !отменена) пункты.push('<button type="button" role="menuitem" data-act="subproject">Подпроект…</button>');
+  if (админ) пункты.push('<button type="button" role="menuitem" data-act="leader">Кто вёл</button>');
   // Дополнительные пункты экрана встречи (05.11.2026): «План следующей» и «Замечания» переехали из строки инструментов,
   // чтобы она не была шире окна. Обработчик даёт экран, меню только место и подпись.
-  for (const д of (опции.доп || []))
+  for (const д of (админ ? (опции.доп || []) : []))
     пункты.push(`<button type="button" role="menuitem" data-act="${esc(д.act)}">${esc(д.label)}</button>`);
-  if (дубль) пункты.push('<button type="button" role="menuitem" data-act="merge">Свести с другой…</button>');
+  if (админ && дубль) пункты.push('<button type="button" role="menuitem" data-act="merge">Свести с другой…</button>');
   if (!отменена) пункты.push(`<button type="button" role="menuitem" data-delete-meeting="${m.id}" data-date="${esc(String(m.date).slice(0, 10))}">Удалить</button>`);
   const $m = document.createElement("div");
   $m.className = "pl-menu reg-menu"; $m.setAttribute("role", "menu");

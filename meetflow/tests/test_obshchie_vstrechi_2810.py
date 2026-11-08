@@ -132,7 +132,8 @@ def test_переименовать_встречу(env):
     r = env.patch(f"/meetings/{mid}/label", json={"label": "  Приёмка   металла "}, headers=env.h("project_admin"))
     assert r.status_code == 200 and r.json()["label"] == "Приёмка металла"
     assert env.patch(f"/meetings/{mid}/label", json={"label": ""}, headers=env.h()).json()["label"] is None
-    assert env.patch(f"/meetings/{mid}/label", json={"label": "x"}, headers=env.h("member")).status_code == 403
+    # с 08.11.2026 переименование доступно и участнику (слово владелицы «вернуть их»)
+    assert env.patch(f"/meetings/{mid}/label", json={"label": "x"}, headers=env.h("member")).status_code == 200
 
 
 def test_перенос_встречи_в_общие_и_обратно(env):

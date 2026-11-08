@@ -395,7 +395,8 @@ def mount(r: APIRouter, ctx: Ctx) -> None:
 
     @r.delete("/meetings/{mid}")
     def delete_meeting(mid: int, request: Request, with_tasks: bool = False):
-        admin = ctx.need_admin(request)
+        # С 08.11.2026 — всем (слово владелицы «вернуть их»): удаление мягкое, «Отменить удаление» возвращает всё.
+        admin = ctx.need_user(request)
         m = ctx.meeting_or_404(mid)
         bl = blockers(m)
         if bl and with_tasks:
@@ -408,7 +409,7 @@ def mount(r: APIRouter, ctx: Ctx) -> None:
     @r.post("/meetings/{mid}/restore")
     def restore_meeting(mid: int, request: Request):
         """Отмена удаления (Доработка 2, 28.10.2026): задачам — прежний статус, карточкам — снова открыты."""
-        admin = ctx.need_admin(request)
+        admin = ctx.need_user(request)
         m = store.get("meetings", mid)
         if not m or not m.get("deleted_at"):
             raise HTTPException(404, "Удалённой встречи с таким номером нет")
@@ -429,8 +430,9 @@ def mount(r: APIRouter, ctx: Ctx) -> None:
 
     @r.patch("/meetings/{mid}/label")
     def set_label(mid: int, payload: MeetingLabelIn, request: Request):
-        """Переименовать встречу (Доработка 2, 28.10.2026). Пустое название — встреча показывается по дате."""
-        admin = ctx.need_admin(request)
+        """Переименовать встречу (Доработка 2, 28.10.2026; с 08.11.2026 — всем: слово владелицы «вернуть их»).
+        Пустое название — встреча показывается по дате."""
+        admin = ctx.need_user(request)
         ctx.meeting_or_404(mid)
         label = " ".join((payload.label or "").split()) or None
         store.update("meetings", mid, label=label)
@@ -527,9 +529,10 @@ def mount(r: APIRouter, ctx: Ctx) -> None:
     @r.post("/meetings/{mid}/move-project")
     def move_project(mid: int, payload: MoveProjectIn, request: Request):
         """«Перенести встречу в другой проект» вместе с её задачами (27.10.2026): встреча из общей папки попала не в свой
-        проект. Протокол не переписывается — после переноса сборка встаёт в очередь заново (`rebuild`)."""
+        проект. Протокол не переписывается — после переноса сборка встаёт в очередь заново (`rebuild`).
+        С 08.11.2026 — всем (слово владелицы «вернуть их»): перенос обратим обратным переносом, сервер пишет историю."""
         from ...core import proekt_zapisi as pz
-        admin = ctx.need_admin(request)
+        admin = ctx.need_user(request)
         ctx.meeting_or_404(mid)
         try:
             out = pz.перенести_встречу(store, mid, payload.project_id, ctx.name(admin))

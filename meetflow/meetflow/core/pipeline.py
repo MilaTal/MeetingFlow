@@ -1197,6 +1197,10 @@ class MeetingPipeline:
                 if budget.calls + 3 >= budget.limits.max_calls:
                     raise RuntimeError("предел вызовов прогона — дополнение пропущено")
                 return self._call(self.gen, budget, "obedinenie", system, user, meeting_id)
+            # Базовая линия тени (08.11.2026): что сделала обычная сборка. Модель дала `drafts` черновиков, после
+            # укрупнения и объединения осталось `planned`; счёт «сведено/дополнено/мусор» добавляется ниже. Без базовой
+            # линии недельная таблица показывала бы числа способа 1 без сравнения — непонятно, добавляет ли он что-то.
+            сейчас: dict = {"черновиков": len(drafts), "после_сборки": len(planned)}
             try:
                 об = ukrupnenie_sborka.объединение(self.s, project_id, planned, source.text, _дополнение,
                                                    meeting_id, meeting.get("date"))
@@ -1207,6 +1211,8 @@ class MeetingPipeline:
                                               шаг="объединение", решение=str(з_.get("решение") or "объединена")[:80],
                                               причина=str(з_.get("почему") or з_.get("причина") or "")[:200])
                 planned = об["planned"]
+                сейчас.update(obedinenie_mod.счёт(об["журнал"]))
+                сейчас["после_сборки"] = len(planned)
                 for t in об["сведённые"]:      # повтор открытой задачи по правилу повторов реестра (29.10.2026)
                     self.journal.write(purpose="triage", meeting_id=meeting_id, verdict="сведено с реестром",
                                        task_id=t.get("duplicate_of"), description=str(t.get("description"))[:300])
@@ -1228,7 +1234,7 @@ class MeetingPipeline:
                              "responsible": r.get("assignee") or "", "project": проект_встречи_имя}
                             for r in self.s.q("SELECT description, source_quote, assignee FROM tasks WHERE "
                                               "source_meeting_id=? AND status='active'", (meeting_id,))]
-                    счёт = svedenie_ten.посчитать(все, запись=source.text)
+                    счёт = svedenie_ten.посчитать(все, запись=source.text, сейчас=сейчас)
                     rep.svedenie_ten = svedenie_ten.строка_итога(счёт)
                     svedenie_ten.записать(self.svedenie_ten_path, meeting_id, счёт,
                                           чем="сборка" if self.svedenie_ten_path else "")
