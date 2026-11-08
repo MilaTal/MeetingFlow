@@ -1,0 +1,87 @@
+"""Срез тени по текущим задачам: считает способ 1 на сегодняшних задачах, в журнал не пишет, база только на чтение.
+
+План, пункт 7: недельная таблица 13.11 собирается из журнала сборок; если сборок не было, итог пуст. Срез даёт числа по
+уже собранным встречам — без пересборки, без модели, без денег и без записи в журнал, чтобы недельное наблюдение не
+смешалось с разовым срезом.
+"""
+from __future__ import annotations
+
+import importlib.util
+from pathlib import Path
+
+import pytest
+
+from meetflow.core.store import Store
+
+КОРЕНЬ = Path(__file__).resolve().parents[1]
+
+
+def _скрипт():
+    путь = КОРЕНЬ / "scripts" / "srez_ten_tekushchie.py"
+    spec = importlib.util.spec_from_file_location("srez_ten_tekushchie", путь)
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    return mod
+
+
+@pytest.fixture
+def база(tmp_path):
+    """Файловая база с одной встречей и тремя задачами: две про один предмет, третья про другой."""
+    путь = tmp_path / "srez.db"
+    s = Store(str(путь))
+    pid = s.insert("projects", name="Пилот", theme="it_product")
+    mid = s.insert("meetings", project_id=pid, date="2026-11-06", status="built")
+    s.insert("sources", meeting_id=mid, name="запись", kind="transcript",
+             text="[00:01:00] Игнатов Иван: Петрова Анастасия, подготовьте график поставки труб к пятнице.\n"
+                  "[00:02:00] Игнатов Иван: И график поставки труб согласуйте с подрядчиком.\n"
+                  "[00:03:00] Игнатов Иван: Отдельно подготовьте отчёт по складу.",
+             digest="d1", created_at="2026-11-06T10:00:00")
+    for описание, кто, цитата in (
+            ("Подготовить график поставки труб", "Петрова Анастасия",
+             "[00:01:00] Петрова Анастасия, подготовьте график поставки труб к пятнице"),
+            ("Согласовать график поставки труб с подрядчиком", "Петрова Анастасия",
+             "[00:02:00] И график поставки труб согласуйте с подрядчиком"),
+            ("Подготовить отчёт по складу", "Сидорова Мария",
+             "[00:03:00] Отдельно подготовьте отчёт по складу")):
+        s.insert("tasks", project_id=pid, description=описание, assignee=кто, status="active",
+                 source_meeting_id=mid, source_quote=цитата)
+    s.close()
+    return путь
+
+
+def test_срез_считает_пары_и_ничего_не_меняет(база):
+    м = _скрипт()
+    до = (база.stat().st_size, len(Store(str(база)).q("SELECT id FROM tasks")))
+    разбор = м.срез(база)
+    assert len(разбор["встречи"]) == 1
+    в = разбор["встречи"][0]
+    assert в["было"] == 3 and в["объединено_бы"] == 1 and в["стало_бы"] == 2
+    assert в["ошибочно_снятых"] == 0
+    после = (база.stat().st_size, len(Store(str(база)).q("SELECT id FROM tasks")))
+    assert после == до, "срез не должен менять базу"
+
+
+def test_markdown_честно_называет_срез(база):
+    м = _скрипт()
+    текст = м.markdown(м.срез(база))
+    assert "(без пересборки)" in текст
+    assert "в журнал недельного наблюдения срез **не пишется**" in текст
+    assert "встреча 1, основание «предмет»" in текст
+    assert "**0, жёстко**: да" in текст
+
+
+def test_итог_пишется_в_файл(база, tmp_path):
+    м = _скрипт()
+    вывод = tmp_path / "срез.md"
+    assert м.main(["--db", str(база), "--вывод", str(вывод)]) == 0
+    assert "Срез тени сведения по текущим задачам" in вывод.read_text(encoding="utf-8")
+
+
+def test_без_задач_итог_пуст(tmp_path, capsys):
+    м = _скрипт()
+    путь = tmp_path / "пусто.db"
+    s = Store(str(путь))
+    s.insert("projects", name="Пилот", theme="it_product")
+    s.close()
+    assert м.main(["--db", str(путь)]) == 1
+    assert "срез пуст" in capsys.readouterr().out
