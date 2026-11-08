@@ -105,3 +105,31 @@ def test_повторная_пересборка_не_двоит_пометку(
     assert "(из прежней версии) (из прежней версии)" not in второй
     assert второй.count("(из прежней версии)") == 1
     assert "4 млн" in второй
+
+
+def test_порог_возврата_из_настройки(monkeypatch):
+    """Порог опоры — числом из `WEBAPP_POTERI_POROG`, а не правкой кода: 0.6 возвращает, 0.8 — уже нет."""
+    запись = "Робот собран, экономия около 4 млн рублей, заявку оформлять, сроки согласованы"
+    абзац = "Робот собран, экономия около 4 млн рублей, заявку оформлять, но про марсианские каналы и климат ничего"
+    monkeypatch.delenv(пп.ПЕРЕМЕННАЯ_ПОРОГ, raising=False)
+    assert пп.порог() == 0.6 and пп.обоснован(абзац, запись) is True
+    monkeypatch.setenv(пп.ПЕРЕМЕННАЯ_ПОРОГ, "0.8")
+    assert пп.порог() == 0.8 and пп.обоснован(абзац, запись) is False
+    monkeypatch.setenv(пп.ПЕРЕМЕННАЯ_ПОРОГ, "0,7")
+    assert пп.порог() == 0.7
+    monkeypatch.setenv(пп.ПЕРЕМЕННАЯ_ПОРОГ, "не число")
+    assert пп.порог() == 0.6
+
+
+def test_возврат_можно_выключить(store, project, meeting, theme, tmp_path, monkeypatch):
+    """«WEBAPP_POTERI_VOZVRAT=0» — вариант «только карточка»: в протокол ничего не возвращается, потеря видна."""
+    monkeypatch.setenv(пп.ПЕРЕМЕННАЯ_ВОЗВРАТ, "0")
+    первая = _сборка(store, project, meeting, theme, tmp_path, "Робот собран, экономия около 4 млн рублей за квартал, "
+                                                              "заявку оформлять на 17-16, сроки согласованы.")
+    первая.run(project, meeting)
+    вторая = _сборка(store, project, meeting, theme, tmp_path, "Робот собран и работает.")
+    вторая.run(project, meeting)
+    второй = store.get("meetings", meeting)["protocol_md"]
+    assert "## Из прежней версии" not in второй and "4 млн" not in второй
+    карточки = store.q("SELECT payload FROM cards WHERE meeting_id=? AND title LIKE 'Пересборка потеряла%'", (meeting,))
+    assert карточки and json.loads(карточки[0]["payload"])["returned"] == 0

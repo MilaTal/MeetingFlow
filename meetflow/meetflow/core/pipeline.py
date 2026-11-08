@@ -1683,7 +1683,9 @@ class MeetingPipeline:
                 вернулось = 0
                 if прежний_протокол:
                     потеряно = protokol_poteri.потерянные(прежний_протокол, protocol_md)
-                    на_возврат = [б for б in потеряно if protokol_poteri.обоснован(б, source.text)]
+                    # выключатель (08.11.2026): «0» — вариант «только карточка», в протокол ничего не возвращаем
+                    на_возврат = ([б for б in потеряно if protokol_poteri.обоснован(б, source.text)]
+                                  if protokol_poteri.возврат_включён() else [])
                     if на_возврат:
                         protocol_md = protokol_poteri.дополнить(protocol_md, на_возврат)
                         вернулось = len(на_возврат)
