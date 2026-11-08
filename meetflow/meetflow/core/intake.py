@@ -110,7 +110,7 @@ def validate_folder(path_text: str, repeat: str, app_dir: Path | None = None, ho
 
 def sign_folder(p: Path) -> None:
     if not any(p.iterdir()):  # пустая — подписываем как приёмник
-        (p / MARKER).write_text("Эта папка назначена приёмником встреч MeetFlow.\n", encoding="utf-8")
+        (p / MARKER).write_text("Эта папка назначена приёмником встреч «Встречи Невалаб».\n", encoding="utf-8")
         (p / HINT_FILE).write_text(HINT_TEXT, encoding="utf-8")
 
 

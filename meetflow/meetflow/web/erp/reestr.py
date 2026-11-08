@@ -432,7 +432,7 @@ def mount(r: APIRouter, ctx: Ctx) -> None:
             t = get_or_404(tid)
             take(t, payload.version, ctx.name(admin))
             if payload.project_id is None:
-                raise HTTPException(400, "В MeetFlow задача всегда в проекте — выберите проект из списка")
+                raise HTTPException(400, "В «Встречах Невалаб» задача всегда в проекте — выберите проект из списка")
             p = store.get("projects", payload.project_id)
             if not p or p.get("archived"):
                 raise HTTPException(400, "Такого проекта нет в справочнике — выберите из списка")

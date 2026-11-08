@@ -439,7 +439,7 @@ def mount(r: APIRouter, ctx: Ctx) -> None:
     def units_extract(mid: int, request: Request):
         ctx.need_admin(request)
         ctx.meeting_or_404(mid)
-        raise HTTPException(400, "Пункты встречи в MeetFlow собираются при сборке протокола — пересоберите протокол "
+        raise HTTPException(400, "Пункты встречи во «Встречах Невалаб» собираются при сборке протокола — пересоберите протокол "
                                  "(«Подготовка встречи»), отдельного вызова нет")
 
     @r.post("/meetings/{mid}/units/accept-all")

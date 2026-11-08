@@ -43,7 +43,8 @@ def test_second_instance_on_same_db_does_not_take_the_folder(tmp_path, monkeypat
     finally:
         srv.close()
     assert started == [], "второй экземпляр запустил забор из папки"
-    assert app.state.store.q("SELECT * FROM cards WHERE title LIKE 'Второй экземпляр MeetFlow на той же базе%'")
+    # перевёрнут 08.11.2026 (записка ffaa73e): система для людей называется «Встречи Невалаб»
+    assert app.state.store.q("SELECT * FROM cards WHERE title LIKE 'Второй экземпляр «Встреч Невалаб» на той же базе%'")
 
 
 def test_hung_process_without_port_does_not_block(tmp_path, monkeypatch, other_process):

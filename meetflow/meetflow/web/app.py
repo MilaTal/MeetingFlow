@@ -410,7 +410,7 @@ def create_app(theme_name: str | None = None, db_path: str | None = None, journa
             except Exception as exc:  # noqa: BLE001 — синхронизация не должна ронять старт сервера
                 print(f"MeetFlow: общая Команда не синхронизирована — {exc}", file=sys.stderr, flush=True)  # дети прошлых запусков продолжают считать — остановить (06.11.2026)
         elif watch_on:
-            pipe.cards.open(None, "event", "Второй экземпляр MeetFlow на той же базе — забор из папки и автокопия "
+            pipe.cards.open(None, "event", "Второй экземпляр «Встреч Невалаб» на той же базе — забор из папки и автокопия "
                             "в нём выключены", {"why": "первый экземпляр работает: его процесс жив и порт слушает; "
                                                        "остановите лишний запуск"})
         yield
@@ -421,7 +421,7 @@ def create_app(theme_name: str | None = None, db_path: str | None = None, journa
         intake.stop()
         backups.stop()
 
-    app = FastAPI(title="MeetFlow", lifespan=lifespan)
+    app = FastAPI(title="Встречи Невалаб", lifespan=lifespan)
     app.state.theme, app.state.store, app.state.pipe, app.state.intake = theme, store, pipe, intake
     app.state.queue = queue
     if os.environ.get("MEETFLOW_RESUME_ON_START", "on") != "off":
@@ -1421,7 +1421,7 @@ def create_app(theme_name: str | None = None, db_path: str | None = None, journa
             # «Команды», «Это он» — имя кандидата из базы голосов, чтобы отпечатки легли к тому же человеку базы
             found = v_komande(name)
             if len(name.split()) < 2 or found is None:
-                raise HTTPException(422, f"«{name or 'пусто'}» — нет в «Команде» MeetFlow полным ФИО. Выберите человека "
+                raise HTTPException(422, f"«{name or 'пусто'}» — нет в «Команде» «Встреч Невалаб» полным ФИО. Выберите человека "
                                          "в «Другой человек»: одно имя или тёзка не подставляются.")
             if body.decision == "other":
                 name = found
