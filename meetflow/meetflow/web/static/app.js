@@ -6,15 +6,26 @@
 (function принятьЧеловекаОтПортала() {
   const параметры = new URLSearchParams(location.search);
   const номер = параметры.get("portal_user");
-  if (номер === null) return;
+  if (номер === null) { localStorage.removeItem("portalEntry"); return; }   // открыли систему напрямую — это снова тестовый режим
   if (/^\d{1,18}$/.test(номер)) {
     localStorage.setItem("currentUserId", номер);
     localStorage.removeItem("currentUserLabel");
+    localStorage.setItem("portalEntry", "1");   // пришёл от портала — вход был по паролю там
   }
   параметры.delete("portal_user");
   const остаток = параметры.toString();
   history.replaceState(null, "", location.pathname + (остаток ? "?" + остаток : "") + location.hash);
 })();
+
+// Откуда пришёл человек (слово владелицы 08.11.2026): если номер передал портал, вход был по паролю на портале,
+// и подпись «Тестовый режим — вход по ФИО, без пароля» врала бы. Ручной выбор в списке снимает отметку.
+function отметитьВходЧерезПортал() {
+  const строка = document.querySelector("#whoami-testing .mode-line");
+  if (!строка) return;
+  строка.innerHTML = localStorage.getItem("portalEntry") === "1"
+    ? "<b>Единый вход</b> — вы вошли через портал, пароль введён там"
+    : "<b>Тестовый режим</b> — вход по ФИО, без пароля";
+}
 
 const $main = document.getElementById("main");
 // Текущий вошедший пользователь (после входа по логину и паролю — решение 19.09.26).
@@ -1723,14 +1734,14 @@ function рисоватьПроекты() {
       <a class="pl-nested-item" data-route="meetings" href="#meetings">Реестр встреч</a>
       <a class="pl-nested-item" data-route="prep" href="#prep">Подготовка встречи</a>
       <a class="pl-nested-item" data-route="agreements" href="#agreements">Договорённости по проекту</a>
-      <a class="pl-nested-item" data-route="status" href="#status">Статус проекта</a></div>`;
+      ${п.general ? "" : `<a class="pl-nested-item" data-route="status" href="#status">Статус проекта</a>`}</div>`;
   const строка = (п) => `<div class="pl-row${п.id === тек ? " pl-on" : ""}" data-id="${п.id}">
-      ${п.id === тек && !п.general ? `<button type="button" class="pl-arrow" aria-expanded="${свёрнут() ? "false" : "true"}"
+      ${п.id === тек ? `<button type="button" class="pl-arrow" aria-expanded="${свёрнут() ? "false" : "true"}"
         aria-label="Свернуть или развернуть меню проекта" title="Свернуть или развернуть меню проекта">${свёрнут() ? "▸" : "▾"}</button>` : ""}
       <button type="button" class="pl-name" role="option" aria-selected="${п.id === тек}" title="${esc(п.label || п.name)}"
         style="padding-left:${8 + 14 * (п.level || 0)}px"><span class="pl-ico">${значок(п)}</span>${esc(п.name)}</button>
       ${супер && !п.general && п.id ? `<button type="button" class="pl-more" aria-label="Действия с проектом «${esc(п.name)}»" aria-haspopup="menu">…</button>` : ""}</div>`;
-  const сМеню = (п) => строка(п) + (п.id === тек && !п.general ? менюПроектаСтрокой(п) : "");
+  const сМеню = (п) => строка(п) + (п.id === тек ? менюПроектаСтрокой(п) : "");
   $l.innerHTML = общие.map(сМеню).join("") + видимые.map(сМеню).join("") +
     (скрыто > 0 ? `<button type="button" class="pl-extra" data-act="more">Показать ещё</button>` : "") +
     строка({ id: 0, name: "Все проекты" }) +
@@ -1836,6 +1847,7 @@ function естьНесохранённыйВвод() {
 
 async function выбратьПроект(id) {
   const v = Number(id) || 0;
+  sessionStorage.setItem("проектСвёрнут", "0");   // выбор проекта сразу раскрывает его пункты
   if (наЭкранеВстречи() && v !== Number(выбранныйПроект())) {
     if (естьНесохранённыйВвод()) {
       const уйти = await confirmDialog("В форме есть несохранённый ввод — при смене проекта он пропадёт. "
@@ -2155,6 +2167,7 @@ async function startTestingMode() {
   document.getElementById("app-shell").hidden = false;
   document.getElementById("whoami-auth").hidden = true;
   document.getElementById("whoami-testing").hidden = false;
+  отметитьВходЧерезПортал();   // пришёл от портала — подпись про тестовый режим не показываем
   await loadUsersForWhoAmI();
   fillWhoAmI();
   updateModeSwitch();
@@ -2163,6 +2176,9 @@ async function startTestingMode() {
 
 document.getElementById("whoami-select")?.addEventListener("change", (e) => {
   localStorage.setItem("currentUserId", e.target.value);
+  localStorage.removeItem("portalEntry");   // человек выбрал себя сам — это уже тестовый режим
+  отметитьВходЧерезПортал();
+
   // Метку человека помним рядом с id: если список людей не загрузится или человека в нём не окажется,
   // поле всё равно покажет, кто выбран, — иначе выбор выглядел бы сброшенным (09.10.26).
   const выбранный = allUsers.find(u => String(u.id) === e.target.value);
