@@ -22,6 +22,8 @@
 """
 from __future__ import annotations
 
+from .people import короткое_фио
+
 import bisect
 import os
 import re
@@ -258,7 +260,7 @@ def строки_встречи(store, meeting: dict, срок_текстом, �
         ранг = 2 if раздел == ОПЕРАТИВНАЯ else (0 if своя else 1)
         поставлена = _д(t.get("date_set"))
         порядок.append((ранг, Строка(
-            задача=t.get("description") or "", статус=статус_задачи(t, день), ответственный=t.get("assignee") or "",
+            задача=t.get("description") or "", статус=статус_задачи(t, день), ответственный=короткое_фио(t.get("assignee")),
             срок=срок_текстом(t) or "", поставлена=f"{поставлена:%d.%m.%Y}" if поставлена else "",
             откуда=откуда_встречи if своя else РЕЕСТР, раздел=раздел, номер=str(t["id"]), задача_id=t["id"])))
     порядок.sort(key=lambda x: x[0])
