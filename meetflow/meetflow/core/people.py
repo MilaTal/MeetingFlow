@@ -174,7 +174,25 @@ class Team:
                     hit.append(i)
                     break
         if hit:
-            return " ".join(orig[i] for i in hit)
+            # 08.11.2026 (пункт 3 плана): обычно возвращаем НЕПРЕРЫВНЫЙ фрагмент цитаты без повторов — отсюда были
+            # «Антон Антон» и «Сергеевич Сергеевич». Но перечисление («Чистякова М., Мелехова А.», «Чистякова и
+            # Мелехова») — это ДВА человека: там поведение прежнее, склеивать их нельзя.
+            перечисление = bool(re.search(r"[,;]|(?<![А-Яа-яЁё])и(?![А-Яа-яЁё])", mention or "")) or \
+                any(len(t) == 1 for t in re.findall(r"[А-Яа-яЁё]+", mention or ""))
+            if перечисление:
+                return " ".join(orig[i] for i in hit)
+            индексы = sorted(set(hit))
+            лучший = текущий = [индексы[0]]
+            for i in индексы[1:]:
+                if i == текущий[-1] + 1:
+                    текущий.append(i)
+                else:
+                    if len(текущий) > len(лучший):
+                        лучший = текущий
+                    текущий = [i]
+            if len(текущий) > len(лучший):
+                лучший = текущий
+            return " ".join(orig[i] for i in лучший)
         depts = set(self._heads) | {p.department.lower().replace("ё", "е") for p in self.people if p.department}
         for w, o in zip(qw, orig):
             if w in depts:
