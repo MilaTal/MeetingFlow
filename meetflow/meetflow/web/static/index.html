@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <link rel="icon" href="data:,">
   <title>Встречи Невалаб</title>
-  <link rel="stylesheet" href="styles.css?v=20261108mf66">
+  <link rel="stylesheet" href="styles.css?v=20261108mf68">
   <link rel="stylesheet" href="theme-line.css?v=20261108mf63">
   <link rel="stylesheet" href="polotno.css?v=20261108mf63">
   <link rel="stylesheet" href="razbor.css?v=20261108mf63">
@@ -31,8 +31,9 @@
            «Общие встречи», проекты, «Все проекты»; «+ Новый проект» и «…» у строки — суперадминистратору. Список
            #project-select остаётся скрытым: его читают другие экраны. -->
       <div class="whoami-project nav-project">
-        <div class="pl-head"><span id="project-list-title">Встречи по проектам</span><input type="search" id="pl-search" class="pl-search" placeholder="Поиск проекта" autocomplete="off" aria-label="Поиск проекта по имени"></div>
+        <div class="pl-head"><span id="project-list-title">Встречи по проектам</span><input type="search" id="pl-search" class="pl-search" placeholder="Поиск проекта или встречи" autocomplete="off" aria-label="Поиск проекта или встречи по имени и дате"></div>
         <div class="project-list" id="project-list" role="listbox" aria-labelledby="project-list-title"></div>
+        <div class="pl-meetings" id="pl-meetings" aria-label="Найденные встречи" hidden></div>
         <select id="project-select" hidden aria-hidden="true"><option value="0">Все проекты</option></select>
       </div>
       <button class="nav-toggle" id="nav-toggle" type="button" aria-expanded="false" aria-controls="nav">Меню</button>
@@ -125,14 +126,14 @@
       <div id="main"></div>
     </main>
   </div>
-  <script src="app.js?v=20261108mf66"></script>
+  <script src="app.js?v=20261108mf68"></script>
   <script src="polotno.js?v=20261108mf63"></script>
-  <script src="registry.js?v=20261108mf66"></script>
+  <script src="registry.js?v=20261108mf68"></script>
   <script src="nav.js?v=20261108mf63"></script>
   <script src="meeting.js?v=20261108mf63"></script>
   <script src="prep.js?v=20261108mf63"></script>
   <script src="conflicts.js?v=20261108mf63"></script>
-  <script src="razbor.js?v=20261108mf67"></script>
+  <script src="razbor.js?v=20261108mf68"></script>
   <!-- team.js (надстройка «Команды» прототипа 13.10.26) снят: «Команда» — 1 в 1 как в старой ERP (владелец 13.10.26) -->
   <script src="system.js?v=20261108mf63"></script>
   <script src="design.js?v=20261108mf63"></script>

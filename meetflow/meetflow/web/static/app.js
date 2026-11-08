@@ -1768,6 +1768,36 @@ function рисоватьПроекты() {
     toast(`Проект «${п.name}» заведён`);
     localStorage.setItem("currentProjectId", String(п.id));
   }));
+  показатьВстречиПоЗапросу(запрос);
+}
+
+// Поиск встречи (слово владелицы 08.11.2026: «лучше сделать функционал поиска проекта или встречи»): по тем же буквам,
+// что сужают проекты, показываем до восьми встреч выбранного охвата — по названию или дате. Ссылка ведёт на встречу.
+let _встречиДляПоиска = { at: 0, строка: "", список: [] };
+async function показатьВстречиПоЗапросу(запрос) {
+  const $m = document.getElementById("pl-meetings");
+  if (!$m) return;
+  if (!запрос) { $m.hidden = true; $m.innerHTML = ""; return; }
+  const ключ = запрос + "|" + String(выбранныйПроект());
+  const свежо = Date.now() - _встречиДляПоиска.at < 30000 && _встречиДляПоиска.строка === ключ;
+  try {
+    if (!свежо) {
+      const список = await api("/meetings");
+      _встречиДляПоиска = { at: Date.now(), строка: ключ, список: Array.isArray(список) ? список : (список.items || []) };
+    }
+  } catch (e) { $m.hidden = true; return; }
+  const ищем = запрос;
+  const подходит = (м) => {
+    const метка = (м.label || "").toLowerCase().replace("ё", "е");
+    const дата = fmtRuDate(м.date || "").toLowerCase();
+    return метка.includes(ищем) || дата.includes(ищем) || (м.date || "").includes(ищем);
+  };
+  const найдено = (_встречиДляПоиска.список || []).filter(подходит).slice(0, 8);
+  if (!найдено.length) { $m.hidden = true; $m.innerHTML = ""; return; }
+  $m.innerHTML = `<div class="pl-head pl-meet-head"><span>Встречи</span></div>` +
+    найдено.map(м => `<a class="pl-meet" href="#meetings/${м.id}"><span class="pl-meet-date">${esc(fmtRuDate(м.date))}</span>` +
+      `<span class="pl-meet-name">${esc(м.label || "встреча")}</span></a>`).join("");
+  $m.hidden = false;
 }
 // Поле ввода на месте строки: Enter — сохранить, Escape или уход фокуса — вернуть как было
 function полеПроекта($где, значение, сохранить) {
