@@ -143,11 +143,14 @@ class Team:
         partial = owners or [p for p in self.people if self._partial_hit(p, toks)]
         if len(toks) >= 2 and not owners:
             # фамилия и имя: «похож» — это та же фамилия, а не одно совпавшее имя (документ 14)
+            до_отбора = partial
             partial = [p for p in partial if words(p.full_name) and
                        any(same_word(t, words(p.full_name)[0]) for t in toks if not self._is_first_name(t))]
             # «Андрей Алексеевич»: фамилии нет — фамильный отбор пуст, но имя и отчество уже назвали двух Андреев;
-            # их и показываем, а дальше решает голос (слово владелицы 08.11.2026)
-            partial = partial or пара
+            # их и показываем, а дальше решает голос (слово владелицы 08.11.2026).
+            # Искажённая распознаванием фамилия («Анатолий Южис» вместо «Анатолий Юрьевич») тоже не должна
+            # оставлять карточку без кандидатов: пара по имени остаётся, решает человек или голос.
+            partial = partial or пара or до_отбора
         # запись короче упоминания («Пересыпкин» при «Пересыпкин Сергей») — кандидат, а не «никого»
         # (находка Планёрки, письмо meeting-registry 23)
         partial += [p for p in self.people if p not in partial and len(words(p.full_name)) == 1
