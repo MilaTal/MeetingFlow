@@ -62,19 +62,31 @@ def _сборка(store, project, meeting, theme, tmp_path, раздел):
     return p
 
 
-def test_пересборка_даёт_карточку_о_потерянных_абзацах(store, project, meeting, theme, tmp_path):
+def test_пересборка_даёт_карточку_и_возвращает_абзац(store, project, meeting, theme, tmp_path):
     первая = _сборка(store, project, meeting, theme, tmp_path, "Робот собран, экономия около 4 млн рублей за квартал, "
                                                               "заявку оформлять на 17-16, сроки согласованы.")
     первая.run(project, meeting)
     assert "4 млн" in store.get("meetings", meeting)["protocol_md"]
     вторая = _сборка(store, project, meeting, theme, tmp_path, "Робот собран и работает.")
     вторая.run(project, meeting)
-    assert "4 млн" not in store.get("meetings", meeting)["protocol_md"], "модель фразу не повторила"
+    второй = store.get("meetings", meeting)["protocol_md"]
+    # вариант Б: абзац, опирающийся на запись, возвращён разделом «Из прежней версии» и помечен
+    assert "## Из прежней версии" in второй and "(из прежней версии)" in второй
+    assert "4 млн" in второй
     карточки = store.q("SELECT title, payload FROM cards WHERE meeting_id=? AND title LIKE 'Пересборка потеряла%'",
                        (meeting,))
     assert карточки, "потеря не должна быть молчаливой"
     данные = json.loads(карточки[0]["payload"])
-    assert данные["count"] >= 1 and "4 млн" in данные["paragraphs"][0] and данные["version"] == 2
+    assert данные["count"] >= 1 and данные["returned"] == 1
+    assert "4 млн" in данные["paragraphs"][0] and данные["version"] == 2
+
+
+def test_обоснованность_считается_по_записи():
+    assert пп.обоснован("Робот собран, экономия около 4 млн рублей за квартал",
+                        ТЕКСТ) is True
+    assert пп.обоснован("Совершенно посторонний вывод про марсианские каналы и климат красной планеты",
+                        ТЕКСТ) is False
+    assert пп.обоснован("Робот собран", "") is False
 
 
 def test_первая_сборка_карточки_не_даёт(store, project, meeting, theme, tmp_path):

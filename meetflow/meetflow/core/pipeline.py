@@ -1669,18 +1669,25 @@ class MeetingPipeline:
                     self.cards.open(project_id, "suspicious_source", "В протоколе скрыт служебный текст системы",
                                     {"filter": "output"}, meeting_id)
                 built = now()
-                # Пересборка потеряла абзацы (вариант А, 08.11.2026): сравнение дословное и кодом, протокол не
-                # меняется — оператору карточка с прежним текстом, чтобы потеря не была молчаливой
+                # Пересборка потеряла абзацы (варианты А и Б, слово владелицы 08.11.2026): сравнение дословное и кодом.
+                # А — карточка с прежним текстом, чтобы потеря не была молчаливой; Б — абзацы, опирающиеся на запись,
+                # возвращаются в протокол разделом «Из прежней версии» с пометкой у каждого.
                 прежний_протокол = meeting.get("protocol_md") or ""
-                self.s.update("meetings", meeting_id, protocol_md=protocol_md, protocol_built_at=built,
-                              built_from=[s["name"] for s in srcs])
+                потеряно: list[str] = []
+                вернулось = 0
                 if прежний_протокол:
                     потеряно = protokol_poteri.потерянные(прежний_протокол, protocol_md)
-                    if потеряно:
-                        ещё_не_сохранена = self.s.q(
-                            "SELECT COUNT(*) AS n FROM protocol_versions WHERE meeting_id=?", (meeting_id,))[0]["n"] + 1
-                        self.cards.open(project_id, "technical", protokol_poteri.заголовок(len(потеряно)),
-                                        protokol_poteri.данные(потеряно, ещё_не_сохранена), meeting_id)
+                    на_возврат = [б for б in потеряно if protokol_poteri.обоснован(б, source.text)]
+                    if на_возврат:
+                        protocol_md = protokol_poteri.дополнить(protocol_md, на_возврат)
+                        вернулось = len(на_возврат)
+                self.s.update("meetings", meeting_id, protocol_md=protocol_md, protocol_built_at=built,
+                              built_from=[s["name"] for s in srcs])
+                if потеряно:
+                    ещё_не_сохранена = self.s.q(
+                        "SELECT COUNT(*) AS n FROM protocol_versions WHERE meeting_id=?", (meeting_id,))[0]["n"] + 1
+                    self.cards.open(project_id, "technical", protokol_poteri.заголовок(len(потеряно)),
+                                    protokol_poteri.данные(потеряно, ещё_не_сохранена, вернулось), meeting_id)
                 # версия: прежняя остаётся в истории; модель — та, что написала текст (43, 47)
                 wrote = budget.answered.get("protocol") or budget.answered.get("extract_tasks") or []
                 if budget.answered.get("_external"):
