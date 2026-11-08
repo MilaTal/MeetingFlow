@@ -932,7 +932,21 @@ class MeetingPipeline:
 
         # Общая «Команда» → проектная: без этого подсказка модели и страж исполнителя работают по пустому
         # списку, хотя подтверждённые люди есть (задание владелицы 26.10.2026).
-        sync_people(self.s, project_id, self.s.get_setting("voice_base_path") or os.environ.get("VOICE_BASE_PATH"))
+        неоднозначные: list[dict] = []
+        sync_people(self.s, project_id, self.s.get_setting("voice_base_path") or os.environ.get("VOICE_BASE_PATH"),
+                    неоднозначные=неоднозначные)
+        if неоднозначные:
+            # «Фамилия + имя» без отчества, а в проекте таких двое с разными отчествами: запись не угадывается и
+            # третья не заводится — оператор видит карточку (правка 09.11.2026 к остатку отчёта 07.11).
+            title = "В «Команде» тёзки — кто именно, не понятно"
+            if not self.s.q("SELECT id FROM cards WHERE project_id=? AND title=? AND status='open'", (project_id, title)):
+                self.cards.open(project_id, "technical", title,
+                                {"items": [{"name": x["name"], "candidates": x["candidates"]}
+                                           for x in неоднозначные[:10]],
+                                 "detail": "В общей «Команде» человек записан без отчества, а в проекте таких двое с "
+                                           "разными отчествами. Запись не угадывалась и не заводилась — уточните "
+                                           "отчество в «Команде» проекта."},
+                                meeting_id)
         people = [Person(p["full_name"], p["role"], p["department"], json.loads(p["aliases"] or "[]"),
                          bool(p["external"]), bool(p["confirmed"]), p["id"], p.get("organization") or "",
                          json.loads(p.get("known_marks") or "[]"))

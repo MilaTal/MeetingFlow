@@ -32,8 +32,14 @@ def shared_people(voice_base_path: str | None = None) -> list[dict[str, Any]]:
     return [p for p in (st.get("people_list") or []) if (p.get("full_name") or "").strip()]
 
 
-def sync_people(store: Store, project_id: int, voice_base_path: str | None = None) -> int:
-    """Добавить недостающих подтверждённых людей общей «Команды» в проект. Возвращает, сколько добавлено."""
+def sync_people(store: Store, project_id: int, voice_base_path: str | None = None,
+                неоднозначные: list[dict] | None = None) -> int:
+    """Добавить недостающих подтверждённых людей общей «Команды» в проект. Возвращает, сколько добавлено.
+
+    Если пришло «фамилия + имя» без отчества, а в проекте таких двое с разными отчествами — **не угадываем** и третью
+    запись не заводим: человек остаётся как есть, сведения кладутся в `неоднозначные` (карточку открывает сборка).
+    Правка 09.11.2026 по остатку отчёта 07.11 (`29d4e86`).
+    """
     people = shared_people(voice_base_path)
     if not people:
         return 0
@@ -50,12 +56,13 @@ def sync_people(store: Store, project_id: int, voice_base_path: str | None = Non
         ч = _части(фио)
         return " ".join(sorted(ч[:2])) if len(ч) >= 2 else _norm(фио)
 
-    в_проекте: dict[str, dict] = {}
+    в_проекте: dict[str, list[dict]] = {}
     for r in store.q("SELECT id, full_name FROM people WHERE project_id=?", (project_id,)):
         ч = _части(r["full_name"])
         if len(ч) >= 2:
-            в_проекте.setdefault(_ключ(r["full_name"]), r)
+            в_проекте.setdefault(_ключ(r["full_name"]), []).append(r)
     added = updated = 0
+    не_угадано = 0
     for p in people:
         name = " ".join(str(p.get("full_name") or "").split())
         if not name:
@@ -63,20 +70,37 @@ def sync_people(store: Store, project_id: int, voice_base_path: str | None = Non
         if _norm(name) in have:
             continue
         ч = _части(name)
-        если_есть = в_проекте.get(_ключ(name)) if len(ч) >= 2 else None
-        if если_есть is not None:
-            было = _части(если_есть["full_name"])
-            if len(было) == 2 and len(ч) >= 3:
-                # дописать отчество в существующую запись
-                store.update("people", если_есть["id"], full_name=name)
-                have[_norm(name)] = {"full_name": name}
-                updated += 1
-                continue
-            if len(было) >= 3 and len(ч) >= 3 and _norm(было[2]) == _norm(ч[2]):
-                continue          # тот же человек, уже есть
-            if len(было) == 2 and len(ч) == 2:
-                continue          # те же два слова в другом порядке — один человек
-            # разные отчества — тёзки: это разные люди, заводим второго отдельной записью
+        варианты = в_проекте.get(_ключ(name), []) if len(ч) >= 2 else []
+        if варианты:
+            if len(ч) >= 3:
+                тот_же = [r for r in варианты if len(_части(r["full_name"])) >= 3
+                          and _norm(_части(r["full_name"])[2]) == _norm(ч[2])]
+                if тот_же:
+                    continue          # тот же человек, уже есть
+                без_отчества = [r for r in варианты if len(_части(r["full_name"])) == 2]
+                if без_отчества:
+                    # дописать отчество в существующую запись
+                    store.update("people", без_отчества[0]["id"], full_name=name)
+                    have[_norm(name)] = {"full_name": name}
+                    обновлённая = без_отчества[0]
+                    for гр in в_проекте.values():
+                        for i, r in enumerate(гр):
+                            if r["id"] == обновлённая["id"]:
+                                гр[i] = {"id": r["id"], "full_name": name}
+                    updated += 1
+                    continue
+                # разные отчества — тёзки: это разные люди, заводим второго отдельной записью
+            else:
+                # пришло «фамилия + имя»: один человек с отчеством — это он; двое с разными отчествами — не угадываем
+                отчества = {_norm(_части(r["full_name"])[2]) for r in варианты
+                            if len(_части(r["full_name"])) >= 3}
+                if len(отчества) <= 1:
+                    continue          # один человек (или записи без отчества) — это он
+                не_угадано += 1
+                if неоднозначные is not None:
+                    неоднозначные.append({"name": name, "project_id": project_id,
+                                          "candidates": [r["full_name"] for r in варианты]})
+                continue              # третью запись не заводим: угадывать не должны (09.11.2026)
         store.insert("people", project_id=project_id, full_name=name,
                      role=str(p.get("role") or ""), department=str(p.get("department") or ""),
                      aliases=json.dumps([], ensure_ascii=False),
@@ -85,9 +109,10 @@ def sync_people(store: Store, project_id: int, voice_base_path: str | None = Non
                      known_marks=json.dumps([], ensure_ascii=False))
         have[_norm(name)] = {"full_name": name}
         if len(ч) >= 2:
-            в_проекте.setdefault(_ключ(name), {"id": 0, "full_name": name})
+            в_проекте.setdefault(_ключ(name), []).append({"id": 0, "full_name": name})
         added += 1
-    print(f"MeetFlow: Команда проекта {project_id} — добавлено {added}, дописано отчеств {updated}", file=__import__("sys").stderr, flush=True)
+    print(f"MeetFlow: Команда проекта {project_id} — добавлено {added}, дописано отчеств {updated}"
+          + (f", тёзок не угадано {не_угадано}" if не_угадано else ""), file=__import__("sys").stderr, flush=True)
     return added
 
 
