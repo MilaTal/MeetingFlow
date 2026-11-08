@@ -174,7 +174,20 @@ class Team:
                     hit.append(i)
                     break
         if hit:
-            return " ".join(orig[i] for i in hit)
+            # 08.11.2026 (пункт 3 плана): возвращаем НЕПРЕРЫВНЫЙ фрагмент цитаты, без повторов. Раньше сюда
+            # попадали все совпавшие слова по отдельности — отсюда «Антон Антон» и «Сергеевич Сергеевич».
+            индексы = sorted(set(hit))
+            лучший = текущий = [индексы[0]]
+            for i in индексы[1:]:
+                if i == текущий[-1] + 1:
+                    текущий.append(i)
+                else:
+                    if len(текущий) > len(лучший):
+                        лучший = текущий
+                    текущий = [i]
+            if len(текущий) > len(лучший):
+                лучший = текущий
+            return " ".join(orig[i] for i in лучший)
         depts = set(self._heads) | {p.department.lower().replace("ё", "е") for p in self.people if p.department}
         for w, o in zip(qw, orig):
             if w in depts:
