@@ -54,8 +54,11 @@ class Match:
 class Team:
     def __init__(self, people: list[Person], diminutives: dict[str, list[str]] | None = None,
                  department_heads: dict[str, str] | None = None, tasks: list[dict] | None = None,
-                 today: str | None = None):
+                 today: str | None = None, voice: list[str] | None = None):
         self._tasks = tasks or []                 # реестр — для профиля человека (темы за 60 дней)
+        # Говорящие этой встречи, опознанные по слепкам голоса (`voice_names`): фамилии нет — сверяем с ними
+        # (слово владелицы 08.11.2026: «если фамилии нет, то надо проверить говорящих по слепкам»).
+        self._voice = {" ".join(v.replace("ё", "е").replace("Ё", "Е").lower().split()) for v in (voice or []) if v}
         self._since = ""
         if today:
             try:
@@ -107,6 +110,7 @@ class Team:
         # Алексеевич. Ищем человека, у которого в полном ФИО есть и имя, и отчество; единственный — это он
         # (слово владелицы 08.11.2026; раньше отчество не участвовало вовсе).
         отчества = [t for t in toks if len(t) > 4 and t.endswith(("вич", "вна", "чна", "ична"))]
+        пара: list = []
         if отчества:
             имя_рядом = [t for t in toks if t not in отчества and len(t) > 1][:1]
             if имя_рядом:
@@ -141,12 +145,43 @@ class Team:
             # фамилия и имя: «похож» — это та же фамилия, а не одно совпавшее имя (документ 14)
             partial = [p for p in partial if words(p.full_name) and
                        any(same_word(t, words(p.full_name)[0]) for t in toks if not self._is_first_name(t))]
+            # «Андрей Алексеевич»: фамилии нет — фамильный отбор пуст, но имя и отчество уже назвали двух Андреев;
+            # их и показываем, а дальше решает голос (слово владелицы 08.11.2026)
+            partial = partial or пара
         # запись короче упоминания («Пересыпкин» при «Пересыпкин Сергей») — кандидат, а не «никого»
         # (находка Планёрки, письмо meeting-registry 23)
         partial += [p for p in self.people if p not in partial and len(words(p.full_name)) == 1
                     and any(same_word(t, words(p.full_name)[0]) for t in toks)]
         partial += [p for p in suspects if p not in partial]
+        # 08.11.2026 (пункт 3 плана): фамилии в упоминании нет — «Сергей», «Андрей Алексеевич», — и кандидатов
+        # несколько: сверяем с опознанными по слепкам говорящими этой встречи. Один из них говорил — это он.
+        if len(toks) <= 2 and partial and not self._есть_фамилия(toks):
+            голосом = self._по_голосу(partial)
+            if len(голосом) == 1:
+                return Match(голосом[0], via="голос")
+            if голосом:
+                partial = голосом
         return Match(None, candidates=partial, via="ambiguous" if partial else "unknown")
+
+    def _есть_фамилия(self, toks: list[str]) -> bool:
+        """Названа ли в упоминании чья-то фамилия «Команды»: только тогда голос не нужен (имя само однозначно).
+        Имя, похожее на фамилию по падежу («Сергей» ~ «Сергеев», правило `same_word`), фамилией не считается."""
+        for p in self.people + self.unconfirmed:
+            pw = words(p.full_name)
+            if len(pw) >= 2 and any(not self._is_first_name(t) and same_word(t, pw[0]) for t in toks):
+                return True
+        return False
+
+    def _по_голосу(self, people: list[Person]) -> list[Person]:
+        """Кандидаты, чей голос опознан на этой встрече: сравниваются полные ФИО без «ё» и регистра."""
+        if not self._voice:
+            return []
+        out = []
+        for p in people:
+            key = " ".join(p.full_name.replace("ё", "е").replace("Ё", "Е").lower().split())
+            if key in self._voice:
+                out.append(p)
+        return out
 
     def said(self, mention: str, quote: str) -> str | None:
         """Как исполнитель назван в самой цитате — с «Командой» сверяется прозвучавшее, а не имя из ответа модели.

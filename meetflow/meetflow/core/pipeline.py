@@ -841,7 +841,8 @@ class MeetingPipeline:
                          json.loads(p.get("known_marks") or "[]"))
                   for p in self.s.q("SELECT * FROM people WHERE project_id=?", (project_id,))]
         team = Team(people, self.theme.get("people.diminutives"), self.theme.get("people.department_heads"),
-                    tasks=_as_of(self.reg.list(project_id, None), meeting.get("date")), today=meeting.get("date"))
+                    tasks=_as_of(self.reg.list(project_id, None), meeting.get("date")), today=meeting.get("date"),
+                    voice=self._participants(meeting_id, meeting)[0])
         gate = TaskGate(team, self.neg, GateConfig(**self.theme.get("gates", {})))
 
         planned: list[tuple[TaskDraft, Any]] = []
