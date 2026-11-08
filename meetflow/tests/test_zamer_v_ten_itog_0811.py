@@ -148,3 +148,28 @@ def test_спорные_пары_из_журнала(tmp_path):
     текст = м.markdown(разбор)
     assert "## Спорные пары" in текст
     assert "встреча 7, предмет 0.55" in текст
+
+
+def test_база_добавляет_срез_в_тот_же_отчёт(tmp_path, capsys):
+    """13.11: один запуск даёт и недельную таблицу, и срез по текущим задачам — если недели наблюдения нет."""
+    from meetflow.core.store import Store
+
+    м = _скрипт()
+    база = tmp_path / "srez.db"
+    s = Store(str(база))
+    pid = s.insert("projects", name="Пилот", theme="it_product")
+    mid = s.insert("meetings", project_id=pid, date="2026-11-06", status="built")
+    s.insert("sources", meeting_id=mid, name="запись", kind="transcript",
+             text="[00:01:00] Игнатов Иван: Петрова Анастасия, подготовьте график поставки труб к пятнице.",
+             digest="d1", created_at="2026-11-06T10:00:00")
+    s.insert("tasks", project_id=pid, description="Подготовить график поставки труб",
+             assignee="Петрова Анастасия", status="active", source_meeting_id=mid,
+             source_quote="Петрова Анастасия, подготовьте график поставки труб к пятнице")
+    s.close()
+    журнал = _журнал(tmp_path, _строка("2026-11-08T10:00:00", 8, чем="сборка (копия базы, демонстрация 08.11)"))
+    до = журнал.read_text(encoding="utf-8")
+    код = м.main(["--журнал", str(журнал), "--с", "2026-11-08", "--по", "2026-11-13", "--база", str(база)])
+    вывод = capsys.readouterr()
+    assert код == 3
+    assert "Срез тени сведения по текущим задачам" in вывод.out and "| 1 | 2026-11-06 |" in вывод.out
+    assert журнал.read_text(encoding="utf-8") == до, "срез не пишет в журнал"

@@ -182,12 +182,24 @@ def markdown(разбор: dict, битых: int = 0) -> str:
     return "\n".join(строки)
 
 
+def _срез():
+    """Скрипт среза по текущим задачам — рядом, в `scripts/`. Импорт по пути: `scripts` — не пакет."""
+    import importlib.util
+    путь = Path(__file__).with_name("srez_ten_tekushchie.py")
+    spec = importlib.util.spec_from_file_location("srez_ten_tekushchie", путь)
+    м = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(м)
+    return м
+
+
 def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(description="Итог замера В по журналу тени сведения")
     ap.add_argument("--журнал", default=str(ЖУРНАЛ), help="путь к svedenie_ten.jsonl")
     ap.add_argument("--с", default=НАЧАЛО_НЕДЕЛИ, help="начало окна, ГГГГ-ММ-ДД (по умолчанию 2026-11-08)")
     ap.add_argument("--по", default=date.today().isoformat(), help="конец окна, ГГГГ-ММ-ДД (по умолчанию сегодня)")
     ap.add_argument("--вывод", default=None, help="файл, куда записать таблицу (по умолчанию только печать)")
+    ap.add_argument("--база", default=None,
+                    help="база MeetFlow для среза по текущим задачам (только чтение); без неё — только журнал")
     a = ap.parse_args(argv)
 
     строки, битых = прочитать(a.журнал)
@@ -196,6 +208,16 @@ def main(argv: list[str] | None = None) -> int:
         return 1
     разбор = собрать(строки, a.с, a.по)
     текст = markdown(разбор, битых)
+    if a.база:
+        # 13.11: если рабочих сборок за неделю не было, решение принимается по срезу — пусть он будет в том же отчёте,
+        # а не отдельным запуском (слово владелицы «итог одной таблицей», 09.11.2026)
+        try:
+            м = _срез()
+            текст += "\n\n" + м.markdown(м.срез(a.база))
+        except SystemExit as exc:
+            текст += f"\n\n## Срез по текущим задачам\n\nсрез не сделан: {exc}\n"
+        except Exception as exc:  # noqa: BLE001 — срез не должен ронять итог
+            текст += f"\n\n## Срез по текущим задачам\n\nсрез не сделан: {type(exc).__name__}: {exc}\n"
     print(текст)
     if a.вывод:
         Path(a.вывод).write_text(текст, encoding="utf-8", newline="\n")
