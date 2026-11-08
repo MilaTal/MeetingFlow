@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import threading
 import time
 import traceback
@@ -47,6 +48,31 @@ STALL_STEP_SEC = int(os.environ.get("MEETFLOW_WATCH_STALL_STEP_SEC", "1800"))
 # сама, а итог (остановлена по пределу → файл в «остановлено») подбирает следующий проход. Раньше проход ждал до 4 ч:
 # сборка, вставшая в очереди (повтор через 10 мин / 1 ч или зависшая), останавливала забор новых файлов.
 AUTORUN_WAIT_SEC = float(os.environ.get("MEETFLOW_WATCH_AUTORUN_WAIT_SEC", "60"))
+# Выгрузка ВКС рядом с записью прикрепляется к её встрече по дате И времени (записка 05.11.2026, п. 6): время в имени
+# файла против времени записи источника. Расхождение больше этого порога — своя встреча, чтобы две встречи одного дня
+# не слились в одну. Нет времени в именах — прикрепляется как прежде.
+ПОРОГ_ВРЕМЕНИ_МИН = int(os.environ.get("MEETFLOW_INTAKE_TIME_GAP_MIN", "180"))
+
+_ДАТА_В_ИМЕНИ = re.compile(r"\d{1,2}[.\-]\d{1,2}[.\-]\d{2,4}|\d{4}-\d{2}-\d{2}")
+_ВРЕМЯ_В_ИМЕНИ = re.compile(r"(?<!\d)(\d{1,2})[-_.: ](\d{2})(?:[-_.: ](\d{2}))?(?!\d)")
+
+
+def время_из_имени(name: str) -> int | None:
+    """Время начала в имени файла, минуты от полуночи: «2026-11-06 11-59-7», «06.11.2026 11.59», «10-15».
+
+    Дата из имени сначала убирается — иначе «06.11» читалось бы как время. Времени нет — None: встреча ищется
+    по дате, как раньше."""
+    s = _ДАТА_В_ИМЕНИ.sub(" ", name or "")
+    было_дата = bool(_ДАТА_В_ИМЕНИ.search(name or ""))
+    for m in _ВРЕМЯ_В_ИМЕНИ.finditer(s):
+        # «06.11» без года — дата, а не время: время с точкой читаем, только когда в имени была полная дата
+        if m.group(0)[len(m.group(1)):len(m.group(1)) + 1] == "." and not было_дата:
+            continue
+        ч, мин = int(m.group(1)), int(m.group(2))
+        if ч > 23 or мин > 59:
+            continue
+        return ч * 60 + мин
+    return None
 
 
 class IntakeError(ValueError):
@@ -235,13 +261,18 @@ class IntakeService:
                 # 08.11.2026 (пункт 2 плана): в названии — тема из имени файла без технических знаков,
                 # само имя файла хранится отдельным полем
                 метка = тема_из_приёмника(item.path.name) or None
-                уже = self.s.q("SELECT id FROM meetings WHERE project_id=? AND date=? AND label=? AND deleted_at IS NULL "
-                               "ORDER BY id", (общие, item.meeting_date.isoformat(), метка))
-                mid = уже[0]["id"] if уже else self.s.insert(
-                    "meetings", project_id=общие, date=item.meeting_date.isoformat(), label=метка,
+                дата = item.meeting_date.isoformat()
+                все = self.s.q("SELECT id, label FROM meetings WHERE project_id=? AND date=? AND deleted_at IS NULL "
+                               "ORDER BY id", (общие, дата))
+                # выгрузка ВКС рядом с записью — та же встреча, когда время в именах совпало (записка 05.11.2026, п. 6)
+                подходят = [r for r in все if self._по_времени(r["id"], item.path.name)]
+                таже = next((r for r in подходят if (r["label"] or None) == метка),
+                            подходят[0] if подходят else None)
+                mid = таже["id"] if таже else self.s.insert(
+                    "meetings", project_id=общие, date=дата, label=метка,
                     file_name=item.path.name, project_how="проект определится по содержанию записи")
             else:
-                mid = self._meeting_for(цель, item.meeting_date.isoformat())
+                mid = self._meeting_for(цель, item.meeting_date.isoformat(), item.path.name)
                 self.s.update("meetings", mid, project_how=чей["how"])
             проект_приёма = цель or общие
             is_media = self.pipe.plugins.resolve_source(item.path.name) is not None and \
@@ -321,12 +352,26 @@ class IntakeService:
                                       "candidate_id": по["project_id"], "candidate": имя}, mid)
         return цель, чей.get("how") or ""
 
-    def _meeting_for(self, project_id: int, iso_date: str) -> int:
+    def _meeting_for(self, project_id: int, iso_date: str, имя: str = "") -> int:
+        """Встреча дня. Несколько встреч одного дня различаются временем в именах файлов (записка 05.11.2026, п. 6):
+        выгрузка ВКС рядом с записью прикрепляется к встрече своей записи, а не к первой за день."""
         rows = self.s.q("SELECT id FROM meetings WHERE project_id=? AND date=? AND deleted_at IS NULL ORDER BY id",
                         (project_id, iso_date))
-        if rows:
-            return rows[0]["id"]
+        for r in rows:
+            if self._по_времени(r["id"], имя):
+                return r["id"]
         return self.s.insert("meetings", project_id=project_id, date=iso_date, label="")
+
+    def _по_времени(self, mid: int, имя: str) -> bool:
+        """Та же встреча по времени: время в имени нового файла против времён источников встречи. Нет времени хотя
+        бы с одной стороны или расхождение в пределах порога — та же встреча (прежнее поведение по дате)."""
+        mine = время_из_имени(имя)
+        if mine is None:
+            return True
+        времена = [t for t in (время_из_имени(s["name"]) for s in
+                               self.s.q("SELECT name FROM sources WHERE meeting_id=? AND removed_at IS NULL", (mid,)))
+                   if t is not None]
+        return not времена or min(abs(mine - t) for t in времена) <= ПОРОГ_ВРЕМЕНИ_МИН
 
 
     def state(self, project_id: int) -> dict[str, Any]:
