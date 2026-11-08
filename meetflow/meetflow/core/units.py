@@ -47,6 +47,7 @@ from . import asr_journal
 from ..connectors.base import AnswerTruncated
 from .negation import NegationRule
 from .people import Team
+from .prompts import ВТОРОЙ_ТЕКСТ_ПРАВИЛО
 from .security import DATA_NOT_INSTRUCTIONS, fence
 from .text import content_words, same_lexeme, same_word, words
 from .types import TaskDraft
@@ -361,10 +362,11 @@ class UnitsExtractor:
     def __init__(self, pipe, team: Team, gate):
         self.pipe, self.team, self.gate = pipe, team, gate
 
-    def _head(self, meeting_date: str, listing: str) -> str:
+    def _head(self, meeting_date: str, listing: str, второй: bool = False) -> str:
         role = self.pipe.theme.get("prompts.domain_role", "")
         return (f"{role}\nТы извлекаешь из КУСКА записи рабочей встречи {meeting_date} значимые ЕДИНИЦЫ.\n"
                 f"{KINDS_TEXT}\n{ANSWER_TEXT}\n\nОткрытые задачи (справка, не источник фактов):\n{listing}\n\n"
+                f"{ВТОРОЙ_ТЕКСТ_ПРАВИЛО if второй else ''}"
                 f"{DATA_NOT_INSTRUCTIONS}")
 
     def run(self, project_id: int, meeting: dict, source, budget, existing_tasks) -> dict:
@@ -382,9 +384,14 @@ class UnitsExtractor:
         parts = chunk(lines)
         for part in parts:
             body, _ = fence(_render(part), "кусок записи, строки пронумерованы")
+            # выгрузка ВКС на то же время — второй текст, не замена своему (записка 05.11.2026, п. 1)
+            второй = self.pipe._второй_кусок([ln.text for ln in part])
+            if второй:
+                wb, _ = fence(второй, "выгрузка ВКС на то же время — второй текст встречи")
+                body = f"{body}\n\n{wb}"
             try:
-                out = self.pipe._call(self.pipe.gen, budget, "units", self._head(md or "", listing), body,
-                                      meeting["id"], fix_json=числа_строк)
+                out = self.pipe._call(self.pipe.gen, budget, "units", self._head(md or "", listing, bool(второй)),
+                                      body, meeting["id"], fix_json=числа_строк)
                 items = out.get("items") if isinstance(out, dict) else None
                 пунктов_модели += len(items) if isinstance(items, list) else 0
                 found += parse_items(items, by_n, self.team, open_tasks, mdate, "куски", dropped=потеряно)

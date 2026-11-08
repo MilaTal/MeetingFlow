@@ -21,6 +21,16 @@ from dataclasses import dataclass
 
 from .security import DATA_NOT_INSTRUCTIONS, fence
 
+# Второй текст сборки — выгрузка ВКС (записка 05.11.2026, п. 2). Своя локальная остаётся основной: смысл, время,
+# подписи голосом; выгрузка — источник названий объектов, номеров, сумм, дат и сроков там, где своя искажена. Тексты
+# код не сливает, модель видит их отдельно и помечает расхождение, а не примиряет.
+ВТОРОЙ_ТЕКСТ_ПРАВИЛО = (
+    "\n\nВторой текст ниже — выгрузка ВКС той же встречи. Своя расшифровка остаётся основной: из неё смысл, порядок и "
+    "подписи голосом. Названия объектов и проектов, номера, суммы, даты и сроки бери из выгрузки, если в своём тексте "
+    "на том же отрезке времени они искажены или пропущены. Формулировку поручения строй по смыслу обоих текстов. "
+    "Если тексты расходятся в числе, дате или названии объекта — не примиряй и не выбирай молча: оставь оба варианта "
+    "дословно (в формулировке или в сроке), это расхождение разберёт человек.")
+
 
 @dataclass(frozen=True)
 class ModelProfile:
@@ -113,7 +123,8 @@ class PromptBuilder:
     def _system(self, task: str) -> str:
         return f"{self.role}\n\n{task}\n\n{DATA_NOT_INSTRUCTIONS}\n{self.p.json_hint}"
 
-    def extract_tasks(self, first_line: int, lines: list[str], team: list[str], projects: str = "") -> tuple[str, str]:
+    def extract_tasks(self, first_line: int, lines: list[str], team: list[str], projects: str = "",
+                      второй: str = "") -> tuple[str, str]:
         # Прежняя формулировка «поручение есть, только если исполнителя назвали» заставляла модель
         # молча отбрасывать решённые действия без исполнителя — у протоколов секретаря ERP это
         # большинство (прогон 03.10.26: 06.03 — 1 задача против 13). Правило владельца: без
@@ -143,6 +154,10 @@ class PromptBuilder:
         if projects:                     # общая база компании (28.10.2026): только у встреч общей тематики
             team_txt += "\n" + projects
         body, _ = fence(numbered(lines, first_line), "кусок записи встречи, строки пронумерованы")
+        if второй:
+            task += ВТОРОЙ_ТЕКСТ_ПРАВИЛО
+            wb, _ = fence(второй, "выгрузка ВКС на то же время — второй текст встречи, не замена своему")
+            body = f"{body}\n\n{wb}"
         return self._system(task), f"{team_txt}\n\n{body}{self.p.no_think_suffix}"
 
     def closing_check(self, candidates: list[dict]) -> tuple[str, str]:
@@ -156,7 +171,8 @@ class PromptBuilder:
         return self._system(task), body + self.p.no_think_suffix
 
     def protocol(self, sections: list[str], source_text: str, notes_text: str = "",
-                 participants: list[str] | None = None, leader: str = "", topic_hint: str = "") -> tuple[str, str]:
+                 participants: list[str] | None = None, leader: str = "", topic_hint: str = "",
+                 второй: str = "") -> tuple[str, str]:
         task = ("ЗАДАЧА: кратко изложи обсуждение по разделам протокола. Только то, что есть в "
                 "тексте встречи; задачи и таблицы не пиши — их вставит система. Без оценок и "
                 "домыслов, деловым языком.\nРАЗДЕЛЫ:\n" + "\n".join(f"- {s}" for s in sections) +
@@ -175,6 +191,10 @@ class PromptBuilder:
         if notes_text:
             nb, _ = fence(notes_text, "заметки — акцент: что точно обязательно, но не предел")
             body = f"{body}\n\n{nb}"
+        if второй:
+            task += ВТОРОЙ_ТЕКСТ_ПРАВИЛО
+            wb, _ = fence(второй, "выгрузка ВКС той же встречи — второй текст, не замена своему")
+            body = f"{body}\n\n{wb}"
         return self._system(task), body + self.p.no_think_suffix
 
     def plan(self, sections: list[str], source_text: str, materials: list[str] | None = None) -> tuple[str, str]:

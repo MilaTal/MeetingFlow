@@ -47,6 +47,7 @@ from . import iskazheniya_nazvaniy, slovar_whisper, ukrupnenie_sborka
 from . import obedinenie as obedinenie_mod     # объединение и мусор (Доработка 1, 29.10.2026)
 from . import vtoroy_sudya                      # второй судья в тень (записка 05.11.2026)
 from . import svedenie_ten                     # сведение кодом в тень, вариант C (слово владелицы 06.11.2026)
+from . import vks_vtoroy_tekst                 # выгрузка ВКС вторым текстом сборки (записка 05.11.2026)
 from .team_sync import sync_people
 from ..connectors.team_shared import team_shared_state
 from .dates import due_text, lenient_date
@@ -136,6 +137,19 @@ def _span(text: str) -> int:
         a, b, c = int(m.group(1)), int(m.group(2)), int(m.group(3) or 0)
         marks.append(a * 3600 + b * 60 + c if m.group(3) else a * 60 + b)
     return marks[-1] - marks[0] if len(marks) >= 2 and marks[-1] >= marks[0] else 0
+
+
+def teksty_sborki(transcripts: list[dict]) -> tuple[dict | None, dict | None, str]:
+    """(основная, вторая, причина) — расшифровки сборки (записка 05.11.2026, п. 1).
+
+    Основная — по правилу 25.10.2026 `choose_transcript`: своя локальная, выгрузка только при явно неполной своей.
+    Вторая — выгрузка ВКС рядом со своей, и только когда основная своя: код тексты не сливает, модель видит оба и
+    берёт из выгрузки названия, номера и сроки там, где своя искажена."""
+    base, reason = choose_transcript(transcripts)
+    second = None
+    if base is not None and base.get("local_asr"):
+        second = vks_vtoroy_tekst.вторая_расшифровка(transcripts)
+    return base, second, reason
 
 
 def choose_transcript(transcripts: list[dict]) -> tuple[dict | None, str]:
@@ -390,6 +404,17 @@ class MeetingPipeline:
             if len(own) >= 3 and len(own & got) >= 0.6 * len(own):
                 return True
         return False
+
+    def _второй_кусок(self, lines: list[str]) -> str:
+        """Кусок выгрузки ВКС на то же время, что и строки своего текста (записка 05.11.2026, п. 1). Нет выгрузки
+        или меток времени — пусто: узкий вызов не получает весь второй текст, только свой отрезок."""
+        текст = getattr(self, "_второй_текст", "") or ""
+        if not текст:
+            return ""
+        времена = [t for t in (vks_vtoroy_tekst.время_строки(line) for line in lines or []) if t is not None]
+        if not времена:
+            return ""
+        return vks_vtoroy_tekst.кусок_по_времени(текст, min(времена), max(времена))
 
     def _participants(self, meeting_id: int, meeting: dict) -> tuple[list[str], str]:
         """ФИО, опознанные по голосам в источниках встречи, и ведущий — для раздела «Участники».
@@ -767,6 +792,7 @@ class MeetingPipeline:
 
     def _run(self, project_id: int, meeting_id: int, limits: BudgetLimits | None) -> RunReport:
         rep = RunReport(meeting_id)
+        self._второй_текст = ""          # выгрузка ВКС вторым текстом — по источникам, ниже (записка 05.11.2026)
         # признак сборки: номер встречи повторяется (стенд, удаление), по нему счёт вызовов не складывается
         self.journal.run_id = f"{meeting_id}-{datetime.now():%Y%m%dT%H%M%S}-{threading.get_ident()}"
         rep.run_id = self.journal.run_id
@@ -803,9 +829,14 @@ class MeetingPipeline:
         if not transcripts and not notes:
             rep.status, rep.detail = "no_sources", "У встречи нет читаемых источников — протокол не собирается."
             return rep
-        base, rep.source_reason = choose_transcript(transcripts) if transcripts else (None, "")
+        # Тексты сборки (записка 05.11.2026, п. 1): основа — правило 25.10.2026 `choose_transcript`; выгрузка ВКС идёт
+        # вторым текстом рядом со своей, не вместо неё. Код тексты не сливает — модель видит два и помечает расхождение.
+        base, вторая, rep.source_reason = teksty_sborki(transcripts) if transcripts else (None, None, "")
         if base is None:
             base = notes[0]
+        self._второй_текст = (вторая.get("text") or "") if вторая is not None else ""
+        if self._второй_текст:
+            rep.source_reason = "; ".join(x for x in (rep.source_reason, "выгрузка ВКС вторым текстом") if x)
         rep.source_choice = base.get("name") or ""
         if base.get("kind") == SourceKind.TRANSCRIPT.value:
             try:
@@ -876,7 +907,8 @@ class MeetingPipeline:
             def extract(first: int, part: list[str], depth: int = 0) -> list:
                 """Ответ оборван потолком 4096 — кусок делится пополам (прогон ERP 03.10.26: на 08.09 обрыв
                 ронял всю встречу). Делить нечего — кусок пропускается с пометкой, встреча не теряется."""
-                sysm, user = self.pb.extract_tasks(first, part, names, проекты_компании)
+                sysm, user = self.pb.extract_tasks(first, part, names, проекты_компании,
+                                                   второй=self._второй_кусок(part))
                 try:
                     return _list(self._call(self.gen, budget, "extract_tasks", sysm, user, meeting_id), "tasks")
                 except AnswerTruncated:
@@ -1222,7 +1254,8 @@ class MeetingPipeline:
                     from . import topics
                     sysm, user = self.pb.protocol(скелет_модели, safe_source.text, notes_text,
                                                   participants=participants, leader=leader,
-                                                  topic_hint=topics.подсказка_протокола(self._topic(meeting)))
+                                                  topic_hint=topics.подсказка_протокола(self._topic(meeting)),
+                                                  второй=getattr(self, "_второй_текст", ""))
                     try:
                         out = self._call(self.gen, budget, "protocol", sysm, user, meeting_id)
                         sections = {k: str(v)[:20000] for k, v in _dict(out, "sections").items()

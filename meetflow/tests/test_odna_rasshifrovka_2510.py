@@ -2,8 +2,12 @@
 
 Страховка: своя пустая или знаков меньше 0,5 от выгрузки — текстом идёт выгрузка; выбор и причина — в итоге сборки.
 Покрытие по времени (70 %) в MeetFlow пока не считается: длительность записи не хранится. Тест написан до правки.
+
+08.11.2026 (записка 05.11.2026, п. 1; пункт 6 плана): правило выбора не отменено, но выгрузка больше не пропадает —
+при полной своей она идёт в сборку ВТОРЫМ текстом (`teksty_sborki`). Тест ниже не удалён, а перевёрнут: к нему
+добавлена вторая половина — выгрузка рядом со своей.
 """
-from meetflow.core.pipeline import choose_transcript
+from meetflow.core.pipeline import choose_transcript, teksty_sborki
 
 
 def _s(name, text, local=False, sid=1):
@@ -15,6 +19,9 @@ def test_local_transcript_wins_when_complete():
     other = _s("выгрузка", "б" * 1200, sid=2)
     row, reason = choose_transcript([other, local])
     assert row is local and reason == ""
+    # перевёрнут 08.11.2026 (записка 05.11.2026, п. 1): выгрузка не теряется — она второй текст сборки
+    base, second, _why = teksty_sborki([other, local])
+    assert base is local and second is other
 
 
 def test_local_empty_falls_back_to_upload():
