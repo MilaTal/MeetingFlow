@@ -1713,3 +1713,9 @@ mark.zapis-mark { background: var(--accent-soft); color: inherit; box-shadow: in
 .pl-nested-item { padding: 4px 8px; border-radius: 6px; color: var(--text-muted); font-size: 13.5px;
   text-decoration: none; }
 .pl-nested-item:hover { background: var(--field-bg); color: var(--text); }
+
+/* Поиск проекта по имени в шапке блока (08.11.2026) */
+.pl-head { display: flex; align-items: center; gap: 8px; }
+.pl-search { flex: 1 1 auto; min-width: 0; font-size: 12.5px; padding: 3px 8px; border-radius: 6px;
+  border: 1px solid var(--reg-line); background: var(--field-bg); color: var(--text); }
+.pl-search::placeholder { color: var(--text-muted); }

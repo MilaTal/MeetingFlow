@@ -1712,8 +1712,11 @@ function рисоватьПроекты() {
   if (!$l) return;
   const тек = выбранныйПроект();
   const супер = typeof isSuperAdmin === "function" && isSuperAdmin();
+  // Поиск проекта по имени (слово владелицы 08.11.2026): вводим буквы — список сужается; «Общие встречи» остаются.
+  const запрос = (document.getElementById("pl-search")?.value || "").trim().toLowerCase().replace("ё", "е");
+  const подходит = (п) => !запрос || (п.name || "").toLowerCase().replace("ё", "е").includes(запрос);
   const общие = _проекты.filter(п => п.general);
-  const прочие = _проекты.filter(п => !п.general);
+  const прочие = _проекты.filter(п => !п.general && подходит(п));
   let верхних = 0;
   const видимые = прочие.filter(п => {
     if (!п.level) верхних += 1;
@@ -1744,7 +1747,7 @@ function рисоватьПроекты() {
   const сМеню = (п) => строка(п) + (п.id === тек ? менюПроектаСтрокой(п) : "");
   $l.innerHTML = общие.map(сМеню).join("") + видимые.map(сМеню).join("") +
     (скрыто > 0 ? `<button type="button" class="pl-extra" data-act="more">Показать ещё</button>` : "") +
-    строка({ id: 0, name: "Все проекты" }) +
+    (запрос ? "" : "") +
     (супер ? `<button type="button" class="pl-extra" data-act="new">+ Новый проект</button>` : "");
   $l.querySelectorAll(".pl-row").forEach(р => {
     р.querySelector(".pl-name").addEventListener("click", () => {
@@ -1882,6 +1885,8 @@ async function выбратьПроект(id) {
   render();
 }
 document.getElementById("project-select")?.addEventListener("change", (e) => выбратьПроект(e.target.value));
+// Поиск проекта по имени: слушатель ставим один раз — поле лежит в шапке блока, перерисовка списка его не трогает
+document.getElementById("pl-search")?.addEventListener("input", () => рисоватьПроекты());
 
 function showLogin(message) {
   me = null;
