@@ -1694,3 +1694,11 @@ mark.zapis-mark { background: var(--accent-soft); color: inherit; box-shadow: in
 .actor-local { color: var(--actor-local); background: var(--actor-local-soft); }
 .actor-store { color: var(--actor-store); background: var(--actor-store-soft); }
 .actor-admin { color: var(--actor-admin); background: var(--actor-admin-soft); }
+
+/* Левая панель по образцу «Меню проекта 08.11»: заголовок и пункты — один шрифт, у каждого пункта значок */
+.pl-head { font-size: 12px; font-weight: 600; letter-spacing: .02em; text-transform: none; color: var(--text-muted); }
+.pl-name { font-size: 14px; font-weight: 500; display: flex; align-items: center; gap: 8px; }
+.pl-ico { display: inline-flex; width: 16px; height: 16px; flex: 0 0 16px; opacity: .75; }
+.pl-svg { width: 16px; height: 16px; fill: none; stroke: currentColor; stroke-width: 1.6;
+  stroke-linecap: round; stroke-linejoin: round; }
+.pl-row.pl-on .pl-ico { opacity: 1; }

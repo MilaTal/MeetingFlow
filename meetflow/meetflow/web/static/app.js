@@ -1696,9 +1696,16 @@ function рисоватьПроекты() {
     return _проектыРаскрыты || верхних <= ПРОЕКТОВ_ВИДНО || п.id === тек;
   });
   const скрыто = прочие.filter(п => !п.level).length - видимые.filter(п => !п.level).length;
+  // Пиктограмма пункта (образец «Меню проекта 08.11»): папка — проект, стопка — «Общие встречи»,
+  // сетка — «Все проекты». Один и тот же размер и цвет, чтобы строки читались как список одного уровня.
+  const значок = (п) => п.id === 0
+    ? '<svg class="pl-svg" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 4h7v7H4zM13 4h7v7h-7zM4 13h7v7H4zM13 13h7v7h-7z"/></svg>'
+    : п.general
+      ? '<svg class="pl-svg" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h16M4 12h16M4 17h16"/></svg>'
+      : '<svg class="pl-svg" viewBox="0 0 24 24" aria-hidden="true"><path d="M3 7a2 2 0 012-2h4l2 2h8a2 2 0 012 2v8a2 2 0 01-2 2H5a2 2 0 01-2-2z"/></svg>';
   const строка = (п) => `<div class="pl-row${п.id === тек ? " pl-on" : ""}" data-id="${п.id}">
       <button type="button" class="pl-name" role="option" aria-selected="${п.id === тек}" title="${esc(п.label || п.name)}"
-        style="padding-left:${8 + 14 * (п.level || 0)}px">${п.level ? "– " : ""}${esc(п.name)}</button>
+        style="padding-left:${8 + 14 * (п.level || 0)}px"><span class="pl-ico">${значок(п)}</span>${esc(п.name)}</button>
       ${супер && !п.general && п.id ? `<button type="button" class="pl-more" aria-label="Действия с проектом «${esc(п.name)}»" aria-haspopup="menu">…</button>` : ""}</div>`;
   $l.innerHTML = общие.map(строка).join("") + видимые.map(строка).join("") +
     (скрыто > 0 ? `<button type="button" class="pl-extra" data-act="more">Показать ещё</button>` : "") +
