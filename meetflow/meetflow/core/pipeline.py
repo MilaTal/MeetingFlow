@@ -48,6 +48,7 @@ from . import obedinenie as obedinenie_mod     # объединение и му�
 from . import vtoroy_sudya                      # второй судья в тень (записка 05.11.2026)
 from . import svedenie_ten                     # сведение кодом в тень, вариант C (слово владелицы 06.11.2026)
 from . import vks_vtoroy_tekst                 # выгрузка ВКС вторым текстом сборки (записка 05.11.2026)
+from . import obekt_ryadom                     # объект рядом с поручением (пункт 8 плана, замер 05.11.2026)
 from .team_sync import sync_people
 from ..connectors.team_shared import team_shared_state
 from .dates import due_text, lenient_date
@@ -444,6 +445,29 @@ class MeetingPipeline:
         self.journal.write(purpose="vks_polnota", meeting_id=meeting_id, okon=len(окна),
                            опор=len(времена), знаков=len(текст))
         return len(окна)
+
+    def _с_объектом(self, описание: str, цитата: str, project_id: int, meeting_id: int,
+                    строки: list[str] | None = None) -> str:
+        """Объект рядом с поручением (пункт 8 плана): в выгрузке ВКС объект назван в пределах ±2 минут от цитаты, а в
+        формулировке его нет — дописываем кодом. Два объекта и больше — описание не меняется, оператору карточка."""
+        текст = getattr(self, "_второй_текст", "") or ""
+        t = vks_vtoroy_tekst.время_строки(цитата or "")
+        if t is None and строки:
+            # короткая цитата идёт без метки времени: ищем её строку в записи и берём время оттуда
+            хвост = " ".join((цитата or "").split())[:60]
+            t = next((vks_vtoroy_tekst.время_строки(строка) for строка in строки
+                      if хвост and хвост in " ".join(строка.split())), None)
+        if not текст or t is None:
+            return описание
+        окно = vks_vtoroy_tekst.кусок_по_времени(текст, t, t, запас=obekt_ryadom.ЗАПАС_СЕК)
+        if not окно:
+            return описание
+        from . import proekt_zapisi as pz
+        итог = obekt_ryadom.с_объектом(описание, окно, pz.проекты(self.s))
+        if итог["сомнительно"]:
+            self.cards.open(project_id, "technical", f"Объект рядом с поручением не ясен: {описание[:100]}",
+                            {"объекты": итог["объекты"], "quote": окно[:1500], "description": описание}, meeting_id)
+        return итог["описание"]
 
     def _participants(self, meeting_id: int, meeting: dict) -> tuple[list[str], str]:
         """ФИО, опознанные по голосам в источниках встречи, и ведущий — для раздела «Участники».
@@ -1350,6 +1374,10 @@ class MeetingPipeline:
                 for d, g in planned:
                     who = g.assignee.label if g.assignee else None
                     pend = g.pending or {}
+                    # Объект рядом с поручением (пункт 8 плана, находка замера 05.11.2026): в выгрузке ВКС объект
+                    # назван в пределах ±2 минут от цитаты, а в формулировке его нет — дописываем кодом; два объекта —
+                    # карточка, описание не меняется.
+                    g.description = self._с_объектом(g.description, g.quote, project_id, meeting_id, source.lines)
                     # отдел без руководителя: исполнитель пустой, отдел — в карточке (владелец 10.10.26 при сверке
                     # скиллов: так в скилле meetflow и движке; отменяет «в графе исполнителя — отдел», письмо 36)
                     if pend.get("reason") == "new_person":
@@ -1452,6 +1480,9 @@ class MeetingPipeline:
                     if not set(reasons) & OUT_OF_REGISTRY:
                         # под вопросом: в реестр и в протокол как обычная, причина — служебная, карточка обязательна
                         who = g.assignee.label if g.assignee else None
+                        # объект рядом с поручением — и на этом пути (пункт 8 плана)
+                        g.description = self._с_объектом(g.description or d.description, quote or d.quote,
+                                                         project_id, meeting_id, source.lines)
                         # пересборка: та же задача этой встречи уже заведена — без цитаты повтор узнаётся по
                         # формулировке и исполнителю (находка циклов ролей ERP и Планёрки, 15.10.26)
                         hit = next((r["id"] for r in this_meeting
@@ -1499,6 +1530,8 @@ class MeetingPipeline:
                             who, np_id, np_new = new_person(pend["name"])
                         elif pend.get("reason") == "department":     # отдел текстом, без карточки (16.10.2026)
                             who, pend = (pend.get("name") or "").strip() or None, {}
+                        # объект рядом с поручением — и на этом пути (пункт 8 плана)
+                        g.description = self._с_объектом(g.description, g.quote, project_id, meeting_id, source.lines)
                         tid = self.reg.add(project_id, g.description, who, meeting_id, g.quote, None, mdate)
                         added.append((tid, TaskDraft(unit.text, None), g))
                         rep.units_tasks += 1
