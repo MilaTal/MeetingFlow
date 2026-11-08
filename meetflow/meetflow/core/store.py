@@ -30,7 +30,7 @@ SCHEMA: dict[str, dict[str, str]] = {
                  "protocol_md": "TEXT", "protocol_built_at": "TEXT", "built_from": "TEXT DEFAULT '[]'",
                  "leader": "TEXT", "review_notes": "TEXT DEFAULT '[]'",
                  # план встречи — как в ERP: готовится до встречи из прошлого протокола, задач и материалов
-                 "plan_md": "TEXT", "plan_built_at": "TEXT", "topic": "TEXT DEFAULT ''",
+                 "plan_md": "TEXT", "plan_built_at": "TEXT", "topic": "TEXT DEFAULT ''", "file_name": "TEXT DEFAULT ''",
                  # экраны ERP 1 в 1 (27.10.2026): состояние встречи, вторая на дату по подтверждению, ключ повтора
                  # создания, ведущий вручную, сводки «Свести в одну», ручная правка протокола и плана, итог сборки
                  "status": "TEXT DEFAULT 'scheduled'", "second_same_day": "INTEGER DEFAULT 0", "request_key": "TEXT",

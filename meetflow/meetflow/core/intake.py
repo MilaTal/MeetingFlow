@@ -27,6 +27,7 @@ from typing import Any
 
 from ..connectors.base import ConnectorError
 from . import hod
+from .nazvanie_vstrechi import тема_из_приёмника
 from ..connectors.watch_folder import (DONE_DIR, MARKER, SKIP_WORDS, STOPPED_DIR, FolderIntake, check_folder_path, is_marker,
                                        single_date)
 from .store import now
@@ -231,12 +232,14 @@ class IntakeService:
             # Повторный проход, пока запись распознаётся, находит ту же встречу по дате и имени файла.
             общие = pz.общие_встречи(self.s)
             if цель is None:
-                метка = f"из папки-приёмника: {item.path.name}"
+                # 08.11.2026 (пункт 2 плана): в названии — тема из имени файла без технических знаков,
+                # само имя файла хранится отдельным полем
+                метка = тема_из_приёмника(item.path.name) or None
                 уже = self.s.q("SELECT id FROM meetings WHERE project_id=? AND date=? AND label=? AND deleted_at IS NULL "
                                "ORDER BY id", (общие, item.meeting_date.isoformat(), метка))
                 mid = уже[0]["id"] if уже else self.s.insert(
                     "meetings", project_id=общие, date=item.meeting_date.isoformat(), label=метка,
-                    project_how="проект определится по содержанию записи")
+                    file_name=item.path.name, project_how="проект определится по содержанию записи")
             else:
                 mid = self._meeting_for(цель, item.meeting_date.isoformat())
                 self.s.update("meetings", mid, project_how=чей["how"])
@@ -323,7 +326,7 @@ class IntakeService:
                         (project_id, iso_date))
         if rows:
             return rows[0]["id"]
-        return self.s.insert("meetings", project_id=project_id, date=iso_date, label="из папки-приёмника")
+        return self.s.insert("meetings", project_id=project_id, date=iso_date, label="")
 
 
     def state(self, project_id: int) -> dict[str, Any]:
