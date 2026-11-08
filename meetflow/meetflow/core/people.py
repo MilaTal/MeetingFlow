@@ -207,6 +207,11 @@ class Team:
         toks = [t for t in re.findall(r"[А-Яа-яЁё]+", mention or "") if len(t) >= 2]
         if len(toks) < 2 or len(toks) > 3:
             return None
+        # 08.11.2026 (пункт 3 плана): «Имя Отчество» — не новый человек, а имя-отчество человека из «Команды»
+        # (корпоративный стиль). Именно здесь появлялись фиктивные «Евгений Сергеевич» и «Сергеевич Сергеевич».
+        отч = [t for t in toks if len(t) > 4 and t.lower().endswith(("вич", "вна", "чна", "ична"))]
+        if len(отч) == len(toks) - 1:
+            return None
         # слово — фамилия того, кто уже есть в «Команде», — значит «похож»: карточка, а не запись
         known = [words(p.full_name)[0] for p in self.people + self.unconfirmed if words(p.full_name)]
         if any(same_word(t.lower(), k) for t in toks for k in known):
