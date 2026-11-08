@@ -1186,9 +1186,9 @@ class MeetingPipeline:
                     все = [{"description": g.description or d.description, "quote": g.quote or d.quote or "",
                             "responsible": (g.assignee.label if g.assignee else ""), "project": проект_встречи_имя}
                            for d, g in planned]
-                    все += [{"description": r["description"] or "", "quote": r.get("quote") or "",
+                    все += [{"description": r["description"] or "", "quote": r.get("source_quote") or "",
                              "responsible": r.get("assignee") or "", "project": проект_встречи_имя}
-                            for r in self.s.q("SELECT description, quote, assignee FROM tasks WHERE "
+                            for r in self.s.q("SELECT description, source_quote, assignee FROM tasks WHERE "
                                               "source_meeting_id=? AND status='active'", (meeting_id,))]
                     счёт = svedenie_ten.посчитать(все, запись=source.text)
                     rep.svedenie_ten = svedenie_ten.строка_итога(счёт)
