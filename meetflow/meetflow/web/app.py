@@ -17,6 +17,8 @@ import threading
 import time
 from contextlib import asynccontextmanager
 from datetime import date as date_cls, datetime, timedelta
+
+_ЗАПУСК = datetime.now()      # время старта процесса — отдаётся в /health (09.11.2026)
 from pathlib import Path
 from typing import Literal
 from urllib.parse import quote, unquote
@@ -522,7 +524,10 @@ def create_app(theme_name: str | None = None, db_path: str | None = None, journa
         сервер во время распознавания нельзя — шаг начинается с нуля, и на длинной записи это часы работы.
         Порядок перезапуска: сначала `/health`, при `busy` — ждать конца шага."""
         что = _busy(intake)
-        return {"ok": True, "theme": theme.id, "busy": bool(что), "busy_что": что}
+        # `started_at` — когда поднялся процесс (09.11.2026): по нему видно, работает ли служба на текущем коде,
+        # без ручного wmic и без времени в журнале обёртки
+        return {"ok": True, "theme": theme.id, "busy": bool(что), "busy_что": что,
+                "started_at": _ЗАПУСК.isoformat(timespec="seconds")}
 
 
     def _busy(intake_service) -> dict:
