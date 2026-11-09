@@ -31,7 +31,7 @@ def test_шапка_панели_двумя_строками():
 
 def test_версии_подняты():
     html = (СТАТИКА / "index.html").read_text(encoding="utf-8")
-    assert "app.js?v=20261109mf85" in html and "styles.css?v=20261109mf85" in html
+    assert "app.js?v=20261109mf86" in html and "styles.css?v=20261109mf86" in html
 
 
 def test_реестр_задач_назван_и_открывается_из_встречи():
@@ -85,7 +85,8 @@ def test_в_меню_проекта_реестр_встреч_первым():
     конец = js.index("const строка =", начало)
     кусок = js[начало:конец]
     assert кусок.index('href="#meetings"') < кусок.index('href="#prep"'), "«Реестр встреч» — первым пунктом"
-    assert кусок.count("pl-nested-item") == 3, "в меню проекта: встречи, задачи, подготовка"
+    assert кусок.count("pl-nested-item") == 5, "у проекта: встречи, задачи, подготовка, договорённости, статус"
+    assert "п.general ? \"\" :" in кусок, "у «Общих встреч» договорённостей и статуса нет"
 
 
 def test_задачи_и_договорённости_открываются_у_встречи():
