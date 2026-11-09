@@ -860,7 +860,10 @@ def create_app(theme_name: str | None = None, db_path: str | None = None, journa
         if not md or project_id is None:
             return md or ""
         md = без_снятых(md, *задачи_для_скрытия(store, project_id))     # проект с подпроектами (27.10.2026)
-        return укрупнить_показ(store, meeting, md) if meeting else md
+        md = укрупнить_показ(store, meeting, md) if meeting else md
+        # договорённости из реестра — в показ с пометкой (решение Планёрки 09.11.2026; по умолчанию выключено)
+        from ..core import dogovorennosti_v_pokaze as _dvp
+        return _dvp.дополнить(store, meeting["id"], md) if meeting else md
 
     @app.get("/api/meetings/{mid}/protocol")
     def protocol(mid: int, u: dict = Depends(user)):
