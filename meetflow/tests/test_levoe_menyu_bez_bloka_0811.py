@@ -21,7 +21,7 @@ def test_все_пункты_блока_скрыты():
                     'id="nav-agreements" href="#agreements" hidden',
                     'data-route="status" href="#status" hidden'):
         assert образец in html, образец
-    assert 'app.js?v=20261109mf75' in html
+    assert 'app.js?v=20261109mf76' in html
 
 
 def test_меню_проекта_держит_те_же_пункты():

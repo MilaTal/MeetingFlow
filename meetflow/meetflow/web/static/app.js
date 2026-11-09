@@ -2148,9 +2148,20 @@ function показатьКтоВошёл(u) {
   место.textContent = u ? `Вы — ${u.full_name} (${u.role_words || "участник"})` : "";
 }
 
+// Слово владелицы 09.11.2026: при входе в систему (из портала или просто по адресу) первой страницей открывается
+// «Общие встречи» — «Реестр задач». Пришли по ссылке с адресом (`#meetings/8`, `#prep` и т. п.) — не перебиваем.
+function перваяСтраницаПриВходе() {
+  if ((location.hash || "").replace(/^#/, "").trim()) return;
+  const общие = (_проекты || []).find(п => п.general);
+  if (!общие) return;
+  localStorage.setItem("currentProjectId", String(общие.id));
+  location.hash = "#dashboard";
+}
+
 async function startApp(user) {
   me = user;
   await загрузитьПроекты();
+  перваяСтраницаПриВходе();
   document.getElementById("login-screen")?.remove();
   document.getElementById("app-shell").hidden = false;
   показатьКтоВошёл(user);
@@ -2204,6 +2215,7 @@ function fillWhoAmI() {
 async function startTestingMode() {
   document.getElementById("login-screen")?.remove();
   await загрузитьПроекты();
+  перваяСтраницаПриВходе();
   показатьКтоВошёл(null);
   document.getElementById("app-shell").hidden = false;
   document.getElementById("whoami-auth").hidden = true;

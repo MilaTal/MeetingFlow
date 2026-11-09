@@ -29,7 +29,7 @@ def test_шапка_панели_двумя_строками():
 
 def test_версии_подняты():
     html = (СТАТИКА / "index.html").read_text(encoding="utf-8")
-    assert "app.js?v=20261109mf75" in html and "styles.css?v=20261109mf75" in html
+    assert "app.js?v=20261109mf76" in html and "styles.css?v=20261109mf76" in html
 
 
 def test_реестр_задач_назван_и_в_меню_проекта():
@@ -39,3 +39,15 @@ def test_реестр_задач_назван_и_в_меню_проекта():
     app_js = (СТАТИКА / "app.js").read_text(encoding="utf-8")
     assert 'data-route="dashboard" href="#dashboard">Реестр задач</a>' in app_js
     assert 'aria-current="page"' in app_js
+
+
+def test_первая_страница_при_входе_общие_встречи_реестр_задач():
+    """Слово 09.11: при входе (портал или просто адрес) первой открывается «Общие встречи» — «Реестр задач»."""
+    js = (СТАТИКА / "app.js").read_text(encoding="utf-8")
+    assert "function перваяСтраницаПриВходе()" in js
+    assert 'localStorage.setItem("currentProjectId", String(общие.id));' in js
+    assert 'location.hash = "#dashboard";' in js
+    # вызывается в обоих путях входа
+    assert js.count("перваяСтраницаПриВходе();") >= 2
+    # пришли по ссылке с адресом — не перебиваем
+    assert 'if ((location.hash || "").replace(/^#/, "").trim()) return;' in js
