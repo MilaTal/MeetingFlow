@@ -1733,6 +1733,7 @@ function рисоватьПроекты() {
   // меню, но привязанные к проекту. Стрелка сворачивает и разворачивает; состояние помнится в памяти вкладки.
   const свёрнут = () => sessionStorage.getItem("проектСвёрнут") === "1";
   const менюПроектаСтрокой = (п) => `<div class="pl-nested"${свёрнут() ? " hidden" : ""}>
+      <a class="pl-nested-item" data-route="dashboard" href="#dashboard">Реестр задач</a>
       <a class="pl-nested-item" data-route="meetings" href="#meetings">Реестр встреч</a>
       <a class="pl-nested-item" data-route="prep" href="#prep">Подготовка встречи</a>
       <a class="pl-nested-item" data-route="agreements" href="#agreements">Договорённости по проекту</a>
@@ -1743,7 +1744,10 @@ function рисоватьПроекты() {
       <button type="button" class="pl-name" role="option" aria-selected="${п.id === тек}" title="${esc(п.label || п.name)}"
         style="padding-left:${8 + 14 * (п.level || 0)}px"><span class="pl-ico">${значок(п)}</span>${esc(п.name)}</button>
       ${супер && !п.general && п.id ? `<button type="button" class="pl-more" aria-label="Действия с проектом «${esc(п.name)}»" aria-haspopup="menu">…</button>` : ""}</div>`;
-  const сМеню = (п) => строка(п) + (п.id === тек ? менюПроектаСтрокой(п) : "");
+  const экранСейчас = (location.hash || "#dashboard").replace(/^#/, "").split("?")[0].split("/")[0];
+  const отметить = (html) => html.replace(`data-route="${экранСейчас}"`,
+                                           `data-route="${экранСейчас}" aria-current="page"`);
+  const сМеню = (п) => строка(п) + (п.id === тек ? отметить(менюПроектаСтрокой(п)) : "");
   $l.innerHTML = общие.map(сМеню).join("") + видимые.map(сМеню).join("") +
     (скрыто > 0 ? `<button type="button" class="pl-extra" data-act="more">Показать ещё</button>` : "") +
     (запрос ? "" : "") +

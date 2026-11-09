@@ -488,7 +488,9 @@ async function renderRegistry(опции = {}) {
         «Подтвердить» — задача остаётся в работе без пометки; «Снять» — задача снимается. Без решения за тот же срок, что у нерешённых карточек «Конфликтов», снимается сама.</div></div></div>
     <div class="live-chips" id="reg-chips" hidden></div>
     ${полосаОтметокHtml()}
-    <div id="reg-list" class="card card-output reg-card"><div class="empty-state">Загрузка…</div></div>` : `<div class="reg-top reg-top-poisk">
+    <div id="reg-list" class="card card-output reg-card"><div class="empty-state">Загрузка…</div></div>` : `<div class="feed-head"><div class="feed-head-text"><h1>Реестр задач</h1>
+      <div class="feed-sub">Задачи проекта, выбранного слева. Проект и «Общие встречи» переключаются в панели проектов.</div></div></div>
+    <div class="reg-top reg-top-poisk">
     <div class="live-views reg-live-views" aria-label="Актуализировать задачи из реестра">
       <div class="reg-search scr-search"><input type="search" id="reg-q" placeholder="Поиск: слова задачи, фамилия или проект" value="${esc(s.q)}" autocomplete="off" aria-label="Поиск по реестру задач"></div>
       <button type="button" class="link search-reset-link" id="reg-reset">Сбросить</button>

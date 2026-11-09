@@ -29,4 +29,13 @@ def test_шапка_панели_двумя_строками():
 
 def test_версии_подняты():
     html = (СТАТИКА / "index.html").read_text(encoding="utf-8")
-    assert "app.js?v=20261109mf74" in html and "styles.css?v=20261109mf74" in html
+    assert "app.js?v=20261109mf75" in html and "styles.css?v=20261109mf75" in html
+
+
+def test_реестр_задач_назван_и_в_меню_проекта():
+    """Экран подписан «Реестр задач», и в меню проекта есть пункт — иначе «не понять, куда попал» (слово 09.11)."""
+    reg = (СТАТИКА / "registry.js").read_text(encoding="utf-8")
+    assert "<h1>Реестр задач</h1>" in reg
+    app_js = (СТАТИКА / "app.js").read_text(encoding="utf-8")
+    assert 'data-route="dashboard" href="#dashboard">Реестр задач</a>' in app_js
+    assert 'aria-current="page"' in app_js
