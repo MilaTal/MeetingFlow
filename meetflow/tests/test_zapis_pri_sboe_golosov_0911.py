@@ -12,8 +12,14 @@ from meetflow.core.pipeline import можно_удалить_запись
 
 
 def test_при_сбое_голосов_запись_остаётся():
-    assert not можно_удалить_запись({"media_path": r"P:\запись.m4a",
+    assert not можно_удалить_запись({"media_path": r"P:\запись.m4a", "voice_retry": True,
                                      "voice_error": "BrokenProcessPool: процесс прерван"})
+
+
+def test_когда_повтор_не_поможет_запись_удаляется():
+    """«Нет времён реплик» или «нет модели» — повтор бессмысленен, запись не храним (как раньше)."""
+    assert можно_удалить_запись({"media_path": r"P:\запись.m4a", "voice_retry": False,
+                                 "voice_error": "точка распознавания не вернула времена реплик"})
 
 
 def test_по_пометке_keep_media_остаётся():

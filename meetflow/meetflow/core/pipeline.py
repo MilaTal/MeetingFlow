@@ -85,7 +85,8 @@ def _отпечаток_файла(path: Path | None) -> str | None:
 def можно_удалить_запись(meta: dict) -> bool:
     """Запись удаляется после сохранения расшифровки, но НЕ при сбое голосов и не по пометке `keep_media`
     (09.11.2026: после `BrokenProcessPool` у встречи 9 файл удалили — повтор и разбор причины стали невозможны)."""
-    return bool(meta.get("media_path")) and not meta.get("keep_media") and not meta.get("voice_error")
+    return (bool(meta.get("media_path")) and not meta.get("keep_media")
+            and not meta.get("voice_retry"))
 
 
 def _as_of(rows: list[dict], meeting_date: str | None) -> list[dict]:
@@ -583,9 +584,11 @@ class MeetingPipeline:
         try:
             if wav_path is None or not Path(wav_path).is_file():
                 meta["voice_error"] = "записи нет на диске — голоса не разобраны"
+                meta["voice_retry"] = False
                 return
             if not meta.get("segment_lines") or not meta.get("segment_times"):
                 meta["voice_error"] = "точка распознавания не вернула времена реплик — голоса не разобраны"
+                meta["voice_retry"] = False
                 return
             row = self.s.q("SELECT date FROM meetings WHERE id=?", (meeting_id,))
             meeting_date = (row[0]["date"] if row else "") or ""
@@ -620,11 +623,13 @@ class MeetingPipeline:
             })
         except voice_step.VoiceStepError as exc:
             meta["voice_error"] = str(exc)
+            meta["voice_retry"] = False
             record["error"] = str(exc)
             self.cards.open(project_id, "technical",
                             f"Голоса не разобраны: запись «{filename}»", {"detail": str(exc)[:400]}, meeting_id)
         except Exception as exc:  # noqa: BLE001 — шаг голосов не отменяет распознавание
             meta["voice_error"] = f"{type(exc).__name__}: {str(exc)[:300]}"
+            meta["voice_retry"] = True          # сбой самого разбора (BrokenProcessPool и др.) — повторяем, запись храним
             record["error"] = meta["voice_error"]
             self.cards.open(project_id, "technical",
                             f"Голоса не разобраны: запись «{filename}»",
@@ -794,7 +799,7 @@ class MeetingPipeline:
                 self.s.update("sources", sid, removed_reason="запись распознана, файл удалён")
             except OSError:
                 self.cards.open(project_id, "technical", f"Не удалось удалить запись «{filename}»", {}, meeting_id)
-        elif media and doc.meta.get("voice_error"):
+        elif media and doc.meta.get("voice_retry"):
             doc.meta["keep_media"] = True
             self.s.update("sources", sid, meta=json.dumps(doc.meta, ensure_ascii=False))
         hits = injection_hits(doc.text)
