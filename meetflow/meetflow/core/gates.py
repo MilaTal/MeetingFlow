@@ -183,10 +183,22 @@ class TaskGate:
         person, pending = None, None
         по_голосу = False
         named = draft.assignee
+        окно_имени = quote or draft.quote or ""      # где проверяем, что имя прозвучало
         if not named and quote:
             # D5 (прогон 09.10.26): модель исполнителя не дала, а реплика обращена к отделу или человеку из
             # «Команды» («ПТО, обновите график») — адресат берётся из цитаты
             named = self.team.addressee(quote)
+        if not named and draft.line_no is not None:
+            # 09.11.2026 (встреча 9): адресат часто звучит в соседней реплике — «Алексей Николаевич» за минуту до
+            # поручения. Ищем в окне ±2 строки и только там же проверяем «имя прозвучало»; вне окна — не берём.
+            линии = source.lines
+            начало = max(0, draft.line_no - 2)
+            окно = линии[начало:draft.line_no + 3]
+            for строка in окно:
+                named = self.team.addressee(строка)
+                if named:
+                    окно_имени = "\n".join(окно)
+                    break
         if not named and quote:
             # исполнитель «я» из подписи голоса (ERP `fill_self_assigned_responsibles`, перенос 27.10.2026): цитата в
             # строке, подписанной ФИО «Команды» по голосу, и говорящий сам в единственном числе обещает действие
@@ -207,7 +219,7 @@ class TaskGate:
             person = self.team.find(named).person
         else:
             # D1 (прогон 09.10.26): сверяется прозвучавшее в цитате, а не имя из ответа модели
-            said = self.team.said(named, quote or draft.quote or "")
+            said = self.team.said(named, окно_имени or quote or draft.quote or "")
             m = None
             if said is None:
                 # имя модели в цитате не прозвучало — не подставлять молча: задача без исполнителя и карточка

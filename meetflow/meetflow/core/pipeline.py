@@ -1276,6 +1276,32 @@ class MeetingPipeline:
             except Exception as exc:  # noqa: BLE001
                 self.step_failed(project_id, meeting_id, "Объединение и мусор", exc)
 
+            # 09.11.2026 (встреча 9): дополнение формулировок могло сделать две задачи одной по смыслу — сведение
+            # повторяем уже по итоговым текстам. Первый проход идёт до дополнения; здесь — второй, только если он
+            # что-то объединил: иначе текст итога не меняется и лишних строк в журнале нет.
+            try:
+                if len(planned) > 1:
+                    ук2 = ukrupnenie_sborka.применить(self.s, project_id, meeting_id, planned, source.text,
+                                                     set(due_unconfirmed), meeting.get("date"))
+                    # только если второй проход действительно что-то свёл: иначе итог и журнал не трогаем
+                    # (выключатель укрупнения тоже даёт строку «выключено» — её второй раз не пишем)
+                    if len(ук2["planned"]) < len(planned):
+                        planned = ук2["planned"]
+                        merged_history.update(ук2["истории"])
+                        rep.ukrupnenie = (((rep.ukrupnenie + "; ") if rep.ukrupnenie else "")
+                                          + "после дополнения: " + ук2["строка"])
+                        for новый, прежний in ук2["замены"].items():
+                            if прежний in due_kinds:
+                                due_kinds[новый] = due_kinds[прежний]
+                        if self.tasks_trace_path:
+                            for з_ in ук2.get("журнал") or []:
+                                if isinstance(з_, dict):
+                                    asr_journal.write(self.tasks_trace_path, meeting_id=meeting_id, путь="drafts",
+                                                      шаг="укрупнение после дополнения", решение="сведена",
+                                                      причина=str(з_.get("почему") or "")[:200])
+            except Exception as exc:  # noqa: BLE001
+                self.step_failed(project_id, meeting_id, "Укрупнение после дополнения", exc)
+
             # Тень сведения (вариант C, слово владелицы 06.11.2026): способ 1 — все задачи всех путей и прежние
             # задачи встречи через `укрупнить` — считает рядом с рабочей сборкой и пишет числа в журнал. Задачи не
             # снимаются: «ошибочно снятых 0» жёстко. Числа за неделю — 13.11.2026 одной таблицей.
