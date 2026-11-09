@@ -20,7 +20,7 @@ from fastapi import APIRouter, File, Form, HTTPException, Request, UploadFile
 from fastapi.responses import JSONResponse, Response
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
-from ...core.nazvanie_vstrechi import для_показа
+from ...core.nazvanie_vstrechi import для_показа, тема_из_протокола
 from ...core.store import now
 from .obshchee import Ctx, iso_dt, loads, ru_date, to_date, today_iso
 
@@ -198,10 +198,18 @@ def mount(r: APIRouter, ctx: Ctx) -> None:
     def tasks_count(mid: int) -> int:
         return len(store.q("SELECT id FROM tasks WHERE source_meeting_id=? AND status!='dropped'", (mid,)))
 
+    def название(m: dict) -> str | None:
+        """Название на экран: без технических знаков; пустое — тема из протокола (слово владелицы 09.11.2026:
+        «тема по содержанию + дата»; дата стоит отдельной колонкой). Рабочую базу не меняем — только показ."""
+        подпись = для_показа(m.get("label"))
+        if подпись or not m.get("protocol_md"):
+            return подпись
+        return тема_из_протокола(m.get("protocol_md")) or None
+
     def meeting_out(m: dict, full: bool = True) -> dict:
         has_min = bool(m.get("protocol_md"))
         b = building(m["id"]) if full else {"running": False}
-        out = {"id": m["id"], "date": (m.get("date") or "")[:10], "label": для_показа(m.get("label")),
+        out = {"id": m["id"], "date": (m.get("date") or "")[:10], "label": название(m),
                "status": m.get("status") or "scheduled", "has_minutes": has_min,
                "second_same_day": bool(m.get("second_same_day")), "created_at": iso_dt(m.get("created_at")) or "",
                "processed_at": iso_dt(m.get("protocol_built_at")), "model_used": None,
@@ -229,7 +237,7 @@ def mount(r: APIRouter, ctx: Ctx) -> None:
         return out
 
     def describe(m: dict) -> dict:
-        return {"id": m["id"], "date": (m.get("date") or "")[:10], "label": для_показа(m.get("label")),
+        return {"id": m["id"], "date": (m.get("date") or "")[:10], "label": название(m),
                 "auto": m.get("label") == AUTO_LABEL, "has_plan": bool(m.get("plan_md")),
                 "plan_generated_at": iso_dt(m.get("plan_built_at")), "has_minutes": bool(m.get("protocol_md")),
                 "materials": len(sources_of(m["id"], True))}
@@ -268,13 +276,13 @@ def mount(r: APIRouter, ctx: Ctx) -> None:
     def search_meetings(request: Request, q: str = ""):
         """Поиск встречи по имени для левой панели (слово владелицы 08.11.2026 «поиск по имени только»)."""
         from ...core import poisk_vstrech
-        from ...core.nazvanie_vstrechi import для_показа
+        from ...core.nazvanie_vstrechi import для_показа, тема_из_протокола
         extra, args = ctx.scope_sql(request)
         rows = live(store.q("SELECT * FROM meetings WHERE 1=1" + extra + " ORDER BY date DESC, id DESC", args))
         out = []
         for m in poisk_vstrech.отобрать(rows, q):
             d = meeting_out(m)
-            d["label"] = для_показа(m.get("label"))      # без «из папки-приёмника:» и хвоста имени файла
+            d["label"] = название(m)                     # без «из папки-приёмника:» и хвоста имени файла
             out.append(d)
         return out
 

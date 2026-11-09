@@ -31,7 +31,7 @@ def test_шапка_панели_двумя_строками():
 
 def test_версии_подняты():
     html = (СТАТИКА / "index.html").read_text(encoding="utf-8")
-    assert "app.js?v=20261109mf81" in html and "styles.css?v=20261109mf81" in html
+    assert "app.js?v=20261109mf82" in html and "styles.css?v=20261109mf82" in html
 
 
 def test_реестр_задач_назван_и_в_меню_проекта():

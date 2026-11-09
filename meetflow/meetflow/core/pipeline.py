@@ -1741,6 +1741,21 @@ class MeetingPipeline:
                         вернулось = len(на_возврат)
                 self.s.update("meetings", meeting_id, protocol_md=protocol_md, protocol_built_at=built,
                               built_from=[s["name"] for s in srcs])
+                # 09.11.2026: пустое название встречи, заведённой приёмом, берём из содержания протокола — «тема по
+                # содержанию + дата» (записка 08.11.2026, пункт 3). Ручное название не трогаем: заполняем только пустое,
+                # и только у встречи с именем файла (значит, её завёл приём, а не человек).
+                try:
+                    from .nazvanie_vstrechi import для_показа, тема_из_протокола
+                    # «Запись2026» — тоже пустое название (техническое): сравниваем то, что видно на экране
+                    if not (для_показа(meeting.get("label")) or "").strip() and (meeting.get("file_name") or "").strip():
+                        тема = тема_из_протокола(protocol_md)
+                        if not тема:
+                            from .topics import тема_встречи
+                            тема = (тема_встречи(self.s, meeting) or "").strip()
+                        if тема:
+                            self.s.update("meetings", meeting_id, label=тема)
+                except Exception as exc:  # noqa: BLE001 — название не отменяет собранный протокол
+                    self.step_failed(project_id, meeting_id, "Название из протокола", exc)
                 # Договорённости и решения из реестра могут не попасть в текст молча (рекомендация Планёрки 09.11.2026):
                 # считаем N в реестре и M в документе; N>0 при M=0 — карточка, а не тишина
                 try:

@@ -3469,25 +3469,34 @@ function hashParts() {
 const МЕТКА_ПРИЁМНИКА = /^\s*(?:создана\s+)?из\s+папки[-\s]?приёмника\s*:?\s*/i;
 const _Н = "(?<![\\p{L}\\d])", _К = "(?![\\p{L}\\d])";
 const ТЕХ_СЛОВА = new RegExp(`${_Н}(?:rec|record|recording|audio|video|zoom|meeting|meet|telemost|запись|копия|copy|final)${_К}`, "giu");
+// 09.11.2026: «Запись2026-11-09» — техническое слово или дата, приклеенные к буквам, разделяем пробелом, иначе
+// границы слова не дают убрать их и в названии остаётся «Запись2026» (видно на встрече 09.11).
+const ЦИФРЫ_ПОСЛЕ_БУКВ = /(?<=[\p{L}])(?=\d{4,})|(?<=[\p{L}])(?=\d{1,2}[._-]\d{1,2}[._-]\d{2,4})/gu;
+// Название, записанное приёмом: расширение файла, полная дата с годом или техническое слово с цифрами («Запись2026»).
+const ПОХОЖЕ_НА_ИМЯ_ФАЙЛА = /\.(?:m4a|mp3|wav|mp4|ogg|oga|webm|flac|aac|txt|docx?|pdf|vtt|srt)\s*$|\b\d{4}[-_.]\d{2}[-_.]\d{2}\b|\b\d{1,2}[._-]\d{1,2}[._-]\d{2,4}\b|^\s*(?:запись|rec|record|recording|audio|video|zoom|meeting|telemost|копия|copy|final)\s*\d/i;
 function темаИзПриёмника(текст) {
   let s = String(текст || "");
   s = s.replace(/\.(?:m4a|mp3|wav|mp4|ogg|oga|webm|flac|aac|txt|docx?|pdf|vtt|srt)$/i, "");
-  s = s.replace(new RegExp(`${_Н}\\d{4}[-_.]?\\d{2}[-_.]?\\d{2}${_К}`, "gu"), " ")          // 2026-11-05, 20261105
-       .replace(new RegExp(`${_Н}\\d{1,2}[._-]\\d{1,2}[._-]\\d{2,4}${_К}`, "gu"), " ")        // 05.11.2026
-       .replace(new RegExp(`${_Н}\\d{1,2}[-_.:]\\d{2}(?:[-_.:]\\d{2})?${_К}`, "gu"), " ")     // 10-30, 10_30_15
-       .replace(/GMT\s*[+-]?\s*\d*/gi, " ")
-       .replace(new RegExp(`${_Н}\\d{4,}${_К}`, "gu"), " ")                                   // длинные номера
-       .replace(/\(\d+\)/g, " ")
-       .replace(ТЕХ_СЛОВА, " ")
-       .replace(/[_#@=+~^;{}\[\]()]/g, " ")
-       .replace(/\s+/g, " ")
-       .replace(/^[\s.,:;\-–—]+|[\s.,:;\-–—]+$/g, "");
+  s = s.replace(ЦИФРЫ_ПОСЛЕ_БУКВ, " ");
+  for (let k = 0; k < 2; k++) {          // каскад: «запись» убирается — следом уходит приклеенная к ней дата
+    s = s.replace(new RegExp(`${_Н}\\d{4}[-_.]?\\d{2}[-_.]?\\d{2}${_К}`, "gu"), " ")          // 2026-11-05, 20261105
+         .replace(new RegExp(`${_Н}\\d{1,2}[._-]\\d{1,2}[._-]\\d{2,4}${_К}`, "gu"), " ")        // 05.11.2026
+         .replace(new RegExp(`${_Н}\\d{1,2}[-_.:]\\d{2}(?:[-_.:]\\d{1,2})?${_К}`, "gu"), " ")   // 10-30, 10_30_15, 11-59-7
+         .replace(/GMT\s*[+-]?\s*\d*/gi, " ")
+         .replace(new RegExp(`${_Н}\\d{4,}${_К}`, "gu"), " ")                                   // длинные номера
+         .replace(/\(\d+\)/g, " ")
+         .replace(ТЕХ_СЛОВА, " ")
+         .replace(/[_#@=+~^;{}\[\]()]/g, " ")
+         .replace(/\s+/g, " ")
+         .replace(/^[\s.,:;\-–—]+|[\s.,:;\-–—]+$/g, "");
+  }
   if (!/\p{L}{3}/u.test(s)) return "";
   return s.charAt(0).toUpperCase() + s.slice(1);
 }
 function cleanLabel(label) {
   if (!label) return "";
-  if (МЕТКА_ПРИЁМНИКА.test(label)) return темаИзПриёмника(label.replace(МЕТКА_ПРИЁМНИКА, ""));
+  const без = label.replace(МЕТКА_ПРИЁМНИКА, "");
+  if (без !== label || ПОХОЖЕ_НА_ИМЯ_ФАЙЛА.test(label)) return темаИзПриёмника(без);
   return !/^Встреча\s+\d/.test(label) ? label : "";
 }
 
