@@ -64,6 +64,23 @@ def свежесть(старт: datetime | None, правка: datetime | None,
     return True, "служба на текущем коде"
 
 
+def строка_команды(разбор: dict) -> tuple[int, str]:
+    """(сколько расхождений, строка): проектная «Команда» против общей — сколько отчеств дописать и людей добавить.
+
+    Расхождение — не ошибка: после правки общей «Команды» копия проектов отстаёт до синхронизации. Но видеть его надо:
+    иначе сборка пойдёт по старым именам, а проверка покажет «46 без отчества».
+    """
+    дописать = sum(len(п.get("дописать") or []) for п in (разбор or {}).values())
+    добавить = sum(len(п.get("добавить") or []) for п in (разбор or {}).values())
+    всего = дописать + добавить
+    if not разбор:
+        return 0, "Команда: общей «Команды» нет или она пуста"
+    if not всего:
+        return 0, "Команда: расхождений нет"
+    return всего, (f"Команда: расхождений {всего} (дописать отчество {дописать}, добавить {добавить}) — "
+                   "синхронизировать: python scripts/sync_komandy.py --apply")
+
+
 def _health(адрес: str = АДРЕС) -> dict | None:
     opener = urllib.request.build_opener(urllib.request.ProxyHandler({}))     # localhost мимо прокси
     try:
@@ -128,6 +145,22 @@ def main(argv: list[str] | None = None) -> int:
         else:
             строк = sum(1 for _ in ЖУРНАЛ_ТЕНИ.open(encoding="utf-8"))
             print(f"Журнал тени: строк {строк}")
+        try:  # расхождение проектной «Команды» с общей — предупреждение, не отказ
+            import importlib.util as _ilu
+            from meetflow.core.store import Store
+            from meetflow.core.team_sync import shared_people
+            spec = _ilu.spec_from_file_location("sync_komandy", Path(__file__).with_name("sync_komandy.py"))
+            ск = _ilu.module_from_spec(spec)
+            spec.loader.exec_module(ск)
+            s_ = Store(str(БАЗА))
+            try:
+                люди = shared_people(s_.get_setting("voice_base_path"))
+                _, текст = строка_команды(ск.план(s_, люди) if люди else {})
+            finally:
+                s_.close()
+            print(текст)
+        except Exception as exc:  # noqa: BLE001 — сверка не должна ломать самопроверку
+            print(f"Команда: сверить не удалось ({type(exc).__name__})")
 
     if not здоровье or not здоровье.get("ok"):
         return 1
