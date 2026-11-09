@@ -38,7 +38,7 @@ from .config import Theme
 from .gates import GateConfig, TaskGate
 from .negation import NegationRule
 from .people import Team
-from .prompts import PromptBuilder, chunks, parse_json, profile
+from .prompts import PromptBuilder, chunks, parse_json, profile, segmenty_po_temam
 from .registry import CardQueue, OperatorMemory, TaskRegistry
 from . import deadline
 from . import asr_journal, hod, mesto_citaty, plan as plan_mod, voice_step
@@ -1027,7 +1027,11 @@ class MeetingPipeline:
                     half = len(part) // 2
                     return extract(first, part[:half], depth + 1) + extract(first + half, part[half:], depth + 1)
             try:
-                for first, part in chunks(source.lines, self.prof.chunk_chars):
+                # Опыт 09.11.2026 (слово владелицы, только на копии): извлечение по темам — режем запись по паузам,
+                # а не по 12 тыс. знаков. По умолчанию выключено.
+                _по_темам = (os.environ.get("WEBAPP_IZVLECHENIE_PO_TEMAM") or "").strip().lower() in ("1", "on", "true", "да")
+                _резать = segmenty_po_temam if _по_темам else chunks
+                for first, part in _резать(source.lines, self.prof.chunk_chars):
                     items = extract(first, part)
                     cut += max(0, len(items) - 40)
                     for t in items[:40]:

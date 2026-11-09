@@ -84,6 +84,45 @@ def numbered(lines: list[str], start: int = 0) -> str:
     return "\n".join(f"{start + i} | {ln}" for i, ln in enumerate(lines))
 
 
+ПАУЗА_ТЕМЫ_СЕК = 120        # пауза между репликами, после которой считаем новую тему (опыт 09.11.2026)
+МИН_ЗНАКОВ_ТЕМЫ = 800       # слишком короткий кусок не режем — иначе десятки мелких вызовов
+
+
+def _секунды(строка: str) -> int | None:
+    """Время из начала строки записи: «[00:12:34] …», «00:12:34	…» или «00:12 …»."""
+    import re as _re
+    m = _re.match(r"^\s*\[?(\d{1,2}):(\d{2})(?::(\d{2}))?\]?\s", строка or "")
+    if not m:
+        return None
+    ч, м, с = int(m.group(1)), int(m.group(2)), int(m.group(3) or 0)
+    return ч * 3600 + м * 60 + с
+
+
+def segmenty_po_temam(lines: list[str], chunk_chars: int, пауза_сек: int = ПАУЗА_ТЕМЫ_СЕК,
+                      мин_знаков: int = МИН_ЗНАКОВ_ТЕМЫ) -> list[tuple[int, list[str]]]:
+    """Запись по темам: новая тема — пауза не меньше `пауза_сек` между метками времени, но кусок не короче
+    `мин_знаков` и не длиннее `chunk_chars`. Так реплика не рвётся посередине (сравнение с нарезкой по 12 тыс.)."""
+    out: list[tuple[int, list[str]]] = []
+    cur: list[str] = []
+    size = 0
+    start = 0
+    прежнее: int | None = None
+    for i, ln in enumerate(lines):
+        сейчас = _секунды(ln)
+        пауза = (сейчас - прежнее) if (сейчас is not None and прежнее is not None) else 0
+        надо_резать = cur and ((пауза >= пауза_сек and size >= мин_знаков) or size + len(ln) > chunk_chars)
+        if надо_резать:
+            out.append((start, cur))
+            cur, size, start = [], 0, i
+        cur.append(ln)
+        size += len(ln) + 1
+        if сейчас is not None:
+            прежнее = сейчас
+    if cur:
+        out.append((start, cur))
+    return out
+
+
 def chunks(lines: list[str], chunk_chars: int) -> list[tuple[int, list[str]]]:
     """Нарезка по строкам: (номер первой строки, строки куска)."""
     out, cur, size, start = [], [], 0, 0
