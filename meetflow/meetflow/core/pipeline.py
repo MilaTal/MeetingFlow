@@ -82,6 +82,12 @@ def _отпечаток_файла(path: Path | None) -> str | None:
         return None
 
 
+def можно_удалить_запись(meta: dict) -> bool:
+    """Запись удаляется после сохранения расшифровки, но НЕ при сбое голосов и не по пометке `keep_media`
+    (09.11.2026: после `BrokenProcessPool` у встречи 9 файл удалили — повтор и разбор причины стали невозможны)."""
+    return bool(meta.get("media_path")) and not meta.get("keep_media") and not meta.get("voice_error")
+
+
 def _as_of(rows: list[dict], meeting_date: str | None) -> list[dict]:
     """Задачи, поставленные до даты встречи включительно. Без даты у встречи или задачи — не отсекаем."""
     if not meeting_date:
@@ -780,12 +786,17 @@ class MeetingPipeline:
                                 digest=doc.content_digest, created_at=now(), local_asr=int(isinstance(c, ASRConnector)),
                                 meta=json.dumps(doc.meta, ensure_ascii=False))
         media = doc.meta.get("media_path")
-        if media and not doc.meta.get("keep_media"):
+        # 09.11.2026: если голоса не разобрались, запись НЕ удаляем — иначе повтор невозможен без новой отправки
+        # (встреча 9: сбой `BrokenProcessPool`, файл удалён, причину смерти процесса уже не проверить).
+        if можно_удалить_запись(doc.meta):
             try:  # запись удаляется только после сохранения расшифровки
                 Path(media).unlink()
                 self.s.update("sources", sid, removed_reason="запись распознана, файл удалён")
             except OSError:
                 self.cards.open(project_id, "technical", f"Не удалось удалить запись «{filename}»", {}, meeting_id)
+        elif media and doc.meta.get("voice_error"):
+            doc.meta["keep_media"] = True
+            self.s.update("sources", sid, meta=json.dumps(doc.meta, ensure_ascii=False))
         hits = injection_hits(doc.text)
         if hits:  # встреча не блокируется, но человек узнаёт о попытке
             self.cards.open(project_id, "suspicious_source",
