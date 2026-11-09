@@ -1768,8 +1768,8 @@ function рисоватьПроекты() {
       <a class="pl-nested-item pl-start" data-route="meetings" href="#meetings">Реестр встреч<span class="pl-start-mark">начните здесь</span></a>
       <a class="pl-nested-item" data-route="dashboard" href="#dashboard">Реестр задач</a>
       <a class="pl-nested-item" data-route="prep" href="#prep">Подготовка встречи</a>
-      ${п.general ? "" : `<a class="pl-nested-item" data-route="agreements" href="#agreements">Договорённости по проекту</a>
-      <a class="pl-nested-item" data-route="status" href="#status">Статус проекта</a>`}</div>`;
+      <a class="pl-nested-item" data-route="agreements" href="#agreements">Договорённости по проекту</a>
+      ${п.general ? "" : `<a class="pl-nested-item" data-route="status" href="#status">Статус проекта</a>`}</div>`;
   const строка = (п) => `<div class="pl-row${п.id === тек ? " pl-on" : ""}" data-id="${п.id}">
       ${п.id === тек ? `<button type="button" class="pl-arrow" aria-expanded="${свёрнут() ? "false" : "true"}"
         aria-label="Свернуть или развернуть меню проекта" title="Свернуть или развернуть меню проекта">${свёрнут() ? "▸" : "▾"}</button>` : ""}
