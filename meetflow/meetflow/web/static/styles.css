@@ -1751,3 +1751,6 @@ mark.zapis-mark { background: var(--accent-soft); color: inherit; box-shadow: in
 .pl-start-mark { margin-left: 6px; font-size: 11px; font-weight: 400; color: var(--accent); white-space: nowrap; }
 .nav .nav-service { opacity: .82; }
 
+/* Обучающее видео (10.11.2026): файл лежит в static/media и отдаётся статикой. Пропорции 16:9 держим и до
+   загрузки метаданных, чтобы блок не схлопывался и кадр не обрезался по высоте. */
+.help-video { height: auto; aspect-ratio: 16 / 9; object-fit: contain; }
