@@ -1790,7 +1790,20 @@ class MeetingPipeline:
                     from .nazvanie_vstrechi import для_показа, тема_из_протокола
                     # «Запись2026» — тоже пустое название (техническое): сравниваем то, что видно на экране
                     if not (для_показа(meeting.get("label")) or "").strip() and (meeting.get("file_name") or "").strip():
-                        тема = тема_из_протокола(protocol_md)
+                        # 09.11.2026 (слово владелицы): название — фраза по содержанию встречи, а не заголовок
+                        # протокола («Итоги синка»). Один дешёвый вызов; не вышло — прежний путь по «Предмету».
+                        тема = ""
+                        try:
+                            sysm, user = self.pb.название_встречи(protocol_md)
+                            ответ = self._call(self.gen, budget, "nazvanie", sysm, user, meeting_id)
+                            сырое = ответ.get("name") if isinstance(ответ, dict) else ""
+                            тема = re.sub(r"\s+", " ", str(сырое or "")).strip(' .,:;—-\"«»')
+                            if len(тема) > 90 or not re.search(r"[^\W\d_]{3}", тема):
+                                тема = ""
+                        except Exception:  # noqa: BLE001 — название не отменяет собранный протокол
+                            тема = ""
+                        if not тема:
+                            тема = тема_из_протокола(protocol_md)
                         if not тема:
                             from .topics import тема_встречи
                             тема = (тема_встречи(self.s, meeting) or "").strip()

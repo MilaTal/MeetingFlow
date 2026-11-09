@@ -61,6 +61,9 @@ class MockLLM(LLMConnector):
             head = system[system.find("РАЗДЕЛЫ:"):] if "РАЗДЕЛЫ:" in system else ""
             names = re.findall(r"^- (.+)$", head, re.M)
             out = {"sections": {n: f"Заглушка плана: {n}." for n in names}}
+        elif purpose == "nazvanie":
+            # название встречи по содержанию (09.11.2026): заглушка даёт понятную фразу, а не «Итоги синка»
+            out = {"name": "Рабочая встреча по содержанию"}
         else:
             out = {"echo": purpose}
         return LLMResult(json.dumps(out, ensure_ascii=False), self.model, len(user) // 3, 50,
