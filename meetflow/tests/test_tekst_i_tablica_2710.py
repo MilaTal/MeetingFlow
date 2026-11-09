@@ -64,26 +64,26 @@ def test_таблица_семь_колонок_и_раздел_поставле
     assert строки and "в работе" in строки[0] and "01.10.2026" in строки[0] and "запись" in строки[0]
 
 
-def test_горизонт_две_встречи_оперативные_снятые(make_pipe, store, project):
+def test_в_таблице_только_эта_встреча(store, project):
+    """Перевёрнуто 09.11.2026 словом владелицы: итоги встречи не смешивать с данными другой встречи ни при каких
+    обстоятельствах. Было (28.10.2026): в таблицу идут прозвучавшие задачи прошлой встречи и оперативные. Стало:
+    только задачи этой встречи; прошлые, оперативные и снятые — в реестре, не в документе."""
     старая = store.insert("meetings", project_id=project, date="2026-09-17", label="с")
     прошлая = store.insert("meetings", project_id=project, date="2026-09-24", label="п")
-    t_old = store.insert("tasks", project_id=project, description="Задача позапрошлой встречи", status="active",
-                         source_meeting_id=старая, date_set="2026-09-17")
-    t_prev = store.insert("tasks", project_id=project, description="Задача прошлой встречи", status="active",
-                          source_meeting_id=прошлая, date_set="2026-09-24", due_date="2026-09-30")
-    t_op = store.insert("tasks", project_id=project, description="Долгая оперативная задача", status="active",
-                        source_meeting_id=старая, date_set="2026-09-17", operational=1)
-    t_drop = store.insert("tasks", project_id=project, description="Снятая задача прошлой встречи", status="dropped",
-                          source_meeting_id=прошлая, date_set="2026-09-24", date_closed="2026-09-25")
-    _, mid, _ = _сборка(make_pipe, store, project)
-    md = store.get("meetings", mid)["protocol_md"]
-    assert "Задача прошлой встречи" in md and "Задача позапрошлой встречи" not in md
-    assert "Снятая задача" not in md and "## Снято по встрече" not in md
-    строка = next(ln for ln in md.splitlines() if "Задача прошлой встречи" in ln)
-    assert "в работе — просрочена" in строка and "| реестр |" in строка and "24.09.2026" in строка
-    оп = md.split("## Оперативные задачи", 1)
-    assert len(оп) == 2 and "Долгая оперативная задача" in оп[1] and "| 1 |" in оп[1]
-    assert {t_old, t_prev, t_op, t_drop}
+    эта = store.insert("meetings", project_id=project, date="2026-10-01", label="э")
+    store.insert("tasks", project_id=project, description="Задача позапрошлой встречи", status="active",
+                 source_meeting_id=старая, date_set="2026-09-17")
+    store.insert("tasks", project_id=project, description="Задача прошлой встречи", status="active",
+                 source_meeting_id=прошлая, date_set="2026-09-24", due_date="2026-09-30")
+    store.insert("tasks", project_id=project, description="Долгая оперативная задача", status="active",
+                 source_meeting_id=старая, date_set="2026-09-17", operational=1)
+    store.insert("tasks", project_id=project, description="Снятая задача прошлой встречи", status="dropped",
+                 source_meeting_id=прошлая, date_set="2026-09-24", date_closed="2026-09-25")
+    store.insert("tasks", project_id=project, description="Задача этой встречи", status="active",
+                 source_meeting_id=эта, date_set="2026-10-01")
+    строки = tablica_zadach.строки_встречи(store, store.get("meetings", эта), lambda t: "")
+    assert [с.задача for с in строки] == ["Задача этой встречи"]
+    assert all(с.откуда == "запись" for с in строки)
 
 
 def test_статус_на_дату_встречи():
