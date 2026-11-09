@@ -44,3 +44,20 @@ def test_далеко_за_окном_не_берём():
     g = _ворота().check(TaskDraft("Посмотреть, как будет передача документов", None, line_no=4), src)
     assert g.accepted, g.reasons
     assert g.assignee is None, "за окном ±2 строки имя не берём"
+
+
+def test_имя_и_отчество_без_прямой_адресации(monkeypatch):
+    """Перенос правила Планёрки 8a3eb812: имя и отчество прозвучали, кандидат один — исполнитель ставится,
+    даже когда обращение не прямое (адресат в цитате не найден)."""
+    src = SourceDoc("t", SourceKind.TRANSCRIPT,
+                    "[00:00:10] Орлова Анна: Сказали, что Алексей Николаевич подготовит смету к пятнице.\n")
+    ворота = _ворота()
+    monkeypatch.setattr(ворота.team, "addressee", lambda q: None)
+    g = ворота.check(TaskDraft("Подготовить смету", None, line_no=0), src)
+    assert g.accepted, g.reasons
+    assert g.assignee is not None and g.assignee.label == "Осуховский Алексей Николаевич"
+
+
+def test_имя_и_отчество_при_двух_кандидатах_без_фио():
+    team = Team([Person("Осуховский Алексей Николаевич"), Person("Алексеев Алексей")])
+    assert team.по_имени_отчеству("Алексей Николаевич подготовит смету") is None, "тёзка без отчества — карточка"

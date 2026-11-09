@@ -182,6 +182,7 @@ class TaskGate:
         # 3. исполнитель назван и есть в Команде
         person, pending = None, None
         по_голосу = False
+        по_имени_отчеству = False
         named = draft.assignee
         окно_имени = quote or draft.quote or ""      # где проверяем, что имя прозвучало
         if not named and quote:
@@ -199,6 +200,18 @@ class TaskGate:
                 if named:
                     окно_имени = "\n".join(окно)
                     break
+        if not named:
+            # Перенос правила Планёрки `8a3eb812` (09.11.2026): имя и отчество прозвучали в окне, человек с таким
+            # именем и отчеством один — он исполнитель, даже если обращение не прямое («Олег Петрович подготовит…»).
+            окно_ио = окно_имени
+            if draft.line_no is not None:
+                линии = source.lines
+                окно_ио = "\n".join(линии[max(0, draft.line_no - 2):draft.line_no + 3])
+            найден_ио = self.team.по_имени_отчеству(окно_ио) if окно_ио else None
+            if найден_ио:
+                named = найден_ио
+                окно_имени = окно_ио
+                по_имени_отчеству = True
         if not named and quote:
             # исполнитель «я» из подписи голоса (ERP `fill_self_assigned_responsibles`, перенос 27.10.2026): цитата в
             # строке, подписанной ФИО «Команды» по голосу, и говорящий сам в единственном числе обещает действие
@@ -219,7 +232,8 @@ class TaskGate:
             person = self.team.find(named).person
         else:
             # D1 (прогон 09.10.26): сверяется прозвучавшее в цитате, а не имя из ответа модели
-            said = self.team.said(named, окно_имени or quote or draft.quote or "")
+            # имя+отчество без фамилии: фамилию в записи не искали — основание «е» Планёрки, человек найден точно
+            said = named if по_имени_отчеству else self.team.said(named, окно_имени or quote or draft.quote or "")
             m = None
             if said is None:
                 # имя модели в цитате не прозвучало — не подставлять молча: задача без исполнителя и карточка

@@ -77,6 +77,37 @@ class Team:
         t = token.lower()
         return [t] + self._dim.get(t, [])
 
+
+    def по_имени_отчеству(self, text: str) -> str | None:
+        """ФИО, если в тексте прозвучали имя и отчество и это однозначно.
+
+        Перенос правила Планёрки `8a3eb812` (решение владелицы 07.11.2026, 09.11.2026): кандидат с таким именем и
+        отчеством ровно один, и ни у одного человека с этим именем отчество не пустое. Иначе — None: «некорректно
+        назначенный хуже, чем без ФИО».
+        """
+        слова = {" ".join(ч.replace("ё", "е").lower().split())
+                 for ч in re.findall(r"[А-Яа-яЁёA-Za-z\-]+", text or "")}
+        if not слова:
+            return None
+        точные: list[tuple[str, str]] = []          # (ФИО, имя)
+        for p in self.people:
+            части = (p.full_name or "").split()
+            if len(части) < 3:
+                continue
+            имя = части[1].replace("ё", "е").lower()
+            отчество = части[2].replace("ё", "е").lower()
+            if имя in слова and отчество in слова:
+                точные.append((p.full_name, имя))
+        if len(точные) != 1:
+            return None
+        имя_кандидата = точные[0][1]
+        for p in self.people:
+            части = (p.full_name or "").split()
+            # тёзка без отчества с тем же именем — неоднозначно: карточка, а не подстановка
+            if len(части) == 2 and части[1].replace("ё", "е").lower() == имя_кандидата:
+                return None
+        return точные[0][0]
+
     def find(self, mention: str, context: str = "", description: str = "") -> Match:
         """context — фраза поручения (для признаков несовпадения), description —
         описание задачи (для профиля внешнего)."""
