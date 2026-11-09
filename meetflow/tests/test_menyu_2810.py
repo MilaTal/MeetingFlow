@@ -106,5 +106,5 @@ def test_создание_проекта_с_подготовки_через_пр
     assert sub.status_code == 201 and sub.json()["parent_id"] == c.pid
     ids = [p["id"] for p in c.get("/projects-list", headers=h()).json()]
     assert n.json()["id"] in ids and sub.json()["id"] in ids
-    # администратор проекта — нет: блок «Создать проект» ему не показывается, сервер отказывает так же
-    assert c.post("/projects-list", json={"name": "Цех сварки"}, headers=h("project_admin")).status_code == 403
+    # 09.11.2026, слово владелицы: завести проект может любой вошедший — администратор проекта тоже (было 403)
+    assert c.post("/projects-list", json={"name": "Цех сварки"}, headers=h("project_admin")).status_code == 201
