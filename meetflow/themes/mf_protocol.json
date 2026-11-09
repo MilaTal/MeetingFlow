@@ -1,0 +1,81 @@
+{
+  "id": "mf_protocol",
+  "title": "Протоколы встреч Невалаб",
+  "vocabulary": {
+    "meeting": "встреча",
+    "meetings": "Встречи",
+    "protocol": "Протокол встречи",
+    "registry": "Реестр задач",
+    "cards": "Разбор"
+  },
+  "protocol_skeleton": [
+    "Участники",
+    "Что сделано",
+    "Блокирующие факторы",
+    "Решения",
+    "Открытые вопросы"
+  ],
+  "notes_markers": [
+    "блокер",
+    "спринт",
+    "релиз",
+    "ответственный",
+    "дедлайн"
+  ],
+  "roles": [
+    "member",
+    "project_admin",
+    "super_admin"
+  ],
+  "intake": {
+    "duration_min": 3,
+    "duration_max": 90
+  },
+  "design": {
+    "palette": "polaris",
+    "document_font": "Calibri",
+    "document_size_pt": 11
+  },
+  "units": {
+    "enabled": true
+  },
+  "prompts": {
+    "domain_role": "Ты ведёшь протокол рабочей встречи. Источник фактов — только текст встречи; без оценок, домыслов и слов «синк», «продуктовая команда»."
+  },
+  "roadmap": {
+    "other_title": "Прочее",
+    "blocks": [
+      {
+        "title": "Разработка",
+        "keywords": [
+          "релиз",
+          "сборка",
+          "код",
+          "стенд",
+          "тест"
+        ]
+      },
+      {
+        "title": "Продукт",
+        "keywords": [
+          "демо",
+          "заказчик",
+          "требование",
+          "бюджет"
+        ]
+      }
+    ]
+  },
+  "protocol": {
+    "title_with_topic": false
+  },
+  "protocol_table": {
+    "columns": [
+      "№",
+      "Задача",
+      "Ответственный",
+      "Срок",
+      "Дата постановки"
+    ]
+  }
+}

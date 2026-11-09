@@ -2017,8 +2017,11 @@ class MeetingPipeline:
         except ValueError:
             date_h = date_s
         tp = self._topic(meeting)
-        # тема — в шапку протокола кодом: «# Протокол 01.10.2026. Стройка.» (как ERP, оформить_протокол)
-        out = [f"# {th.word('protocol')} {date_h}" + (f". {tp['name'].strip().rstrip('.')}." if tp else ""), ""]
+        # тема — в шапку протокола кодом: «# Протокол 01.10.2026. Стройка.» (как ERP, оформить_протокол).
+        # Слово владелицы 09.11.2026: в документе заказчику темы в шапке нет — только «Протокол встречи» и дата,
+        # поэтому тема `mf_protocol` выключает её флагом `protocol.title_with_topic: false`.
+        с_темой = (tp and self.theme.get("protocol.title_with_topic", True))
+        out = [f"# {th.word('protocol')} {date_h}" + (f". {tp['name'].strip().rstrip('.')}." if с_темой else ""), ""]
         участники_строкой: list[str] = []
         for sec in self._skeleton(meeting):
             if participants and _раздел_участников(sec):
@@ -2048,7 +2051,7 @@ class MeetingPipeline:
             self.s, meeting,
             lambda t: due_text(t.get("due_date"), t.get("date_set"), t.get("due_kind")) or "", откуда,
             текст_записи=record if base_kind == SourceKind.TRANSCRIPT.value else None)
-        out += tablica_zadach.раздел_задач(строки)
+        out += tablica_zadach.раздел_задач(строки, колонки=tablica_zadach.колонки(self.theme))
         if closings:
             out += [f"## {th.word('closed_tasks')}", ""]
             for i, (_tid, q) in enumerate(closings, 1):
