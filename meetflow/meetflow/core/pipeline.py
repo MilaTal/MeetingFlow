@@ -45,6 +45,7 @@ from . import asr_journal, hod, mesto_citaty, plan as plan_mod, voice_step
 from . import petlya_raspoznavaniya as petlya, polnota_rasshifrovki as polnota
 from . import korotkiy_protokol, schet_zadach, tablica_zadach, tekst_po_zapisi
 from . import iskazheniya_nazvaniy, slovar_whisper, ukrupnenie_sborka
+from . import format_protokola     # заголовок отдельно от абзаца (рекомендация Планёрки 08.11.2026)
 from . import obedinenie as obedinenie_mod     # объединение и мусор (Доработка 1, 29.10.2026)
 from . import vtoroy_sudya                      # второй судья в тень (записка 05.11.2026)
 from . import svedenie_ten                     # сведение кодом в тень, вариант C (слово владелицы 06.11.2026)
@@ -1670,6 +1671,9 @@ class MeetingPipeline:
                                                     record=safe_source.text + ("\n" + notes_text if notes_text else ""),
                                                     people=[p.full_name for p in team.people], rep=rep,
                                                     base_kind=source.kind.value, participants=участники_кодом)
+                # модель иногда склеивает «## Решения **Тема:** текст» в одну строку — в markdown это заголовок
+                # целиком; разрезаем кодом, текст не меняя (рекомендация Планёрки, нормализация заголовков)
+                protocol_md = format_protokola.нормализовать(protocol_md)
                 # то же правило для абзацев «**Проект** – …» тела: без опоры — «Проект не определён» (как ERP)
                 protocol_md, _оп, _св = iskazheniya_nazvaniy.применить_к_встрече(self.s, project_id, protocol_md, [],
                                                                                  safe_source.text)
