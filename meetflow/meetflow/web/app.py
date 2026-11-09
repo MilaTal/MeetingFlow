@@ -1940,6 +1940,16 @@ def create_app(theme_name: str | None = None, db_path: str | None = None, journa
     from . import erp
     erp.mount(app, store=store, pipe=pipe, theme=theme, accounts=accounts, queue=queue, intake=intake, backups=backups,
               journal=journal, app_dir=app_dir)
+    # 09.11.2026: `index.html` отдавался без `Cache-Control` — браузер держал старую страницу, и новые версии
+    # статики (?v=mfNN) не подхватывались до Ctrl+F5 (владелица видела старый старт). HTML перепроверяем каждый раз;
+    # файлы с версией в адресе кэшируются как раньше.
+    @app.middleware("http")
+    async def _свежий_html(request, call_next):
+        ответ = await call_next(request)
+        if (ответ.headers.get("content-type") or "").startswith("text/html"):
+            ответ.headers["Cache-Control"] = "no-cache, must-revalidate"
+        return ответ
+
     app.mount("/", StaticFiles(directory=STATIC, html=True), name="static")
     return app
 
