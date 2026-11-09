@@ -1740,3 +1740,14 @@ mark.zapis-mark { background: var(--accent-soft); color: inherit; box-shadow: in
 .pl-search { flex: 1 1 100%; min-width: 0; font-size: 12.5px; padding: 3px 8px; border-radius: 6px;
   border: 1px solid var(--reg-line); background: var(--field-bg); color: var(--text); }
 .pl-search::placeholder { color: var(--text-muted); }
+
+/* 09.11.2026, вариант А владелицы: блок «Встречи по проектам» — мягкая подложка, «Реестр встреч» с акцентной
+   полосой и меткой «начните здесь»; второй блок (Команда, Разбор, Параметры) — бледнее, как второй план. */
+.whoami-project.nav-project { background: var(--field-bg); border: 1px solid var(--accent-border);
+  border-radius: 10px; padding: 8px 8px 10px; }
+.whoami-project .pl-head > span { color: var(--text); font-weight: 600; }
+.pl-nested-item.pl-start { border-left: 2px solid var(--accent); border-radius: 0 6px 6px 0; padding-left: 9px;
+  color: var(--text); font-weight: 600; }
+.pl-start-mark { margin-left: 6px; font-size: 11px; font-weight: 400; color: var(--accent); white-space: nowrap; }
+.nav .nav-service { opacity: .82; }
+

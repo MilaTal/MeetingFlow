@@ -205,8 +205,9 @@ def mount(r: APIRouter, ctx: Ctx) -> None:
 
     @r.post("/projects-list", status_code=201)
     def project_create(body: ProjectIn, request: Request):
+        """Завести проект может любой вошедший (слово владелицы 09.11.2026). Правка и удаление — по-прежнему суперу."""
         from ...core.store import now
-        u = ctx.need_super(request)
+        u = ctx.need_user(request)
         name, aliases = clean(body)
         if same_name(name):
             raise HTTPException(409, f"Проект «{name}» уже есть")

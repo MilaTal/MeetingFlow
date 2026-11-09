@@ -31,17 +31,17 @@ def test_шапка_панели_двумя_строками():
 
 def test_версии_подняты():
     html = (СТАТИКА / "index.html").read_text(encoding="utf-8")
-    assert "app.js?v=20261109mf83" in html and "styles.css?v=20261109mf83" in html
+    assert "app.js?v=20261109mf85" in html and "styles.css?v=20261109mf85" in html
 
 
 def test_реестр_задач_назван_и_открывается_из_встречи():
-    """Перевёрнуто 09.11.2026 (слово владелицы): задачи относятся только к конкретной встрече, поэтому в меню проекта
-    пункта «Реестр задач» нет — он открывается со страницы встречи («Все задачи встречи в реестре»)."""
+    """09.11.2026: экран «Реестр задач» виден снова (слово владелицы «не видно вообще»). Он открывается из меню проекта,
+    а со страницы встречи — с фильтром по этой встрече."""
     reg = (СТАТИКА / "registry.js").read_text(encoding="utf-8")
     assert "<h1>Реестр задач</h1>" in reg
     app_js = (СТАТИКА / "app.js").read_text(encoding="utf-8")
-    assert 'data-route="dashboard" href="#dashboard">Реестр задач</a>' not in app_js, "из меню проекта пункт убран"
-    assert 'data-route="meetings" href="#meetings">Реестр встреч</a>' in app_js
+    assert 'data-route="dashboard" href="#dashboard">Реестр задач</a>' in app_js
+    assert 'data-route="meetings" href="#meetings">Реестр встреч<span class="pl-start-mark">начните здесь</span></a>' in app_js
 
 
 def test_первая_страница_при_входе_общие_встречи_реестр_встреч():
@@ -85,7 +85,7 @@ def test_в_меню_проекта_реестр_встреч_первым():
     конец = js.index("const строка =", начало)
     кусок = js[начало:конец]
     assert кусок.index('href="#meetings"') < кусок.index('href="#prep"'), "«Реестр встреч» — первым пунктом"
-    assert кусок.count("pl-nested-item") == 2, "в меню проекта только встречи и подготовка"
+    assert кусок.count("pl-nested-item") == 3, "в меню проекта: встречи, задачи, подготовка"
 
 
 def test_задачи_и_договорённости_открываются_у_встречи():

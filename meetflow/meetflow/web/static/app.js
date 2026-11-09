@@ -1736,6 +1736,8 @@ function рисоватьПроекты() {
   const $l = document.getElementById("project-list");
   if (!$l) return;
   const тек = выбранныйПроект();
+  const $заголовок = document.getElementById("project-list-title");
+  if ($заголовок) $заголовок.textContent = `Встречи по проектам · ${(_проекты || []).filter(п => !п.general).length}`;
   const супер = typeof isSuperAdmin === "function" && isSuperAdmin();
   // Поиск проекта по имени (слово владелицы 08.11.2026): вводим буквы — список сужается; «Общие встречи» остаются.
   const запрос = (document.getElementById("pl-search")?.value || "").trim().toLowerCase().replace("ё", "е");
@@ -1763,7 +1765,8 @@ function рисоватьПроекты() {
   // «Статус проекта» для отдельных встреч не нужен — пункт убран совсем.
   const свёрнут = () => sessionStorage.getItem("проектСвёрнут") === "1";
   const менюПроектаСтрокой = (п) => `<div class="pl-nested"${свёрнут() ? " hidden" : ""}>
-      <a class="pl-nested-item" data-route="meetings" href="#meetings">Реестр встреч</a>
+      <a class="pl-nested-item pl-start" data-route="meetings" href="#meetings">Реестр встреч<span class="pl-start-mark">начните здесь</span></a>
+      <a class="pl-nested-item" data-route="dashboard" href="#dashboard">Реестр задач</a>
       <a class="pl-nested-item" data-route="prep" href="#prep">Подготовка встречи</a></div>`;
   const строка = (п) => `<div class="pl-row${п.id === тек ? " pl-on" : ""}" data-id="${п.id}">
       ${п.id === тек ? `<button type="button" class="pl-arrow" aria-expanded="${свёрнут() ? "false" : "true"}"
@@ -1778,7 +1781,7 @@ function рисоватьПроекты() {
   $l.innerHTML = общие.map(сМеню).join("") + видимые.map(сМеню).join("") +
     (скрыто > 0 ? `<button type="button" class="pl-extra" data-act="more">Показать ещё</button>` : "") +
     (запрос ? "" : "") +
-    (супер ? `<button type="button" class="pl-extra" data-act="new">+ Новый проект</button>` : "");
+    `<button type="button" class="pl-extra" data-act="new">+ Новый проект</button>`;   // 09.11.2026: доступно всем
   $l.querySelectorAll(".pl-row").forEach(р => {
     р.querySelector(".pl-name").addEventListener("click", () => {
       выбратьПроект(р.dataset.id);
