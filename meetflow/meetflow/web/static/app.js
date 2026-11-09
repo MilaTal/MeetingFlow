@@ -1751,9 +1751,11 @@ function рисоватьПроекты() {
   $l.querySelectorAll(".pl-row").forEach(р => {
     р.querySelector(".pl-name").addEventListener("click", () => {
       выбратьПроект(р.dataset.id);
-      // Слово владелицы 08.11.2026 (уточнение по скриншоту): при переключении проекта и «Общих встреч» справа
-      // открывается вкладка «Реестр встреч», а не реестр задач — «куда-то потерялась задача».
-      if (!/^meetings/.test(location.hash.replace(/^#/, ""))) location.hash = "#meetings";
+      // Слово владелицы 09.11.2026 (третий раз): при переключении проекта и «Общих встреч» справа открывается
+      // «Реестр задач» (#dashboard) — задачи выбранного проекта. Если уже там — перерисовываем, иначе hash не меняется
+      // и экран остаётся со старым проектом.
+      const экран = (location.hash || "#dashboard").replace(/^#/, "").split("?")[0].split("/")[0];
+      if (экран !== "dashboard") location.hash = "#dashboard"; else render();
     });
     р.querySelector(".pl-more")?.addEventListener("click", (e) => { e.stopPropagation(); менюПроекта(р); });
     р.querySelector(".pl-arrow")?.addEventListener("click", (e) => {
