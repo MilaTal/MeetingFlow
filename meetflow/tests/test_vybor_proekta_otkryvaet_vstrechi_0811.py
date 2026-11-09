@@ -31,7 +31,7 @@ def test_шапка_панели_двумя_строками():
 
 def test_версии_подняты():
     html = (СТАТИКА / "index.html").read_text(encoding="utf-8")
-    assert "app.js?v=20261109mf80" in html and "styles.css?v=20261109mf80" in html
+    assert "app.js?v=20261109mf81" in html and "styles.css?v=20261109mf81" in html
 
 
 def test_реестр_задач_назван_и_в_меню_проекта():
@@ -74,3 +74,13 @@ def test_страница_входа_не_кэшируется(tmp_path):
     файл = c.get("/app.js?v=20261109mf79")
     assert файл.status_code == 200
     assert "no-cache" not in (файл.headers.get("cache-control") or "")
+
+
+def test_в_меню_проекта_реестр_встреч_первым():
+    """Слово владелицы 09.11.2026: первой строкой меню проекта — «Реестр встреч», за ней «Реестр задач».
+    Иначе первый пункт ведёт не туда, куда человек ждёт от первой страницы."""
+    js = (СТАТИКА / "app.js").read_text(encoding="utf-8")
+    начало = js.index("const менюПроектаСтрокой")
+    конец = js.index("const строка =", начало)
+    кусок = js[начало:конец]
+    assert кусок.index('href="#meetings"') < кусок.index('href="#dashboard"'), "«Реестр встреч» — первым пунктом"

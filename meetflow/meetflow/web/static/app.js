@@ -1757,10 +1757,11 @@ function рисоватьПроекты() {
       : '<svg class="pl-svg" viewBox="0 0 24 24" aria-hidden="true"><path d="M3 7a2 2 0 012-2h4l2 2h8a2 2 0 012 2v8a2 2 0 01-2 2H5a2 2 0 01-2-2z"/></svg>';
   // Вложенное меню проекта под выбранной строкой (вариант А, решение владелицы 08.11.2026): те же пункты, что в левом
   // меню, но привязанные к проекту. Стрелка сворачивает и разворачивает; состояние помнится в памяти вкладки.
+  // 09.11.2026 (слово владелицы): «Реестр встреч» — первым пунктом, как и первая страница при входе.
   const свёрнут = () => sessionStorage.getItem("проектСвёрнут") === "1";
   const менюПроектаСтрокой = (п) => `<div class="pl-nested"${свёрнут() ? " hidden" : ""}>
-      <a class="pl-nested-item" data-route="dashboard" href="#dashboard">Реестр задач</a>
       <a class="pl-nested-item" data-route="meetings" href="#meetings">Реестр встреч</a>
+      <a class="pl-nested-item" data-route="dashboard" href="#dashboard">Реестр задач</a>
       <a class="pl-nested-item" data-route="prep" href="#prep">Подготовка встречи</a>
       <a class="pl-nested-item" data-route="agreements" href="#agreements">Договорённости по проекту</a>
       ${п.general ? "" : `<a class="pl-nested-item" data-route="status" href="#status">Статус проекта</a>`}</div>`;
