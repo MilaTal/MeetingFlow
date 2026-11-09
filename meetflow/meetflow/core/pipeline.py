@@ -421,6 +421,30 @@ class MeetingPipeline:
             return ""
         return vks_vtoroy_tekst.кусок_по_времени(текст, min(времена), max(времена))
 
+    def _edinicy_v_protokole(self, project_id: int, meeting_id: int, protocol_md: str) -> None:
+        """Сколько договорённостей и решений реестра реально попало в текст протокола. Ноль при непустом реестре —
+        карточка: тихая потеря единиц (рекомендация Планёрки 09.11.2026, п. 3)."""
+        строки = self.s.q("SELECT text FROM units WHERE meeting_id=? AND kind IN ('agreement','decision') "
+                          "AND COALESCE(status,'') != 'dropped'", (meeting_id,))
+        if not строки:
+            return
+        md = " ".join((protocol_md or "").replace("ё", "е").lower().split())
+        нашли = 0
+        for r in строки:
+            начало = " ".join((r["text"] or "").replace("ё", "е").lower().split())[:30]
+            if начало and начало in md:
+                нашли += 1
+        if нашли:
+            return
+        title = f"Договорённости не попали в протокол: {len(строки)}"
+        if not self.s.q("SELECT id FROM cards WHERE meeting_id=? AND title=? AND status='open'", (meeting_id, title)):
+            self.cards.open(project_id, "technical", title,
+                            {"units": len(строки), "in_text": 0,
+                             "detail": "В реестре встречи есть договорённости и решения, но ни одно не найдено в тексте "
+                                       "протокола по первым 30 знакам. Проверьте, что разделы протокола их содержат; "
+                                       "сборка их не выдумывает."},
+                            meeting_id)
+
     def _vks_polnota(self, project_id: int, meeting_id: int, mdate: str | None) -> int:
         """Проверка полноты по выгрузке ВКС — кодом, без модели (записка 05.11.2026, п. 4).
 
@@ -1713,6 +1737,12 @@ class MeetingPipeline:
                         вернулось = len(на_возврат)
                 self.s.update("meetings", meeting_id, protocol_md=protocol_md, protocol_built_at=built,
                               built_from=[s["name"] for s in srcs])
+                # Договорённости и решения из реестра могут не попасть в текст молча (рекомендация Планёрки 09.11.2026):
+                # считаем N в реестре и M в документе; N>0 при M=0 — карточка, а не тишина
+                try:
+                    self._edinicy_v_protokole(project_id, meeting_id, protocol_md)
+                except Exception as exc:  # noqa: BLE001 — проверка не отменяет собранный протокол
+                    self.step_failed(project_id, meeting_id, "Единицы в протоколе", exc)
                 if потеряно:
                     ещё_не_сохранена = self.s.q(
                         "SELECT COUNT(*) AS n FROM protocol_versions WHERE meeting_id=?", (meeting_id,))[0]["n"] + 1
