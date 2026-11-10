@@ -31,7 +31,7 @@ def test_шапка_панели_двумя_строками():
 
 def test_версии_подняты():
     html = (СТАТИКА / "index.html").read_text(encoding="utf-8")
-    assert "app.js?v=20261109mf90" in html and "styles.css?v=20261109mf90" in html
+    assert "app.js?v=20261109mf92" in html and "styles.css?v=20261109mf92" in html
 
 
 def test_реестр_задач_назван_и_открывается_из_встречи():
@@ -41,7 +41,8 @@ def test_реестр_задач_назван_и_открывается_из_в�
     assert "<h1>Реестр задач</h1>" in reg
     app_js = (СТАТИКА / "app.js").read_text(encoding="utf-8")
     assert 'data-route="dashboard" href="#dashboard">Реестр задач</a>' in app_js
-    assert 'data-route="meetings" href="#meetings">Реестр встреч<span class="pl-start-mark">начните здесь</span></a>' in app_js
+    assert 'class="pl-nested-item pl-start"' in app_js and 'pl-start-num">1<' in app_js
+    assert 'pl-start-mark">начните здесь<' in app_js
 
 
 def test_первая_страница_при_входе_общие_встречи_реестр_встреч():

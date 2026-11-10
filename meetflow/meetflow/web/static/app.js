@@ -1765,7 +1765,7 @@ function рисоватьПроекты() {
   // «Статус проекта» для отдельных встреч не нужен — пункт убран совсем.
   const свёрнут = () => sessionStorage.getItem("проектСвёрнут") === "1";
   const менюПроектаСтрокой = (п) => `<div class="pl-nested"${свёрнут() ? " hidden" : ""}>
-      <a class="pl-nested-item pl-start" data-route="meetings" href="#meetings">Реестр встреч<span class="pl-start-mark">начните здесь</span></a>
+      <a class="pl-nested-item pl-start" data-route="meetings" href="#meetings"><span class="pl-start-num">1</span><span class="pl-start-text">Реестр встреч<span class="pl-start-mark">начните здесь</span></span><span class="pl-start-arrow" aria-hidden="true">→</span></a>
       ${п.general ? "" : `<a class="pl-nested-item" data-route="dashboard" href="#dashboard">Реестр задач</a>`}
       <a class="pl-nested-item" data-route="prep" href="#prep">Подготовка встречи</a>
       ${п.general ? "" : `<a class="pl-nested-item" data-route="agreements" href="#agreements">Договорённости по проекту</a>
@@ -2335,7 +2335,7 @@ document.getElementById("change-password-btn")?.addEventListener("click", () => 
 // 2–3 минуты нарезок со своими экранами ERP и подписями, без голоса, на вымышленных людях и проектах. Пункт — в самом низу
 // блока «Вы работаете как», виден всем ролям. Файл лежит рядом с фронтом и отдаётся статикой; версия в адресе — та же
 // ступень, что у app.js, чтобы новый ролик не застрял в кэше.
-const ВИДЕО_КАК_ПОЛЬЗОВАТЬСЯ = "media/kak_polzovatsya.mp4?v=20261109mf90";
+const ВИДЕО_КАК_ПОЛЬЗОВАТЬСЯ = "media/kak_polzovatsya.mp4?v=20261109mf92";
 async function renderHelp() {
   $main.innerHTML = `
     <div class="doc-head"><h1>Как пользоваться</h1></div>
