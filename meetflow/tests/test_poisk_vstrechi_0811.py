@@ -19,7 +19,7 @@ def test_поле_искало_проект_или_встречу():
     html = (СТАТИКА / "index.html").read_text(encoding="utf-8")
     assert 'placeholder="Поиск проекта или встречи"' in html
     assert 'id="pl-meetings"' in html
-    assert 'app.js?v=20261109mf89' in html and 'styles.css?v=20261109mf89' in html
+    assert 'app.js?v=20261109mf90' in html and 'styles.css?v=20261109mf90' in html
 
 
 def test_экран_показывает_найденные_встречи():

@@ -62,7 +62,7 @@ async function renderProtocols() {
   // открывается щелчком в любом месте. Будущие даты в списке не показываются (у Планёрки — решение владельца 15.10.26
   // «будущее не надо показывать»): над списком — ближайшая встреча и её план.
   $main.innerHTML = `<div class="feed-head"><div class="feed-head-text"><h1>Реестр встреч</h1>
-      <div class="feed-sub">Нажмите на строку, чтобы открыть встречу и её протокол.${canPrepare() ? " Новая встреча заводится в «Подготовке встречи»." : ""}</div></div></div>
+      <div class="feed-sub">Нажмите на строку, чтобы открыть встречу и её протокол; в «…» строки — задачи и договорённости этой встречи.${canPrepare() ? " Новая встреча заводится в «Подготовке встречи»." : ""}</div></div></div>
     <div id="nearest-slot"></div>
     <div id="proto-list"><div class="card empty-state">Загрузка…</div></div>`;
   const встречи = await api("/meetings");
@@ -149,6 +149,9 @@ function менюВстречи($кнопка, m, опции = {}) {
   const живыеНаДату = все.filter(x => x.date === m.date && x.status !== "cancelled");
   const дубль = живыеНаДату.length > 1 && !отдельная(m);
   const пункты = [];
+  // 10.11.2026 (слово владелицы): задачи и договорённости — у конкретной встречи; открываем их прямо из «…» строки.
+  пункты.push('<button type="button" role="menuitem" data-act="tasks">Реестр задач встречи</button>');
+  пункты.push('<button type="button" role="menuitem" data-act="agreements">Договорённости встречи</button>');
   пункты.push('<button type="button" role="menuitem" data-act="rename">Переименовать</button>');
   // Дату меняют, только пока у встречи нет протокола и материалов: сервер отказывает, если есть протокол или источники.
   // 05.11.2026: причина видна до нажатия — пункт с числом материалов вместо кнопки, которая обещает и не делает.
@@ -172,6 +175,14 @@ function менюВстречи($кнопка, m, опции = {}) {
   $кнопка.parentElement.appendChild($m);
   const закрыть = (e) => { if (!e || !$m.contains(e.target)) { $m.remove(); document.removeEventListener("click", закрыть); } };
   setTimeout(() => document.addEventListener("click", закрыть), 0);
+  $m.querySelector('[data-act="tasks"]')?.addEventListener("click", () => {
+    закрыть();
+    реестрПоВстрече(m.id, m.date);
+  });
+  $m.querySelector('[data-act="agreements"]')?.addEventListener("click", () => {
+    закрыть();
+    location.hash = `#meetings/${m.id}/agreements`;
+  });
   $m.querySelector('[data-act="rename"]')?.addEventListener("click", () => {
     закрыть();
     openModal("Переименовать встречу", `<label class="field-label" for="mt-label">Название встречи ${esc(fmtRuDate(m.date))}</label>

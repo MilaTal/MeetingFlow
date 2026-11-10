@@ -339,6 +339,11 @@ async function renderMeetingReader(id, запрошеннаяВкладка) {
     document.getElementById("mt-all-tasks")?.addEventListener("click", () => реестрПоВстрече(id, встреча.date));
   };
   document.querySelectorAll(".mt-btn[data-drawer]").forEach(b => b.addEventListener("click", () => открыть(b.dataset.drawer, b)));
+  // 10.11.2026: ссылка из меню «…» — #meetings/N/agreements сразу открывает панель договорённостей этой встречи.
+  if (/\/agreements(\?|$)/.test(location.hash)) {
+    const панель = $main.querySelector('.mt-btn[data-drawer="agreements"]');
+    if (панель) await открыть("agreements", панель);
+  }
   // «⋯» — одно меню со встречей (Б4): те же пункты, что в реестре и подготовке.
   const допПункты = [{ act: "plan-next", label: "План следующей" }];
   if (админ && hasMin) допПункты.push({ act: "notes", label: `Замечания${замечания ? ` — ${замечания}` : ""}` });
