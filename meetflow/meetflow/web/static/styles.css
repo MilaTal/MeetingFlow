@@ -1748,16 +1748,16 @@ mark.zapis-mark { background: var(--accent-soft); color: inherit; box-shadow: in
 .whoami-project .pl-head > span { color: var(--text); font-weight: 600; }
 /* Точка входа — заметнее (10.11.2026, слово владелицы «акцент не очень явный»): мягкая заливка всего пункта,
    полоса 3px, номер шага в круге и бейдж «начните здесь»; стрелка справа показывает, что это переход. */
-.pl-nested-item.pl-start { display: flex; align-items: flex-start; gap: 6px; background: var(--accent-soft);
-  border-left: 3px solid var(--accent); border-radius: 6px; padding: 6px 8px 6px 6px; color: var(--text);
-  font-weight: 600; }
+.pl-nested-item.pl-start { display: flex; align-items: center; gap: 6px; background: var(--accent-soft);
+  border-left: 2px solid color-mix(in srgb, var(--accent) 55%, transparent); border-radius: 6px;
+  padding: 6px 8px 6px 8px; color: var(--text); font-weight: 600; }
 .pl-nested-item.pl-start:hover { background: var(--accent-soft-hover); color: var(--text); }
-.pl-start-num { width: 18px; height: 18px; flex: none; margin-top: 1px; border-radius: 50%; background: var(--accent);
-  color: #fff; font-size: 11px; display: inline-flex; align-items: center; justify-content: center; }
 .pl-start-text { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
-.pl-start-mark { align-self: flex-start; padding: 1px 7px; border-radius: 10px; background: var(--accent); color: #fff;
+.pl-start-mark { align-self: flex-start; padding: 1px 7px; border-radius: 10px;
+  background: var(--accent-soft-hover); color: var(--accent); border: 1px solid var(--accent-border);
   font-size: 10.5px; font-weight: 500; white-space: nowrap; }
-.pl-start-arrow { margin-left: auto; align-self: center; color: var(--accent); font-weight: 400; }
+.pl-start-arrow { margin-left: auto; align-self: center;
+  color: color-mix(in srgb, var(--accent) 70%, transparent); font-weight: 400; }
 .nav .nav-service { opacity: .82; }
 
 /* Обучающее видео (10.11.2026): файл лежит в static/media и отдаётся статикой. Пропорции 16:9 держим и до

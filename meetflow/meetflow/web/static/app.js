@@ -1765,7 +1765,7 @@ function рисоватьПроекты() {
   // «Статус проекта» для отдельных встреч не нужен — пункт убран совсем.
   const свёрнут = () => sessionStorage.getItem("проектСвёрнут") === "1";
   const менюПроектаСтрокой = (п) => `<div class="pl-nested"${свёрнут() ? " hidden" : ""}>
-      <a class="pl-nested-item pl-start" data-route="meetings" href="#meetings"><span class="pl-start-num">1</span><span class="pl-start-text">Реестр встреч<span class="pl-start-mark">начните здесь</span></span><span class="pl-start-arrow" aria-hidden="true">→</span></a>
+      <a class="pl-nested-item pl-start" data-route="meetings" href="#meetings"><span class="pl-start-text">Реестр встреч<span class="pl-start-mark">начни здесь</span></span><span class="pl-start-arrow" aria-hidden="true">→</span></a>
       ${п.general ? "" : `<a class="pl-nested-item" data-route="dashboard" href="#dashboard">Реестр задач</a>`}
       <a class="pl-nested-item" data-route="prep" href="#prep">Подготовка встречи</a>
       ${п.general ? "" : `<a class="pl-nested-item" data-route="agreements" href="#agreements">Договорённости по проекту</a>
