@@ -1766,10 +1766,10 @@ function рисоватьПроекты() {
   const свёрнут = () => sessionStorage.getItem("проектСвёрнут") === "1";
   const менюПроектаСтрокой = (п) => `<div class="pl-nested"${свёрнут() ? " hidden" : ""}>
       <a class="pl-nested-item pl-start" data-route="meetings" href="#meetings">Реестр встреч<span class="pl-start-mark">начните здесь</span></a>
-      <a class="pl-nested-item" data-route="dashboard" href="#dashboard">Реестр задач</a>
+      ${п.general ? "" : `<a class="pl-nested-item" data-route="dashboard" href="#dashboard">Реестр задач</a>`}
       <a class="pl-nested-item" data-route="prep" href="#prep">Подготовка встречи</a>
-      <a class="pl-nested-item" data-route="agreements" href="#agreements">Договорённости по проекту</a>
-      ${п.general ? "" : `<a class="pl-nested-item" data-route="status" href="#status">Статус проекта</a>`}</div>`;
+      ${п.general ? "" : `<a class="pl-nested-item" data-route="agreements" href="#agreements">Договорённости по проекту</a>
+      <a class="pl-nested-item" data-route="status" href="#status">Статус проекта</a>`}</div>`;
   const строка = (п) => `<div class="pl-row${п.id === тек ? " pl-on" : ""}" data-id="${п.id}">
       ${п.id === тек ? `<button type="button" class="pl-arrow" aria-expanded="${свёрнут() ? "false" : "true"}"
         aria-label="Свернуть или развернуть меню проекта" title="Свернуть или развернуть меню проекта">${свёрнут() ? "▸" : "▾"}</button>` : ""}
@@ -2184,11 +2184,16 @@ function показатьКтоВошёл(u) {
 // страницей открывается «Общие встречи» — «Реестр встреч». Пришли по ссылке с адресом (`#meetings/8`, `#prep` и т. п.) —
 // не перебиваем.
 function перваяСтраницаПриВходе() {
-  if (!пришлиБезАдреса) return;                 // пришли по ссылке — её адрес не перебиваем
+  // 10.11.2026: вход с «#dashboard» без выбранной встречи — это не осмысленный адрес, а прежняя вкладка/закладка;
+  // ведём на «Реестр встреч», иначе человек снова попадает на общий список задач (жалоба владелицы).
   const общие = (_проекты || []).find(п => п.general);
   if (!общие) return;
+  const pИзАдреса = new URLSearchParams((location.hash || "").split("?")[1] || "").get("p");
+  const только_общий_реестр = (/^#dashboard(\?|$)/.test(location.hash || "")
+                                && (pИзАдреса === null || pИзАдреса === "" || Number(pИзАдреса) === общие.id));
+  if (!пришлиБезАдреса && !только_общий_реестр) return;   // пришли по ссылке — её адрес не перебиваем
   const экран = (location.hash || "").replace(/^#/, "").split("?")[0];
-  if (экран && экран !== "meetings") return;    // пока грузились, человек уже ушёл на другой экран
+  if (экран && экран !== "meetings" && !только_общий_реестр) return;    // человек уже ушёл на другой экран
   localStorage.setItem("currentProjectId", String(общие.id));
   sessionStorage.setItem("currentProjectId", String(общие.id));   // проект вкладки главнее localStorage
   const адрес = location.pathname + location.search + "#meetings?p=" + общие.id;

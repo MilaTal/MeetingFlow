@@ -31,7 +31,7 @@ def test_шапка_панели_двумя_строками():
 
 def test_версии_подняты():
     html = (СТАТИКА / "index.html").read_text(encoding="utf-8")
-    assert "app.js?v=20261109mf88" in html and "styles.css?v=20261109mf88" in html
+    assert "app.js?v=20261109mf89" in html and "styles.css?v=20261109mf89" in html
 
 
 def test_реестр_задач_назван_и_открывается_из_встречи():
@@ -52,7 +52,7 @@ def test_первая_страница_при_входе_общие_встреч
     js = (СТАТИКА / "app.js").read_text(encoding="utf-8")
     assert "function перваяСтраницаПриВходе()" in js
     assert 'const пришлиБезАдреса = !(location.hash || "").replace(/^#/, "").trim();' in js
-    assert 'if (!пришлиБезАдреса) return;' in js
+    assert 'if (!пришлиБезАдреса && !только_общий_реестр) return;' in js
     assert 'localStorage.setItem("currentProjectId", String(общие.id));' in js
     assert 'sessionStorage.setItem("currentProjectId", String(общие.id));' in js
     assert '"#meetings?p=" + общие.id' in js, "адрес первой страницы несёт проект «Общие встречи»"
@@ -95,3 +95,11 @@ def test_задачи_и_договорённости_открываются_у_
     mj = (СТАТИКА / "meeting.js").read_text(encoding="utf-8")
     assert "реестрПоВстрече(id, встреча.date)" in mj
     assert "agreements?meeting_id=${id}" in mj
+
+
+def test_вход_с_общего_реестра_ведёт_на_реестр_встреч():
+    """Жалоба владелицы 10.11.2026: вход снова попадал на «Реестр задач». Если адрес — `#dashboard` без выбранной
+    встречи (прежняя вкладка/закладка), первая страница — «Реестр встреч»; ссылка с проектом не перебивается."""
+    js = (СТАТИКА / "app.js").read_text(encoding="utf-8")
+    assert "только_общий_реестр" in js
+    assert 'pИзАдреса === null || pИзАдреса === "" || Number(pИзАдреса) === общие.id' in js
