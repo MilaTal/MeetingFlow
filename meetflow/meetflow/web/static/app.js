@@ -2268,6 +2268,24 @@ async function startTestingMode() {
   document.getElementById("whoami-testing").hidden = false;
   отметитьВходЧерезПортал();   // пришёл от портала — подпись про тестовый режим не показываем
   await loadUsersForWhoAmI();
+  // Вход через портал — это рабочий режим: пароль введён там, и переключать «Вы работаете как» нечего.
+  // Смена ФИО остаётся только супер-администратору (решение владелицы 10.11.2026), как в Планёрке и ERP.
+  const черезПортал = localStorage.getItem("portalEntry") === "1";
+  const кто = allUsers.find(u => String(u.id) === String(localStorage.getItem("currentUserId") || ""));
+  const супер = !!кто && кто.access_role === "super_admin";
+  const $фикс = document.getElementById("whoami-fixed");
+  if (черезПортал && !супер) {
+    document.getElementById("whoami-testing").hidden = true;
+    if ($фикс) {
+      $фикс.hidden = false;
+      document.getElementById("user-name-fixed").textContent = кто ? кто.full_name : "не выбран";
+      document.getElementById("user-role-fixed").textContent =
+        (!кто ? "Участник" : кто.access_role === "super_admin" ? "Супер-админ"
+          : кто.access_role === "project_admin" ? "Админ проекта" : "Участник") + (кто && кто.role ? " · " + кто.role : "");
+    }
+  } else if ($фикс) {
+    $фикс.hidden = true;
+  }
   fillWhoAmI();
   updateModeSwitch();
   render();
@@ -2335,7 +2353,7 @@ document.getElementById("change-password-btn")?.addEventListener("click", () => 
 // 2–3 минуты нарезок со своими экранами ERP и подписями, без голоса, на вымышленных людях и проектах. Пункт — в самом низу
 // блока «Вы работаете как», виден всем ролям. Файл лежит рядом с фронтом и отдаётся статикой; версия в адресе — та же
 // ступень, что у app.js, чтобы новый ролик не застрял в кэше.
-const ВИДЕО_КАК_ПОЛЬЗОВАТЬСЯ = "media/kak_polzovatsya.mp4?v=20261109mf92";
+const ВИДЕО_КАК_ПОЛЬЗОВАТЬСЯ = "media/kak_polzovatsya.mp4?v=20261110mf93";
 async function renderHelp() {
   $main.innerHTML = `
     <div class="doc-head"><h1>Как пользоваться</h1></div>

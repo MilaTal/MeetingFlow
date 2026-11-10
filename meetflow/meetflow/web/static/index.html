@@ -103,6 +103,13 @@
           <div class="mode-line"><b>Тестовый режим</b> — вход по ФИО, без пароля</div>
           <button class="btn-sm mode-switch" id="mode-switch-testing" type="button" hidden>Включить рабочий режим (вход по логину)</button>
         </div>
+        <!-- Вход через портал (пароль введён там) — рабочий режим: видно, кто вы, выбора ФИО нет.
+             Остаётся только супер-администратору (решение владелицы 10.11.2026); рисует app.js. -->
+        <div id="whoami-fixed" hidden>
+          <div class="whoami-name" id="user-name-fixed"></div>
+          <div class="whoami-role" id="user-role-fixed"></div>
+          <div class="mode-line"><b>Рабочий режим</b> — вход через портал, ФИО не выбирается</div>
+        </div>
         <div id="whoami-auth" hidden>
           <div class="whoami-name" id="user-name"></div>
           <div class="whoami-role" id="user-role"></div>
@@ -126,7 +133,7 @@
       <div id="main"></div>
     </main>
   </div>
-  <script src="app.js?v=20261109mf92"></script>
+  <script src="app.js?v=20261110mf93"></script>
   <script src="polotno.js?v=20261108mf63"></script>
   <script src="registry.js?v=20261108mf69"></script>
   <script src="nav.js?v=20261109mf92"></script>
