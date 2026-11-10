@@ -21,7 +21,7 @@ import subprocess
 import tempfile
 from pathlib import Path
 
-from . import diarize, hod, otdelnyy_process, voice_contrib, voice_review, voice_rule
+from . import diarize, hod, otdelnyy_process, voice_contrib, voice_review, voice_rule, voice_split
 
 DEFAULT_LABEL = "Говорящий"
 
@@ -147,6 +147,24 @@ def process(wav_path: str | Path, text: str, meta: dict, *, meeting_id: int, mee
         if base:
             try:
                 centry, base_info = voice_rule.etalony(base)
+
+                # Слипшиеся метки (10.11.2026): диаризация иногда собирает разных людей в одну метку — её
+                # центр ложится между людьми и правило имени молчит. Делим до опознания; вариант выбираем
+                # по числу РАЗНЫХ уверенно названных людей (как в Планёрке: k=2 — один, k=4 — трое).
+                def _имён_уверенно(под_samples, под_segments):
+                    try:
+                        пробно = voice_rule.opoznat(под_samples, centry, in_team=in_team_factory(team),
+                                                    settings=settings)
+                    except Exception:  # noqa: BLE001 — проверка варианта не должна ронять шаг
+                        return 0
+                    return len({v["name"] for v in пробно.values()
+                                if v.get("status") == voice_rule.CONFIRMED and v.get("name")})
+
+                embedded, segments, разделено = voice_split.split_mixed(embedded, segments,
+                                                                        подходит=_имён_уверенно)
+                if разделено:
+                    notes.append("слипшиеся голоса разделены: " + "; ".join(
+                        f"{r['label']} — окон {r['windows']}, групп {r['groups']}" for r in разделено))
                 identified = voice_rule.opoznat(embedded, centry, in_team=in_team_factory(team), settings=settings)
                 names = {label: v["name"] for label, v in identified.items()
                          if v.get("status") == voice_rule.CONFIRMED and v.get("name")}

@@ -52,8 +52,22 @@ def выполнить(функция, *аргументы, **именованн
         return функция(*аргументы, **именованные)
     контекст = multiprocessing.get_context("spawn")
     try:
-        with concurrent.futures.ProcessPoolExecutor(max_workers=1, mp_context=контекст) as пул:
-            return пул.submit(функция, *аргументы, **именованные).result()
+        пул = concurrent.futures.ProcessPoolExecutor(max_workers=1, mp_context=контекст)
+        работники = list(getattr(пул, "_processes", {}).values())
+        предел = float(os.environ.get("WEBAPP_HEAVY_TIMEOUT_SEC", "0") or 0)
+        try:
+            future = пул.submit(функция, *аргументы, **именованные)
+            return future.result(timeout=предел or None)
+        finally:
+            # Ребёнок гасится явно (10.11.2026): после результата pyannote/torch иногда не отпускают
+            # свои потоки, `shutdown(wait=True)` ждёт их, а работник продолжает жечь процессор.
+            пул.shutdown(wait=False)
+            for работник in работники:
+                if работник.is_alive():
+                    работник.terminate()
+                    работник.join(timeout=5)
+                    if работник.is_alive():
+                        работник.kill()
     except RuntimeError as exc:
         # Скрипт без `if __name__ == "__main__"` не может породить процесс: это не поломка разбора,
         # просто считаем на месте (дольше, но результат тот же).
