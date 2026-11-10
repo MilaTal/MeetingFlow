@@ -2335,7 +2335,7 @@ document.getElementById("change-password-btn")?.addEventListener("click", () => 
 // 2–3 минуты нарезок со своими экранами ERP и подписями, без голоса, на вымышленных людях и проектах. Пункт — в самом низу
 // блока «Вы работаете как», виден всем ролям. Файл лежит рядом с фронтом и отдаётся статикой; версия в адресе — та же
 // ступень, что у app.js, чтобы новый ролик не застрял в кэше.
-const ВИДЕО_КАК_ПОЛЬЗОВАТЬСЯ = "media/kak_polzovatsya.mp4?v=20261109mf88";
+const ВИДЕО_КАК_ПОЛЬЗОВАТЬСЯ = "media/kak_polzovatsya.mp4?v=20261109mf89";
 async function renderHelp() {
   $main.innerHTML = `
     <div class="doc-head"><h1>Как пользоваться</h1></div>
