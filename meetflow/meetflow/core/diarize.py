@@ -91,7 +91,10 @@ def diarize(wav_path: Path) -> tuple[list[dict], dict]:
     Номера голосов — по порядку первого появления в записи."""
     from . import otdelnyy_process
 
-    return otdelnyy_process.выполнить(_diarize_here, Path(wav_path))
+    # Предел (11.11.2026): без него зависший дочерний процесс держал разбор часами — в Планёрке так вышло
+    # 87 минут без движения CPU. По пределу — понятная ошибка, встреча идёт дальше без подписей.
+    return otdelnyy_process.выполнить(_diarize_here, Path(wav_path),
+                                      предел=int(os.environ.get("VOICE_DIARIZE_TIMEOUT", "4500") or 4500))
 
 
 def _diarize_here(wav_path: Path) -> tuple[list[dict], dict]:

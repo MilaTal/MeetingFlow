@@ -138,7 +138,9 @@ def process(wav_path: str | Path, text: str, meta: dict, *, meeting_id: int, mee
 
         # Отпечатки окон считаем один раз: по ним и опознаём, и пополняем базу (ERP делает так же).
         hod.ход.подшаг("отпечатки голосов", прогноз_сек=длительность * 0.15 or None)
-        embedded = otdelnyy_process.выполнить(voice_contrib.embed_segments, work_wav, segments)
+        embedded = otdelnyy_process.выполнить(
+            voice_contrib.embed_segments, work_wav, segments,
+            предел=int(os.environ.get("VOICE_EMBED_TIMEOUT", "1800") or 1800))
         hod.ход.подшаг("подписи по голосам")
         names: dict[str, str] = {}
         identified: dict = {}

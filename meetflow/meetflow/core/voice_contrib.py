@@ -300,7 +300,9 @@ def contribute(wav_path: Path, segments: list[dict], *, origin_ref: str = "", em
     # Отпечатки могли уже снять для имён голосов (`recording_queue._voice_names`) — второй раз не считаем.
     if embedded is None:
         from . import otdelnyy_process     # отпечатки на процессоре — не в процессе сервера (25.10.2026)
-        embedded = otdelnyy_process.выполнить(embed_segments, wav_path, segments)
+        embedded = otdelnyy_process.выполнить(
+            embed_segments, wav_path, segments,
+            предел=int(os.environ.get("VOICE_EMBED_TIMEOUT", "1800") or 1800))
     if not embedded:
         return {"samples": 0, "named": 0, "hinted": 0, "duplicates": 0,
                 "skipped": f"нет кусков длиннее {MIN_SEGMENT_SEC:g} с"}
