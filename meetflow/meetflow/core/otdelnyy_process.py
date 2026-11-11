@@ -17,8 +17,11 @@ from __future__ import annotations
 
 import concurrent.futures
 import multiprocessing
+import ctypes
+import json
 import os
 import sys
+from pathlib import Path
 
 ПЕРЕМЕННАЯ = "MEETFLOW_HEAVY_IN_PROCESS"
 
@@ -42,6 +45,94 @@ def по_имени(функция) -> bool:
     return объект is функция
 
 
+# --- стартовая уборка осиротевших детей (11.11.2026) -----------------------------------------------------
+# Внешнее убийство сервера оставляет работника жить (09.11 — 40 616 с CPU). Пишем PID и время создания;
+# перед новым тяжёлым шагом снимаем тех, чей родитель мёртв, время создания совпадает ±2 с.
+ФАЙЛ_ДЕТЕЙ = Path(__file__).resolve().parents[2] / "data" / "logs" / "heavy_children.json"
+
+
+def _жив(pid: int) -> bool:
+    if not pid:
+        return False
+    if os.name != "nt":
+        try:
+            os.kill(pid, 0)
+            return True
+        except OSError:
+            return False
+    h = ctypes.windll.kernel32.OpenProcess(0x1000, False, int(pid))
+    if not h:
+        return False
+    код = ctypes.c_ulong()
+    ок = ctypes.windll.kernel32.GetExitCodeProcess(h, ctypes.byref(код))
+    ctypes.windll.kernel32.CloseHandle(h)
+    return bool(ок) and код.value == 259
+
+
+def _создан(pid: int) -> float | None:
+    if os.name != "nt":
+        return None
+    h = ctypes.windll.kernel32.OpenProcess(0x1000, False, int(pid))
+    if not h:
+        return None
+    from ctypes import wintypes
+    c, e, k, u = (wintypes.FILETIME() for _ in range(4))
+    ок = ctypes.windll.kernel32.GetProcessTimes(h, ctypes.byref(c), ctypes.byref(e), ctypes.byref(k), ctypes.byref(u))
+    ctypes.windll.kernel32.CloseHandle(h)
+    if not ок:
+        return None
+    return ((c.dwHighDateTime << 32) | c.dwLowDateTime) / 10_000_000 - 11644473600
+
+
+def _снять(pid: int) -> None:
+    if os.name != "nt":
+        return
+    h = ctypes.windll.kernel32.OpenProcess(0x0001, False, int(pid))
+    if h:
+        ctypes.windll.kernel32.TerminateProcess(h, 1)
+        ctypes.windll.kernel32.CloseHandle(h)
+
+
+def _запомнить(работники) -> None:
+    записи = [{"pid": p.pid, "created": _создан(p.pid), "parent": os.getpid()}
+              for p in работники if getattr(p, "pid", None)]
+    if записи:
+        try:
+            ФАЙЛ_ДЕТЕЙ.parent.mkdir(parents=True, exist_ok=True)
+            ФАЙЛ_ДЕТЕЙ.write_text(json.dumps(записи), encoding="utf-8")
+        except OSError:
+            pass
+
+
+def _забыть() -> None:
+    try:
+        ФАЙЛ_ДЕТЕЙ.unlink()
+    except OSError:
+        pass
+
+
+def убрать_сирот() -> None:
+    """Снять работников, чей родитель мёртв. Живого родителя не трогаем."""
+    try:
+        записи = json.loads(ФАЙЛ_ДЕТЕЙ.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return
+    живые = []
+    for з in записи if isinstance(записи, list) else []:
+        if _жив(int(з.get("parent") or 0)):
+            живые.append(з)
+            continue
+        pid = int(з.get("pid") or 0)
+        создан = _создан(pid) if pid else None
+        if _жив(pid) and создан is not None and abs(создан - float(з.get("created") or 0)) <= 2:
+            _снять(pid)
+    try:
+        ФАЙЛ_ДЕТЕЙ.write_text(json.dumps(живые), encoding="utf-8")
+    except OSError:
+        pass
+
+
+
 def выполнить(функция, *аргументы, **именованные):
     """Результат `функция(*аргументы, **именованные)`, посчитанный в отдельном процессе (если это возможно)."""
     if not включено() or not по_имени(функция):
@@ -50,13 +141,16 @@ def выполнить(функция, *аргументы, **именованн
     main_file = getattr(sys.modules.get("__main__"), "__file__", "") or ""
     if not main_file or main_file.endswith("<stdin>"):
         return функция(*аргументы, **именованные)
+    убрать_сирот()
     контекст = multiprocessing.get_context("spawn")
     try:
         пул = concurrent.futures.ProcessPoolExecutor(max_workers=1, mp_context=контекст)
-        работники = list(getattr(пул, "_processes", {}).values())
+        работники = []
         предел = float(os.environ.get("WEBAPP_HEAVY_TIMEOUT_SEC", "0") or 0)
         try:
             future = пул.submit(функция, *аргументы, **именованные)
+            работники = list(getattr(пул, "_processes", {}).values())
+            _запомнить(работники)
             return future.result(timeout=предел or None)
         finally:
             # Ребёнок гасится явно (10.11.2026): после результата pyannote/torch иногда не отпускают
@@ -68,6 +162,7 @@ def выполнить(функция, *аргументы, **именованн
                     работник.join(timeout=5)
                     if работник.is_alive():
                         работник.kill()
+            _забыть()
     except RuntimeError as exc:
         # Скрипт без `if __name__ == "__main__"` не может породить процесс: это не поломка разбора,
         # просто считаем на месте (дольше, но результат тот же).
