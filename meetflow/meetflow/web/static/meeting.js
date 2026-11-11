@@ -345,11 +345,16 @@ async function renderMeetingReader(id, запрошеннаяВкладка) {
     if (панель) await открыть("agreements", панель);
   }
   // «⋯» — одно меню со встречей (Б4): те же пункты, что в реестре и подготовке.
-  const допПункты = [{ act: "plan-next", label: "План следующей" }];
+  const допПункты = [{ act: "plan-next", label: "План следующей" },
+                     { act: "recognition-export", label: "Итоги распознавания" }];
   if (админ && hasMin) допПункты.push({ act: "notes", label: `Замечания${замечания ? ` — ${замечания}` : ""}` });
   document.getElementById("meeting-more")?.addEventListener("click", () => менюВстречи(document.getElementById("meeting-more"), встреча,
-    { все: встречи, перерисовать: () => renderMeetingReader(id, tab), доп: допПункты,
+    { все: встреча, перерисовать: () => renderMeetingReader(id, tab), доп: допПункты,
       приВыборе: (акт) => {
+        if (акт === "recognition-export") {
+          window.open(`/meetings/${id}/recognition/export`, "_blank");
+          return;
+        }
         const к = document.querySelector(`.mt-btn[data-drawer="${акт === "plan-next" ? "plan" : "notes"}"]`);
         открыть(акт === "plan-next" ? "plan" : "notes", к);
       } }));

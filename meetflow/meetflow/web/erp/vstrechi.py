@@ -769,6 +769,43 @@ def mount(r: APIRouter, ctx: Ctx) -> None:
         return Response(body, media_type=DOCX, headers={"Content-Disposition": "attachment; filename*=UTF-8''"
                                                         + quote(re.sub(r'[\\/:*?"<>|]', " ", stem)[:120] + ".docx")})
 
+    @r.get("/meetings/{mid}/recognition/export")
+    def export_recognition(mid: int):
+        """«Итоги распознавания» — текст расшифровок и сводка протокола распознавания для быстрой проверки.
+
+        Доработка владелицы 11.11.2026: в «Ещё» у каждой встречи — выгрузка того, что услышала система
+        (источники с подписями говорящих и сведения распознавания), без вызова модели.
+        """
+        m = ctx.meeting_or_404(mid)
+        srcs = text_sources(mid)
+        if not srcs:
+            raise HTTPException(404, "У этой встречи нет расшифровки записи")
+        строки = [f"Итоги распознавания — встреча {ru_date(m['date'])}", ""]
+        for s in srcs:
+            meta = s.get("meta")
+            if isinstance(meta, str):
+                try:
+                    meta = json.loads(meta)
+                except Exception:  # noqa: BLE001 — мета бывает и строкой, сводка не обязательна
+                    meta = {}
+            if not isinstance(meta, dict):
+                meta = {}
+            строки.append(f"=== {s.get('name') or 'расшифровка'} ===")
+            for ключ, подпись in (("model", "модель"), ("device", "устройство"), ("lines", "строк"),
+                                  ("speech_seconds", "речь, с"), ("asr_seconds", "расшифровка, с"),
+                                  ("speakers", "голосов"), ("signed_lines", "подписано строк")):
+                if meta.get(ключ) is not None:
+                    строки.append(f"  {подпись}: {meta[ключ]}")
+            текст = s.get("text") or ""
+            метки = sum(1 for x in текст.splitlines() if len(x.split("\t")) >= 3)
+            именованных = sum(1 for x in текст.splitlines() if len(x.split("\t")) >= 3
+                              and not x.split("\t")[1].strip().startswith("Говорящий"))
+            строки += [f"  строк: {len(текст.splitlines())} | подписано: {метки} | с именем: {именованных}", "",
+                       текст, ""]
+        имя = quote(f"Итоги распознавания {ru_date(m['date'])}.txt")
+        return Response("\n".join(строки), media_type="text/plain; charset=utf-8",
+                        headers={"Content-Disposition": f"attachment; filename*=UTF-8''{имя}"})
+
     @r.get("/meetings/{mid}/sources/{sid}/export")
     def export_source(mid: int, sid: int):
         ctx.meeting_or_404(mid)
