@@ -1859,12 +1859,15 @@ class MeetingPipeline:
             limited = True
             rep.findings = [{"issue": f"Проверка не выполнена: {e}", "severity": "minor"}]
             if stopped is None:
-                rep.detail = " ".join(x for x in ("Протокол сохранён, проверка остановлена по пределу.", rep.detail)
-                                      if x)
+                rep.detail = " ".join(x for x in (
+                    "Протокол сохранён, проверка остановлена по пределу; протокол проверен кодом "
+                    "(проект, исполнитель, срок, алфавит названий) — повторите пересборку.", rep.detail) if x)
         except Exception as e:  # любой сбой проверки не отменяет сохранённое; оператору — карточка (стенд 40)
             rep.findings = [{"issue": f"Проверка не выполнена: {type(e).__name__}", "severity": "minor"}]
             self.step_failed(project_id, meeting_id, "Проверка протокола", e)
-            rep.detail = " ".join(x for x in ("Протокол сохранён, проверка не выполнена.", rep.detail) if x)
+            rep.detail = " ".join(x for x in (
+                "Протокол сохранён, проверка не выполнена; протокол проверен кодом (проект, исполнитель, "
+                "срок, алфавит названий) — повторите пересборку.", rep.detail) if x)
         # кодовые проверки черновика — то, что модель почти не ловит (письмо meeting-registry 18):
         # оценочное слово без опоры в записи, факт из эпизода другого проекта. Справка, не шлюз.
         full_source = source.text + ("\n" + notes_text if notes_text else "")

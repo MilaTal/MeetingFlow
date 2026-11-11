@@ -158,8 +158,25 @@ def facts_from_other_episode(draft_md: str, source_text: str) -> list[dict]:
     return out
 
 
+def mixed_alphabet(draft_md: str) -> list[dict]:
+    """Смешанные алфавиты в названиях: «Quadrosоft» — латиница с кириллической «о» (записка 11.11.2026).
+
+    Модель берёт название из речи и переносит посимвольно; глазом такая подмена не видна, а поиск и сверка
+    со справочником по ней ломаются. Ловим слова, где есть и кириллица, и латиница одновременно.
+    """
+    out = []
+    for ln in (draft_md or "").splitlines():
+        for word in re.findall(r"[A-Za-zА-Яа-яЁё0-9]{3,}", ln):
+            if re.search(r"[А-Яа-яЁё]", word) and re.search(r"[A-Za-z]", word):
+                out.append({"kind": "смешанный алфавит", "quote": ln.strip()[:200],
+                            "source_line": "", "note": f"в названии «{word}» смешаны кириллица и латиница"})
+                break
+    return out
+
+
 def run_code_checks(draft_md: str, source_text: str) -> list[dict]:
-    return added_judgement(draft_md, source_text) + facts_from_other_episode(draft_md, source_text)
+    return (added_judgement(draft_md, source_text) + facts_from_other_episode(draft_md, source_text)
+            + mixed_alphabet(draft_md))
 
 
 # ---------------------------------------------------------------- документ чистый для читателя
