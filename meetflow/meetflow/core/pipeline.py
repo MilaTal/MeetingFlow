@@ -552,6 +552,38 @@ class MeetingPipeline:
         return out
 
     # ---------------------------------------------------------------- приём
+    def _снять_не_людей(self, project_id: int, meeting_id: int, team) -> list[str]:
+        """Снять исполнителей, которые не человек «Команды» и не известный отдел.
+
+        Слово владелицы 12.11.2026: «неподтверждённая аббревиатура ОДС вообще не должна была никуда попасть».
+        Проверяем и сразу (ворота), и здесь — после сборки: так ловятся и задачи из единиц, и старые записи.
+        """
+        люди = {" ".join((r["full_name"] or "").replace("ё", "е").lower().split())
+                for r in self.s.q("SELECT full_name FROM people WHERE project_id=?", (project_id,))}
+        # отдел, записанный полным названием («Производственное подразделение»), — тоже известный отдел
+        отделы = {" ".join((p.department or "").replace("ё", "е").lower().split())
+                  for p in list(team.people) + list(team.unconfirmed) if p.department}
+        снятые: list[str] = []
+        for t in self.s.q("SELECT id, status, assignee FROM tasks WHERE source_meeting_id=? AND status!='dropped'",
+                          (meeting_id,)):
+            кто = (t["assignee"] or "").strip()
+            if not кто:
+                continue
+            m = team.find(кто)
+            кто_н = " ".join(кто.replace("ё", "е").lower().split())
+            ок = (m.person is not None or (m.via == "department_without_head" and bool(m.candidates))
+                  or кто_н in люди or кто_н in отделы)
+            if ок:
+                continue
+            self.s.update("tasks", t["id"], assignee=None)
+            try:
+                self.reg._history(t["id"], t["status"], t["status"], "meeting",
+                                  f"исполнитель снят: «{кто}» — не человек и не отдел «Команды»")
+            except Exception:  # noqa: BLE001 — история не должна ронять проверку
+                pass
+            снятые.append(кто)
+        return снятые
+
     def _voice_step(self, project_id: int, meeting_id: int, wav_path: Path | None, doc, filename: str) -> None:
         """Разделение по голосам, ФИО по общей базе и вклад в базу — с записью в журнал распознавания.
 
@@ -1480,6 +1512,7 @@ class MeetingPipeline:
                             return known, pid_, False
                     new_people[name] = self.s.insert("people", project_id=project_id, full_name=name, confirmed=0)
                     return name, new_people[name], True
+                не_люди_сокращения: set[str] = set()
                 for d, g in planned:
                     who = g.assignee.label if g.assignee else None
                     pend = g.pending or {}
@@ -1497,6 +1530,11 @@ class MeetingPipeline:
                         # отдел без руководителя — исполнителем название отдела текстом, как у секретаря, без карточки
                         # (решение владелицы 16.10.2026 и 24.10.2026, ERP `test_otdel_tekstom_1610`; перенос 27.10.2026)
                         who = (pend.get("name") or "").strip() or None
+                    elif pend.get("reason") == "not_a_person":
+                        # 12.11.2026: сокращение вне «Команды» (ТМЦ, ОДС) — исполнитель пустой, одной карточкой на встречу
+                        who = None
+                        if (pend.get("name") or "").strip():
+                            не_люди_сокращения.add(pend["name"].strip())
                     tid = self.reg.add(project_id, g.description, who, meeting_id, g.quote, d.due_date, mdate,
                                        due_kinds.get(id(d)), doubt_reason=d.doubt_reason)
                     added.append((tid, d, g))
@@ -1513,6 +1551,8 @@ class MeetingPipeline:
                         g.pending = None
                     elif pend.get("reason") == "department":
                         g.pending = None          # отдел записан исполнителем текстом, карточки нет (16.10.2026)
+                    elif pend.get("reason") == "not_a_person":
+                        g.pending = None          # сокращение — не исполнитель; карточка одна на встречу
                     elif pend.get("reason") == "unknown":
                         self.cards.open(project_id, "assign_person",
                                         f"Кто исполнитель: {d.assignee} — {g.description[:100]}",
@@ -1639,6 +1679,10 @@ class MeetingPipeline:
                             who, np_id, np_new = new_person(pend["name"])
                         elif pend.get("reason") == "department":     # отдел текстом, без карточки (16.10.2026)
                             who, pend = (pend.get("name") or "").strip() or None, {}
+                        elif pend.get("reason") == "not_a_person":   # сокращение вне «Команды» (12.11.2026)
+                            if (pend.get("name") or "").strip():
+                                не_люди_сокращения.add(pend["name"].strip())
+                            who, pend = None, {}
                         # объект рядом с поручением — и на этом пути (пункт 8 плана)
                         g.description = self._с_объектом(g.description, g.quote, project_id, meeting_id, source.lines)
                         tid = self.reg.add(project_id, g.description, who, meeting_id, g.quote, None, mdate)
@@ -1685,6 +1729,18 @@ class MeetingPipeline:
                                          "from": "единицы встречи"}, meeting_id)
                 # Снятая прежней пересборкой и найденная снова — в работу с прежним номером (ERP 26.10.2026); до
                 # снятия «не вошедших» и до сборки таблицы: строка задачи в документе не теряется.
+                # Последующая проверка исполнителей (слово владелицы 12.11.2026): в задачах не должно быть
+                # сокращений и отделов, которых нет в «Команде». Снимаем такие имена и говорим одной карточкой.
+                try:
+                    не_люди_сокращения |= set(self._снять_не_людей(project_id, meeting_id, team))
+                except Exception as exc:  # noqa: BLE001 — проверка не отменяет собранное
+                    self.step_failed(project_id, meeting_id, "Проверка исполнителей", exc)
+                if не_люди_сокращения:
+                    # В заголовке карточки сокращений нет: владелица 12.11.2026 — «неподтверждённая аббревиатура
+                    # не должна попасть никуда». Сами слова — только в данных карточки, для разбора.
+                    self.cards.open(project_id, "technical",
+                                    "Исполнитель не назначен: в записи сокращения вне «Команды»",
+                                    {"mentions": sorted(не_люди_сокращения)}, meeting_id)
                 when_rb = rebuild_mod.когда_сейчас()
                 for tid in sorted(back_ids):
                     if rebuild_mod.цитата_занята(self.s, meeting_id, tid, self.s.get("tasks", tid).get("source_quote")):

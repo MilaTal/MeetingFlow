@@ -9,6 +9,29 @@ from meetflow.connectors import llm_routes as lr
 from meetflow.core.types import LLMResult
 
 
+class _Аренда:
+    взято = True
+    причина = ""
+
+
+class _Держит:
+    def __enter__(self):
+        return _Аренда()
+
+    def __exit__(self, *арг):
+        return False
+
+
+@pytest.fixture(autouse=True)
+def _аренда_свободна(monkeypatch):
+    """Локальное распознавание в тестах не должно ждать живую аренду Планёрки на этой машине.
+
+    12.11.2026: полный прогон падал тремя тестами ASR — в файле аренды стояло «сейчас распознаёт Планёркой,
+    задание 36». В тестах маршрутов аренда всегда свободна."""
+    from meetflow.connectors import asr_whisper
+    monkeypatch.setattr(asr_whisper.recognition_lease, "держит_аренду", lambda *a, **k: _Держит())
+
+
 class Fake(LLMConnector):
     def __init__(self, name, mode, calls):
         self.name, self.model, self.profile, self.mode, self.calls = name, f"model-{name}", "generic", mode, calls
