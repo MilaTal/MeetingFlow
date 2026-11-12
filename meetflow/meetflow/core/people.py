@@ -561,6 +561,10 @@ def короткое_фио(фио: str | None) -> str:
     s = " ".join(str(фио or "").split())
     if not s:
         return ""
+    # несколько ответственных в одной графе: «Чекунова М.В., Макарова А.» — сокращаем каждого отдельно
+    список = [ч.strip() for ч in re.split(r"[,;]", s) if ч.strip()]
+    if len(список) > 1:
+        return ", ".join(короткое_фио(ч) for ч in список)
     части = s.split(" ")
     if len(части) < 2:
         return s
