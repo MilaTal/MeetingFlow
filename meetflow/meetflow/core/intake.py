@@ -28,6 +28,7 @@ from typing import Any
 
 from ..connectors.base import ConnectorError
 from . import hod
+from . import peregovorka
 from .nazvanie_vstrechi import тема_из_приёмника
 from ..connectors.watch_folder import (DONE_DIR, MARKER, SKIP_WORDS, STOPPED_DIR, FolderIntake, check_folder_path, is_marker,
                                        single_date)
@@ -226,10 +227,11 @@ class IntakeService:
         self._check_pending(project_id)
         with self._lock:
             fi = self._intakes.get(project_id)
-            if fi is None or str(fi.folder) != path:
+            по_времени = peregovorka.включена(self.s, project_id)
+            if fi is None or str(fi.folder) != path or fi.дата_по_времени != по_времени:
                 # FolderIntake сравнивает байты файлов; повтор ручной загрузки
                 # ловит конвейер по отпечатку текста (ingest -> duplicate)
-                fi = self._intakes[project_id] = FolderIntake(path, set(), today)
+                fi = self._intakes[project_id] = FolderIntake(path, set(), today, дата_по_времени=по_времени)
         result: dict[str, Any] = {"at": now(), "folder": path, "ingested": [], "held": [], "rejected": [],
                                   "waiting": [], "no_date": [], "duplicates": []}
         try:
@@ -257,6 +259,23 @@ class IntakeService:
             # записи одного дня — две встречи, а не одна на двоих, как 26.10); проект решит содержание после распознавания.
             # Повторный проход, пока запись распознаётся, находит ту же встречу по дате и имени файла.
             общие = pz.общие_встречи(self.s)
+            проект_приёма = цель or общие
+            is_media = self.pipe.plugins.resolve_source(item.path.name) is not None and \
+                self.pipe.plugins.resolve_source(item.path.name).kind == "asr"
+            # Новый порядок для переговорки (12.11.2026, слово владелицы): сплошная запись сутками, файлы по темам —
+            # сначала измеряем звук (тишина по краям, паузы, обрыв), потом режем на части и только затем распознаём.
+            # Прежде 82-минутная запись с тремя встречами принималась одной встречей целиком.
+            if is_media and peregovorka.включена(self.s, проект_приёма):
+                итог = self._переговорка(проект_приёма, item, чей, result)
+                if итог is not None:
+                    if итог.get("status") == "held":
+                        result["held"].append(item.path.name)      # запись ждёт инструментов — остаётся на месте
+                    else:
+                        fi.known.add(item.digest)
+                        if item.path.exists():
+                            fi.done(item.path)
+                        result["ingested" if итог.get("status") == "ok" else "duplicates"].append(item.path.name)
+                    continue
             if цель is None:
                 # 08.11.2026 (пункт 2 плана): в названии — тема из имени файла без технических знаков,
                 # само имя файла хранится отдельным полем
@@ -275,8 +294,6 @@ class IntakeService:
                 mid = self._meeting_for(цель, item.meeting_date.isoformat(), item.path.name)
                 self.s.update("meetings", mid, project_how=чей["how"])
             проект_приёма = цель or общие
-            is_media = self.pipe.plugins.resolve_source(item.path.name) is not None and \
-                self.pipe.plugins.resolve_source(item.path.name).kind == "asr"
             self._beat(project_id, "распознавание записи" if is_media else "приём файла", item.path.name)
             data = None if is_media else item.path.read_bytes()
             res = self.pipe.ingest(проект_приёма, mid, item.path.name, data, path=item.path if is_media else None)
@@ -330,6 +347,110 @@ class IntakeService:
         if any(result[k] for k in ("ingested", "held", "rejected", "duplicates", "no_date")):
             self.s.set_setting("watch_last_useful_scan", result, project_id)
         return result
+
+    # ------------------------------------------------------------ переговорка (12.11.2026)
+    def _переговорка(self, project_id: int, item, чей: dict, result: dict) -> dict | None:
+        """Запись из переговорки: измерить, разрезать по паузам, завести по встрече на часть.
+
+        Возвращает итог {"status": "ok|duplicate|held"}; None — разбор не удался, запись идёт обычным путём
+        (не теряем её из-за собственного сбоя измерения).
+        """
+        import hashlib
+        import tempfile
+        from ..core.nazvanie_vstrechi import тема_из_приёмника
+        from . import proekt_zapisi as pz
+
+        try:
+            разбор = peregovorka.разбор(item.path)
+        except Exception as exc:  # noqa: BLE001 — измерение не должно съедать запись
+            self.pipe.cards.open(project_id, "technical", f"Не удалось измерить запись «{item.path.name}»",
+                                 {"file": str(item.path), "detail": f"{type(exc).__name__}: {str(exc)[:300]}"})
+            return None
+        итог = {"status": "ok"}
+        if разбор["без_звука"]:
+            self.pipe.cards.open(project_id, "technical", f"Запись «{item.path.name}» без звука — встреча не заведена",
+                                 {"file": str(item.path), "минут": round(разбор["длительность_с"] / 60, 1),
+                                  "why": "весь файл — тишина: запись вели при пустой переговорке"})
+            итог["без_звука"] = True
+            итог["минут"] = round(разбор["длительность_с"] / 60, 1)
+            return итог
+        тема = тема_из_приёмника(item.path.name) or item.path.stem
+        дата = item.meeting_date.isoformat()
+        части = разбор["части"]
+        # id встречи на часть: повторный проход (запись ждала инструментов) находит ту же встречу, а не плодит новую
+        встречи = []
+        for i, часть in enumerate(части, start=1):
+            метка = тема if len(части) == 1 else f"{тема} · {peregovorka.ччммсс(часть['начало_с'])}–{peregovorka.ччммсс(часть['конец_с'])}"
+            была = self.s.q("SELECT id FROM meetings WHERE project_id=? AND date=? AND label=? AND deleted_at IS NULL "
+                            "ORDER BY id LIMIT 1", (project_id, дата, метка))
+            mid = была[0]["id"] if была else self.s.insert(
+                "meetings", project_id=project_id, date=дата, label=метка, file_name=item.path.name,
+                project_how=чей.get("how") or "")
+            встречи.append((mid, метка, часть))
+        # нарезка: части пишутся в свою папку по отпечатку записи — повторный проход берёт готовые
+        отпечаток = hashlib.sha1(f"{item.path.name}|{item.path.stat().st_size}".encode()).hexdigest()[:10]
+        куда = Path(tempfile.gettempdir()) / "meetflow_переговорка" / отпечаток
+        if разбор["нужна_нарезка"]:
+            self._beat(project_id, "нарезка записи", item.path.name)
+            try:
+                нарезано = peregovorka.нарезать(item.path, части, куда)
+            except Exception as exc:  # noqa: BLE001 — не режем, но запись не теряем
+                self.pipe.cards.open(project_id, "technical", f"Не удалось нарезать запись «{item.path.name}»",
+                                     {"file": str(item.path), "detail": f"{type(exc).__name__}: {str(exc)[:300]}"})
+                нарезано = None
+        else:
+            нарезано = None
+        статус = "ok"
+        сборки = []
+        for i, (mid, метка, часть) in enumerate(встречи):
+            путь = нарезано[i]["path"] if нарезано else item.path
+            имя = путь.name
+            self._beat(project_id, "распознавание записи", f"{item.path.name} → {метка}")
+            try:
+                res = self.pipe.ingest(project_id, mid, имя, None, path=путь, окно_мин=peregovorka.МИН_МИНУТ)
+            except Exception as exc:  # noqa: BLE001 — один сбой части не отменяет остальные
+                self.pipe.cards.open(project_id, "technical", f"Сбой приёма части «{метка}»",
+                                     {"file": str(путь), "detail": f"{type(exc).__name__}: {str(exc)[:300]}"}, mid)
+                статус = "held"
+                continue
+            st = res.get("status")
+            if st == "held":
+                статус = "held"
+                continue
+            if st == "ok":
+                if res.get("kind") == "transcript" and автозапуск_включён(self.s, project_id):
+                    сборки.append(mid)
+            elif st == "duplicate":
+                статус = "duplicate" if статус == "ok" else статус
+            else:
+                статус = "held"
+        # итог в проход — для экрана мониторинга
+        result.setdefault("переговорка", []).append({
+            "file": item.path.name, "минут": round(разбор["длительность_с"] / 60, 1),
+            "частей": len(части), "встречи": [m for m, _, _ in встречи],
+            "паузы": разбор["паузы"], "обрыв": разбор["обрыв"],
+            "тишина_начало_с": разбор["тишина_начало_с"], "тишина_конец_с": разбор["тишина_конец_с"]})
+        if разбор["обрыв"]:
+            self.pipe.cards.open(project_id, "technical", f"Запись «{item.path.name}» оборвана",
+                                 {"file": str(item.path), "недобор_с": разбор["недобор_с"]})
+        if len(части) > 1:
+            self.pipe.cards.open(project_id, "event", f"Запись «{item.path.name}» разделена на {len(части)} встречи",
+                                 {"паузы": разбор["паузы"], "встречи": [m for m, _, _ in встречи],
+                                  "порог_паузы_мин": разбор["порог_паузы_мин"]})
+        # сборка протоколов — очередью, как автозапуск из папки
+        q = getattr(self.pipe, "queue", None)
+        for mid in сборки:
+            self._beat(project_id, "сборка протокола", item.path.name)
+            if q:
+                rid = q.enqueue(project_id, mid, "автозапуск из папки-приёмника")
+                if q.wait(rid, timeout=AUTORUN_WAIT_SEC).get("status") == "queued":
+                    self._pending[rid] = (project_id, mid, item.path.name, None)
+            else:
+                self.pipe.run(project_id, mid)
+        итог["status"] = статус
+        итог["встречи"] = [m for m, _, _ in встречи]
+        итог["частей"] = len(части)
+        return итог
 
     def _по_содержанию(self, mid: int, цель: int | None, чей: dict, файл: str) -> tuple[int, str]:
         """Проект по содержанию расшифровки (Доработка 2, 28.10.2026). Имя не узнало проект — решает содержание: узнан —

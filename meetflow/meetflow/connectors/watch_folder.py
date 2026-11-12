@@ -15,7 +15,7 @@ from __future__ import annotations
 
 import hashlib
 from dataclasses import dataclass, field
-from datetime import date
+from datetime import date, datetime
 from pathlib import Path
 
 from ..core.dates import single_date
@@ -78,9 +78,14 @@ class ScanResult:
 
 
 class FolderIntake:
-    def __init__(self, folder: str | Path, known_digests: set[str] | None = None, today: date | None = None):
+    def __init__(self, folder: str | Path, known_digests: set[str] | None = None, today: date | None = None,
+                 дата_по_времени: bool = False):
         self.folder = Path(folder)
         self.known = known_digests if known_digests is not None else set()
+        # Переговорка (12.11.2026): рекордер пишет файл по теме и без даты в имени. Тогда дата встречи — день, когда
+        # файл дописан. Правило включается у проекта, а не глобально: у обычного приёмника файл без даты по-прежнему
+        # ждёт человека, чтобы не угадывать день.
+        self.дата_по_времени = дата_по_времени
         self._sizes: dict[Path, int] = {}
         self._reported_no_date: set[str] = set()
         self.today = today
@@ -102,6 +107,8 @@ class FolderIntake:
                 res.waiting.append(f.name)
                 continue
             d = single_date(f.name, self.today) or single_date(f.parent.name, self.today)
+            if d is None and self.дата_по_времени:
+                d = datetime.fromtimestamp(f.stat().st_mtime).date()
             if d is None:
                 if f.name not in self._reported_no_date:
                     self._reported_no_date.add(f.name)

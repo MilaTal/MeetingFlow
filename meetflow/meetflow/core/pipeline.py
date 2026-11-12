@@ -735,8 +735,12 @@ class MeetingPipeline:
                                       polnota.основа_сравнения(tp["name"] if tp else None, d.isoweekday()))
 
     def ingest(self, project_id: int, meeting_id: int, filename: str, data: bytes | None = None,
-               path: Path | None = None) -> dict:
-        """Ручная загрузка / папка-приёмник. Возвращает {"status", ...}."""
+               path: Path | None = None, окно_мин: float | None = None) -> dict:
+        """Ручная загрузка / папка-приёмник. Возвращает {"status", ...}.
+
+        `окно_мин` — нижняя граница длительности для этой записи (переговорка, 12.11.2026): у комнаты нормальны и
+        минутные фрагменты, а окно темы (3 мин) отсекало их как «не запись встречи». Верхняя граница темы остаётся.
+        """
         c = self.plugins.resolve_source(filename)
         if c is None:
             return {"status": "rejected", "reason": f"Формат файла «{filename}» не поддерживается."}
@@ -760,9 +764,14 @@ class MeetingPipeline:
                         c.initial_prompt = сборка.текст
                     # подшаг для прибора «завис» (06.11.2026): видно, что идёт распознавание, и сколько оно идёт
                     hod.ход.подшаг("распознавание записи")
+                    прежний_мин = getattr(c, "duration_min", None)
+                    if окно_мин is not None and прежний_мин is not None:
+                        c.duration_min = окно_мин        # переговорка: минутный фрагмент — тоже запись
                     try:
                         doc = c.transcribe(path)
                     finally:
+                        if прежний_мин is not None:
+                            c.duration_min = прежний_мин
                         if hasattr(c, "initial_prompt"):
                             c.initial_prompt = ""
                         hod.ход.сбросить()
