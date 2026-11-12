@@ -31,6 +31,11 @@ from .shared import recognition_lease
 log = logging.getLogger(__name__)
 
 os.environ.setdefault("HF_HUB_OFFLINE", "1")
+# 12.11.2026 (встреча 11.11): при загрузке локальной модели large-v3 в общем процессе службы MKL падал
+# «mkl_malloc: failed to allocate memory» — потоки по числу ядер резервировали слишком много. Четыре потока
+# грузят модель за 16 с и не роняют память; на распознавание одной записи этого достаточно.
+os.environ.setdefault("OMP_NUM_THREADS", "4")
+os.environ.setdefault("MKL_NUM_THREADS", "4")
 os.environ.setdefault("PYANNOTE_METRICS_ENABLED", "false")
 
 FORBIDDEN_CLOUD = ("pyannoteai", "speechkit", "openai.audio", "deepgram", "assemblyai")
@@ -71,24 +76,40 @@ class WhisperLocalASR(ASRConnector):
         return {"name": self.name, "ok": ok, "offline": os.environ.get("HF_HUB_OFFLINE") == "1",
                 "detail": "" if ok else "faster-whisper не установлен: записи ждут (waiting_tools)"}
 
+    def _местная_модель(self, model: str) -> str:
+        """Имя модели → папка локального набора `VOICE_MODELS_DIR` (без обращения к Hugging Face).
+
+        12.11.2026 (встреча 11.11): без этого faster-whisper искал кэш HF и падал «Cannot find an appropriate
+        cached snapshot folder», хотя папка `whisper-large-v3` лежит в наборе моделей. Ошибка хуже: «Транс» был
+        недоступен, и запись осталась без распознавания вовсе.
+        """
+        try:
+            from ..core import local_models
+            путь = local_models.whisper_dir(model)
+        except Exception:  # noqa: BLE001 — нет набора моделей: ведём себя как раньше (кэш HF)
+            return model
+        return str(путь) if путь and путь.is_dir() else model
+
     def _load(self):
         if self._model is None:
             if not self.available():
                 raise ConnectorError("waiting_tools: инструменты распознавания не установлены, запись ждёт.")
             from faster_whisper import WhisperModel
+            модель = self._местная_модель(self.model_name)
             try:
-                self._model = WhisperModel(self.model_name, device="cuda", compute_type="int8_float16",
+                self._model = WhisperModel(модель, device="cuda", compute_type="int8_float16",
                                            local_files_only=True)
             except Exception as e:     # не молча (находка стенда 33): откат на процессор — в журнал с причиной
                 log.warning("Распознавание: видеокарта недоступна (%s: %s) — модель %s на процессоре",
                             type(e).__name__, e, self.model_name)
-                self._model = WhisperModel(self.model_name, device="cpu", compute_type="int8",
+                self._model = WhisperModel(модель, device="cpu", compute_type="int8",
                                            local_files_only=True)
         return self._model
 
     def _load_point(self, model: str, device: str = "auto"):
         """Модель точки маршрута; «auto» — видеокарта с откатом на процессор, «cuda» — без отката: откат даёт
         следующая точка цепочки."""
+        model = self._местная_модель(model)
         key = (model, device)
         if key not in self._models:
             if not self.available():
@@ -213,7 +234,8 @@ class WhisperLocalASR(ASRConnector):
                                      + "; ".join(errors))
         dur_min = duration / 60
         if self.duration_min and dur_min < self.duration_min or self.duration_max and dur_min > self.duration_max:
-            raise ConnectorError(f"held_recording: длительность {dur_min:.0f} мин вне окна темы.")
+            сколько = f"{dur_min * 60:.0f} с" if dur_min < 1 else f"{dur_min:.1f} мин".replace(".0 мин", " мин")
+            raise ConnectorError(f"held_recording: длительность {сколько} вне окна темы.")
         # запись удаляет конвейер ПОСЛЕ сохранения расшифровки (находка ревью:
         # удаление до записи в БД теряло встречу при сбое) — см. Pipeline.ingest
         meta = {"connector": self.name, "media_seconds": duration or None, "route": self.last_route,
