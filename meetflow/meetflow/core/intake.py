@@ -368,9 +368,8 @@ class IntakeService:
             return None
         итог = {"status": "ok"}
         if разбор["без_звука"]:
-            self.pipe.cards.open(project_id, "technical", f"Запись «{item.path.name}» без звука — встреча не заведена",
-                                 {"file": str(item.path), "минут": round(разбор["длительность_с"] / 60, 1),
-                                  "why": "весь файл — тишина: запись вели при пустой переговорке"})
+            # Слово владелицы 12.11.2026: «пустые записи — не собирать и не фиксировать». Карточку не заводим —
+            # факт остаётся строкой в отчёте прохода (watch_last_scan), чтобы не плодить записи о тишине.
             итог["без_звука"] = True
             итог["минут"] = round(разбор["длительность_с"] / 60, 1)
             return итог
@@ -390,6 +389,12 @@ class IntakeService:
         # нарезка: части пишутся в свою папку по отпечатку записи — повторный проход берёт готовые
         отпечаток = hashlib.sha1(f"{item.path.name}|{item.path.stat().st_size}".encode()).hexdigest()[:10]
         куда = Path(tempfile.gettempdir()) / "meetflow_переговорка" / отпечаток
+        # Голоса вторым этапом — для длинных записей (12.11.2026). Запись нужна шагу голосов, а исходник уедет в
+        # «обработано»: держим свою копию по отпечатку. Копируем байт в байт, а не перекодируем — отпечаток тот же,
+        # и уже сделанная расшифровка не распознаётся заново.
+        голоса_потом = разбор["длительность_с"] >= peregovorka.ПОРОГ_ГОЛОСА_ПОТОМ_МИН * 60
+        нарезано = None
+        копия = None
         if разбор["нужна_нарезка"]:
             self._beat(project_id, "нарезка записи", item.path.name)
             try:
@@ -398,16 +403,26 @@ class IntakeService:
                 self.pipe.cards.open(project_id, "technical", f"Не удалось нарезать запись «{item.path.name}»",
                                      {"file": str(item.path), "detail": f"{type(exc).__name__}: {str(exc)[:300]}"})
                 нарезано = None
-        else:
-            нарезано = None
+        elif голоса_потом:
+            try:
+                import shutil
+                куда.mkdir(parents=True, exist_ok=True)
+                копия = куда / item.path.name
+                if not копия.exists() or копия.stat().st_size != item.path.stat().st_size:
+                    shutil.copy2(item.path, копия)
+            except OSError as exc:
+                self.pipe.cards.open(project_id, "technical", f"Не удалось сохранить копию записи «{item.path.name}»",
+                                     {"file": str(item.path), "detail": f"{type(exc).__name__}: {str(exc)[:300]}"})
+                копия = None
         статус = "ok"
         сборки = []
         for i, (mid, метка, часть) in enumerate(встречи):
-            путь = нарезано[i]["path"] if нарезано else item.path
+            путь = нарезано[i]["path"] if нарезано else (копия or item.path)
             имя = путь.name
             self._beat(project_id, "распознавание записи", f"{item.path.name} → {метка}")
             try:
-                res = self.pipe.ingest(project_id, mid, имя, None, path=путь, окно_мин=peregovorka.МИН_МИНУТ)
+                res = self.pipe.ingest(project_id, mid, имя, None, path=путь, окно_мин=peregovorka.МИН_МИНУТ,
+                                       голоса_потом=голоса_потом)
             except Exception as exc:  # noqa: BLE001 — один сбой части не отменяет остальные
                 self.pipe.cards.open(project_id, "technical", f"Сбой приёма части «{метка}»",
                                      {"file": str(путь), "detail": f"{type(exc).__name__}: {str(exc)[:300]}"}, mid)
@@ -418,7 +433,10 @@ class IntakeService:
                 статус = "held"
                 continue
             if st == "ok":
-                if res.get("kind") == "transcript" and автозапуск_включён(self.s, project_id):
+                # короче 3 минут протокол не собираем (слово владелицы 12.11.2026): по фрагменту выходил пустой
+                # протокол, а реестр показывал «протокол готов». Расшифровка остаётся материалом встречи.
+                if res.get("kind") == "transcript" and автозапуск_включён(self.s, project_id) \
+                        and (часть["конец_с"] - часть["начало_с"]) >= peregovorka.ПОРОГ_ПРОТОКОЛА_С:
                     сборки.append(mid)
             elif st == "duplicate":
                 статус = "duplicate" if статус == "ok" else статус
@@ -429,6 +447,8 @@ class IntakeService:
             "file": item.path.name, "минут": round(разбор["длительность_с"] / 60, 1),
             "частей": len(части), "встречи": [m for m, _, _ in встречи],
             "паузы": разбор["паузы"], "обрыв": разбор["обрыв"],
+            # «потом» — протокол соберётся без голосов, подписи говорящих добавит второй этап (12.11.2026)
+            "голоса": "потом" if голоса_потом else "сразу",
             "тишина_начало_с": разбор["тишина_начало_с"], "тишина_конец_с": разбор["тишина_конец_с"]})
         if разбор["обрыв"]:
             self.pipe.cards.open(project_id, "technical", f"Запись «{item.path.name}» оборвана",
@@ -437,6 +457,12 @@ class IntakeService:
             self.pipe.cards.open(project_id, "event", f"Запись «{item.path.name}» разделена на {len(части)} встречи",
                                  {"паузы": разбор["паузы"], "встречи": [m for m, _, _ in встречи],
                                   "порог_паузы_мин": разбор["порог_паузы_мин"]})
+        # Деление по смыслу внутри одной части (слово владелицы 12.11.2026): паузы нет, микрофон не прерывался.
+        # Явные признаки — режем сразу; сомнительные — подсказка человеку.
+        if len(части) == 1 and статус == "ok":
+            новые = self._разделить_по_смыслу(project_id, встречи[0][0], тема, item.path.name, разбор, result)
+            if новые and автозапуск_включён(self.s, project_id):
+                сборки.extend(новые)
         # сборка протоколов — очередью, как автозапуск из папки
         q = getattr(self.pipe, "queue", None)
         for mid in сборки:
@@ -451,6 +477,55 @@ class IntakeService:
         итог["встречи"] = [m for m, _, _ in встречи]
         итог["частей"] = len(части)
         return итог
+
+    def _разделить_по_смыслу(self, project_id: int, mid: int, тема: str, файл: str, разбор: dict,
+                             result: dict) -> list[int]:
+        """Одна часть, но по содержанию это несколько встреч (слово владелицы 12.11.2026).
+
+        Расшифровка одна — распознавание не повторяем. Явные признаки (прощание и приветствие рядом, смена состава)
+        режем сразу: первая часть остаётся в исходной встрече, остальные получают свою встречу и свой протокол.
+        Сомнительные границы — карточка-подсказка с цитатой и временем, решает человек.
+        """
+        строки = self.s.q("SELECT id, text FROM sources WHERE meeting_id=? AND removed_at IS NULL AND kind='transcript' "
+                          "ORDER BY id DESC LIMIT 1", (mid,))
+        if not строки:
+            return []
+        sid, текст = строки[0]["id"], строки[0]["text"] or ""
+        итог = peregovorka.границы_по_смыслу(текст, разбор.get("паузы") or [])
+        if not итог["авто"]:
+            if итог["подсказки"]:
+                self.pipe.cards.open(project_id, "event", f"Запись «{файл}»: похоже на несколько встреч — проверьте",
+                                     {"подсказки": итог["подсказки"], "порог_авто": peregovorka.ПОРОГ_АВТО},
+                                     mid)
+                result.setdefault("переговорка", [{}])[-1]["подсказки_границ"] = len(итог["подсказки"])
+            return []
+        куски = peregovorka.разрезать_текст(текст, итог["авто"])
+        if len(куски) < 2:
+            return []
+        дата = (self.s.get("meetings", mid) or {}).get("date") or ""
+        self.s.update("sources", sid, text=куски[0]["текст"])      # первая встреча — в исходной записи
+        новые: list[int] = []
+        for i, кусок in enumerate(куски[1:], start=2):
+            метка = (f"{тема} · {peregovorka.ччммсс(кусок['начало_с']).replace(':', '-')}"
+                     f"–{peregovorka.ччммсс(кусок['конец_с']).replace(':', '-')}")
+            была = self.s.q("SELECT id FROM meetings WHERE project_id=? AND date=? AND label=? AND deleted_at IS NULL "
+                            "ORDER BY id LIMIT 1", (project_id, дата, метка))
+            mid2 = была[0]["id"] if была else self.s.insert(
+                "meetings", project_id=project_id, date=дата, label=метка, file_name=файл,
+                project_how="разделено по смыслу")
+            имя = f"{тема} — часть {i} ({peregovorka.ччммсс(кусок['начало_с'])}-{peregovorka.ччммсс(кусок['конец_с'])}).txt"
+            try:
+                self.pipe.ingest(project_id, mid2, имя, кусок["текст"].encode("utf-8"))
+            except Exception as exc:  # noqa: BLE001 — одна часть не отменяет остальные
+                self.pipe.cards.open(project_id, "technical", f"Не удалось принять часть «{метка}»",
+                                     {"detail": f"{type(exc).__name__}: {str(exc)[:300]}"}, mid2)
+                continue
+            новые.append(mid2)
+        if новые:
+            self.pipe.cards.open(project_id, "event", f"Запись «{файл}» разделена по смыслу на {len(куски)} встречи",
+                                 {"границы": итог["авто"], "встречи": [mid] + новые}, mid)
+            result.setdefault("переговорка", [{}])[-1]["разделено_по_смыслу"] = len(куски)
+        return новые
 
     def _по_содержанию(self, mid: int, цель: int | None, чей: dict, файл: str) -> tuple[int, str]:
         """Проект по содержанию расшифровки (Доработка 2, 28.10.2026). Имя не узнало проект — решает содержание: узнан —
@@ -555,6 +630,10 @@ class IntakeService:
         self._stop.set()
         if self._thread:
             self._thread.join(timeout=10)
+
+    def busy(self) -> bool:
+        """Идёт ли проход прямо сейчас (для очереди голосов: два тяжёлых шага на одном процессоре не гоняем)."""
+        return bool(self._scanning)
 
     def _loop(self, tick: float) -> None:
         last: dict[int, float] = {}

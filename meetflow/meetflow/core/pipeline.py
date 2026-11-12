@@ -571,8 +571,11 @@ class MeetingPipeline:
                 continue
             m = team.find(кто)
             кто_н = " ".join(кто.replace("ё", "е").lower().split())
+            # несколько ответственных в одной графе: «Чекунова М.В., Макарова А.» — оставляем, если каждый человек
+            части = [ч.strip() for ч in кто.replace(";", ",").split(",") if ч.strip()]
+            все_люди = len(части) > 1 and all(team.find(ч).person is not None for ч in части)
             ок = (m.person is not None or (m.via == "department_without_head" and bool(m.candidates))
-                  or кто_н in люди or кто_н in отделы)
+                  or кто_н in люди or кто_н in отделы or все_люди)
             if ок:
                 continue
             self.s.update("tasks", t["id"], assignee=None)
@@ -735,11 +738,14 @@ class MeetingPipeline:
                                       polnota.основа_сравнения(tp["name"] if tp else None, d.isoweekday()))
 
     def ingest(self, project_id: int, meeting_id: int, filename: str, data: bytes | None = None,
-               path: Path | None = None, окно_мин: float | None = None) -> dict:
+               path: Path | None = None, окно_мин: float | None = None, голоса_потом: bool = False) -> dict:
         """Ручная загрузка / папка-приёмник. Возвращает {"status", ...}.
 
         `окно_мин` — нижняя граница длительности для этой записи (переговорка, 12.11.2026): у комнаты нормальны и
         минутные фрагменты, а окно темы (3 мин) отсекало их как «не запись встречи». Верхняя граница темы остаётся.
+
+        `голоса_потом` — двухэтапный разбор (12.11.2026): сейчас только расшифровка (и протокол сразу), разделение
+        по голосам — фоном очередью, затем пересборка. Запись сохраняется до шага голосов.
         """
         c = self.plugins.resolve_source(filename)
         if c is None:
@@ -817,12 +823,20 @@ class MeetingPipeline:
                                     meta=json.dumps(doc.meta, ensure_ascii=False))
             # Голоса — после сохранения текста и до удаления записи: разделению и отрывкам нужен звук. Сбой шага не
             # отменяет распознанный текст, причина уходит в журнал и карточку.
-            try:
-                self._voice_step(project_id, meeting_id, path, doc, filename)
-            finally:
-                причина = str(doc.meta.get("voice_error") or "")
+            if голоса_потом:
+                # Двухэтапный разбор (12.11.2026): голоса — фоном, после протокола. Запись не удаляем: она нужна шагу
+                # голосов; путь и состояние хранятся в источнике, очередь `core/golosa_ochered` подберёт.
+                doc.meta["keep_media"] = True
+                doc.meta["voices_deferred"] = True
                 self.s.update("sources", sid, meta=json.dumps(doc.meta, ensure_ascii=False),
-                              voice_state=("сбой: " + причина[:300]) if причина else "готово")
+                              voice_state="ждут голоса (потом)")
+            else:
+                try:
+                    self._voice_step(project_id, meeting_id, path, doc, filename)
+                finally:
+                    причина = str(doc.meta.get("voice_error") or "")
+                    self.s.update("sources", sid, meta=json.dumps(doc.meta, ensure_ascii=False),
+                                  voice_state=("сбой: " + причина[:300]) if причина else "готово")
         dup = self.s.q("SELECT id FROM sources WHERE meeting_id=? AND digest=? AND removed_at IS NULL",
                        (meeting_id, doc.content_digest)) if not sid else []
         if dup:
@@ -1837,6 +1851,19 @@ class MeetingPipeline:
                     self.cards.open(project_id, "suspicious_source", "В протоколе скрыт служебный текст системы",
                                     {"filter": "output"}, meeting_id)
                 built = now()
+                # Пустой протокол не сохраняем (слово владелицы 12.11.2026: «не выводить ошибочную информацию о
+                # готовности»). По минутной записи переговорки сборка писала шапку и «Новых задач не зафиксировано» —
+                # реестр показывал «протокол готов», а внутри было пусто. Прежний непустой протокол не стираем.
+                from .protokol_sostoyanie import пустой as _протокол_пустой
+                if not added and _протокол_пустой(protocol_md):
+                    прежний = meeting.get("protocol_md") or ""
+                    self.s.update("meetings", meeting_id,
+                                  protocol_md=прежний or None,
+                                  protocol_built_at=meeting.get("protocol_built_at") if прежний else None,
+                                  build_note="пустой протокол не сохранён: в записи нет ни задач, ни решений")
+                    rep.protocol_saved = False
+                    rep.detail = "пустой протокол не сохранён: в записи нет ни задач, ни решений"
+                    return rep
                 # Пересборка потеряла абзацы (варианты А и Б, слово владелицы 08.11.2026): сравнение дословное и кодом.
                 # А — карточка с прежним текстом, чтобы потеря не была молчаливой; Б — абзацы, опирающиеся на запись,
                 # возвращаются в протокол разделом «Из прежней версии» с пометкой у каждого.

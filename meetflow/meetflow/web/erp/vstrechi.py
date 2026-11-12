@@ -171,6 +171,10 @@ def mount(r: APIRouter, ctx: Ctx) -> None:
         if (m.get("status") or "") == "cancelled":
             return "встреча отменена"
         if m.get("protocol_md"):
+            # Протокол есть, но содержания в нём нет — «готовым» не называем (слово владелицы 12.11.2026)
+            from ...core.protokol_sostoyanie import пустой as _пустой
+            if _пустой(m.get("protocol_md"), задач=tasks_count(m["id"])):
+                return "протокола нет: в записи не нашлось задач и решений"
             return None
         b = building(m["id"])
         if b["running"] and b["kind"] == "minutes":
@@ -207,7 +211,11 @@ def mount(r: APIRouter, ctx: Ctx) -> None:
         return тема_из_протокола(m.get("protocol_md")) or None
 
     def meeting_out(m: dict, full: bool = True) -> dict:
-        has_min = bool(m.get("protocol_md"))
+        # «Протокол готов» — только когда в протоколе есть содержание (слово владелицы 12.11.2026): по минутной
+        # записи переговорки сохранялась шапка и «задач нет», и реестр обещал готовый протокол при пустом экране.
+        from ...core.protokol_sostoyanie import пустой as _пустой
+        задач_встречи = tasks_count(m["id"])
+        has_min = bool(m.get("protocol_md")) and not _пустой(m.get("protocol_md"), задач=задач_встречи)
         b = building(m["id"]) if full else {"running": False}
         out = {"id": m["id"], "date": (m.get("date") or "")[:10], "label": название(m),
                "status": m.get("status") or "scheduled", "has_minutes": has_min,
@@ -220,7 +228,7 @@ def mount(r: APIRouter, ctx: Ctx) -> None:
                "leader_note": m.get("leader_note"), "project_id": m.get("project_id")}
         if full:
             from ...core.intake import автозапуск_включён
-            out.update({"состояние_протокола": state_line(m), "tasks_count": tasks_count(m["id"]), "draft_pending": False,
+            out.update({"состояние_протокола": state_line(m), "tasks_count": задач_встречи, "draft_pending": False,
                         "building": bool(b["running"]), "предложена_пересборка": False,
                         "has_plan": bool(m.get("plan_md")), "plan_generated_at": iso_dt(m.get("plan_built_at")),
                         "materials_count": len(sources_of(m["id"], True)),
@@ -237,9 +245,12 @@ def mount(r: APIRouter, ctx: Ctx) -> None:
         return out
 
     def describe(m: dict) -> dict:
+        from ...core.protokol_sostoyanie import пустой as _пустой
         return {"id": m["id"], "date": (m.get("date") or "")[:10], "label": название(m),
                 "auto": m.get("label") == AUTO_LABEL, "has_plan": bool(m.get("plan_md")),
-                "plan_generated_at": iso_dt(m.get("plan_built_at")), "has_minutes": bool(m.get("protocol_md")),
+                "plan_generated_at": iso_dt(m.get("plan_built_at")),
+                "has_minutes": bool(m.get("protocol_md")) and not _пустой(m.get("protocol_md"),
+                                                                          задач=tasks_count(m["id"])),
                 "materials": len(sources_of(m["id"], True))}
 
     def refuse(code: int, detail: str, other: dict | None = None) -> JSONResponse:

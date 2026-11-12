@@ -346,6 +346,10 @@ def create_app(theme_name: str | None = None, db_path: str | None = None, journa
         if home != here:
             store.set_setting("db_home", here, None, "система")
     intake = IntakeService(pipe)
+    # Второй этап голосов (12.11.2026): сначала протокол без голосов, потом разделение по голосам фоном и
+    # пересборка. Пока идёт проход приёмника, голоса не берём — оба шага тяжёлые, процессор один.
+    from ..core.golosa_ochered import GolosaOchered
+    golosa = GolosaOchered(pipe, intake)
     from ..core.build_queue import BuildQueue, later
     queue = BuildQueue(pipe)
     pipe.queue = queue                     # автозапуск из папки-приёмника идёт через ту же очередь
@@ -398,6 +402,7 @@ def create_app(theme_name: str | None = None, db_path: str | None = None, journa
     async def lifespan(_app):
         if watch_on and _primary():
             intake.start()        # фоновый забор из папок-приёмников
+            golosa.start()        # второй этап: голоса длинных записей после протокола (12.11.2026)
             backups.start()       # автокопия базы по расписанию
             карточки_сторож_старт(pipe)   # карточки исполнителя старше 7 дней — раз в час, как в ERP
             голоса_при_старте(pipe)       # нет папки моделей — строка в журнал и одна карточка, а не тишина
@@ -421,6 +426,7 @@ def create_app(theme_name: str | None = None, db_path: str | None = None, journa
             _карточки_сторож[0] = None
             _карточки_сторож[1] = None
         intake.stop()
+        golosa.stop()
         backups.stop()
 
     app = FastAPI(title="Встречи Невалаб", lifespan=lifespan)
