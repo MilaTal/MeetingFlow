@@ -228,7 +228,10 @@ def mount(r: APIRouter, ctx: Ctx) -> None:
                "leader_note": m.get("leader_note"), "project_id": m.get("project_id")}
         if full:
             from ...core.intake import автозапуск_включён
-            out.update({"состояние_протокола": state_line(m), "tasks_count": задач_встречи, "draft_pending": False,
+            out.update({"состояние_протокола": state_line(m), "tasks_count": задач_встречи,
+                        # «черновик» — протокол собран без голосов: имена ещё уточняются (12.11.2026)
+                        "draft_pending": str(m.get("build_note") or "").startswith("черновик"),
+                        "draft_note": m.get("build_note") if str(m.get("build_note") or "").startswith("черновик") else None,
                         "building": bool(b["running"]), "предложена_пересборка": False,
                         "has_plan": bool(m.get("plan_md")), "plan_generated_at": iso_dt(m.get("plan_built_at")),
                         "materials_count": len(sources_of(m["id"], True)),

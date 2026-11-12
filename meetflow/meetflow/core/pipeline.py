@@ -1468,11 +1468,23 @@ class MeetingPipeline:
                     # участник — тот, у кого в записи есть реплика (решение владелицы 28.10.2026: опознанный голос без
                     # единой строки расшифровки — ошибка опознания, а не участник; 26.10 — «Говорящий 6», 0 реплик)
                     participants = self._с_репликой(participants, source.lines)
-                    # «Участники» — кодом из опознанных голосов и «Команды» (27.10.2026): раздел модель не пишет, если
-                    # голоса опознаны; без голосов (заметки, протокол секретаря) — как раньше, по тексту
-                    участники_кодом = self._participants_by_code(participants, leader)
-                    скелет_модели = [s for s in self._skeleton(meeting)
-                                     if not (участники_кодом and _раздел_участников(s))]
+                    # «Участники» — кодом из опознанных голосов и «Команды» (27.10.2026). С 12.11.2026 раздел пишет
+                    # ТОЛЬКО код: без голосов модель писала «Светлана, Лена, Барч, Ира» — имена как услышано, не ФИО
+                    # из «Команды». Пока голоса не разобраны, в разделе честная строка «уточняются».
+                    from . import identity
+                    люди_команды = [p.full_name for p in list(team.people) + list(team.unconfirmed) if p.full_name]
+                    участники_кодом, отброшены = identity.имена_в_строю(
+                        self._participants_by_code(participants, leader), люди_команды)
+                    if отброшены:
+                        self.cards.open(project_id, "technical", "В «Участниках» отброшены имена вне «Команды»",
+                                        {"отброшено": отброшены[:20]}, meeting_id)
+                    голоса_ждут = bool(self.s.q("SELECT id FROM sources WHERE meeting_id=? AND removed_at IS NULL "
+                                                "AND voice_state LIKE 'ждут%'", (meeting_id,)))
+                    участники_примечание = ""
+                    if not участники_кодом:
+                        участники_примечание = ("уточняются: идёт разбор записи по голосам" if голоса_ждут
+                                                else "не опознаны: в записи нет подписей по голосам")
+                    скелет_модели = [s for s in self._skeleton(meeting) if not _раздел_участников(s)]
                     from . import topics
                     sysm, user = self.pb.protocol(скелет_модели, safe_source.text, notes_text,
                                                   participants=participants, leader=leader,
@@ -1824,7 +1836,8 @@ class MeetingPipeline:
                 protocol_md = self._render_protocol(meeting, sections, added, closings, srcs, removals,
                                                     record=safe_source.text + ("\n" + notes_text if notes_text else ""),
                                                     people=[p.full_name for p in team.people], rep=rep,
-                                                    base_kind=source.kind.value, participants=участники_кодом)
+                                                    base_kind=source.kind.value, participants=участники_кодом,
+                                                    participants_note=участники_примечание)
                 # модель иногда склеивает «## Решения **Тема:** текст» в одну строку — в markdown это заголовок
                 # целиком; разрезаем кодом, текст не меняя (рекомендация Планёрки, нормализация заголовков)
                 protocol_md = format_protokola.нормализовать(protocol_md)
@@ -1883,8 +1896,24 @@ class MeetingPipeline:
                     if на_возврат:
                         protocol_md = protokol_poteri.дополнить(protocol_md, на_возврат)
                         вернулось = len(на_возврат)
+                # Проверка фамилий по «Команде» (слово владелицы 12.11.2026): «Песковнов» при «Пискунов» в справочнике
+                # не должен уходить в готовый протокол молча. Найденное вне «Команды» — карточка и черновик.
+                чужие_фамилии: list[str] = []
+                try:
+                    from . import identity as _ид
+                    чужие_фамилии = _ид.подозрительные_фамилии(protocol_md, люди_команды)
+                except Exception as exc:  # noqa: BLE001 — проверка не отменяет собранный протокол
+                    self.step_failed(project_id, meeting_id, "Проверка фамилий", exc)
+                if чужие_фамилии:
+                    self.cards.open(project_id, "technical", "Проверка имён: фамилии вне «Команды»",
+                                    {"фамилии": чужие_фамилии[:10],
+                                     "что_делать": "проверьте написание и «Команду»; до решения протокол — черновик"},
+                                    meeting_id)
+                _черновик = ("черновик: голоса разбираются — имена уточняются" if голоса_ждут else
+                             ("черновик: фамилии вне «Команды» — " + ", ".join(чужие_фамилии[:3]) if чужие_фамилии
+                              else None))
                 self.s.update("meetings", meeting_id, protocol_md=protocol_md, protocol_built_at=built,
-                              built_from=[s["name"] for s in srcs])
+                              built_from=[s["name"] for s in srcs], build_note=_черновик)
                 # 09.11.2026: пустое название встречи, заведённой приёмом, берём из содержания протокола — «тема по
                 # содержанию + дата» (записка 08.11.2026, пункт 3). Ручное название не трогаем: заполняем только пустое,
                 # и только у встречи с именем файла (значит, её завёл приём, а не человек).
@@ -2106,7 +2135,8 @@ class MeetingPipeline:
 
     def _render_protocol(self, meeting: dict, sections: dict[str, str | None], added, closings, srcs,
                          removals=(), *, record: str | None = None, people=(), rep: RunReport | None = None,
-                         base_kind: str = "transcript", participants: list[str] | None = None) -> str:
+                         base_kind: str = "transcript", participants: list[str] | None = None,
+                         participants_note: str = "") -> str:
         """Документ для читателя — без системных пометок: модель, стенд, файлы, пределы и замечания
         уходят в карточки и журнал (правило владельца 13.10.26 для всех систем).
 
@@ -2129,9 +2159,13 @@ class MeetingPipeline:
         out = [f"# {th.word('protocol')} {date_h}" + (f". {tp['name'].strip().rstrip('.')}." if с_темой else ""), ""]
         участники_строкой: list[str] = []
         for sec in self._skeleton(meeting):
-            if participants and _раздел_участников(sec):
-                # кодом и после проверки опоры (ФИО — не речь, проверять нечего); раздел участников — первым после шапки
-                участники_строкой = [f"## {sec}", ", ".join(participants) + ".", ""]
+            if _раздел_участников(sec):
+                # кодом и после проверки опоры (ФИО — не речь, проверять нечего); раздел участников — первым после шапки.
+                # Имён «как услышано» здесь быть не может: либо ФИО из «Команды», либо честная строка-примечание.
+                if participants:
+                    участники_строкой = [f"## {sec}", ", ".join(participants) + ".", ""]
+                elif participants_note:
+                    участники_строкой = [f"## {sec}", f"{participants_note}.", ""]
                 continue
             body = sections.get(sec, "")
             if body is None:              # не собран (предел, потолок ответа) — пусто, причина в карточке
