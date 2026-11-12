@@ -86,7 +86,7 @@ def _из_файла(п: Path) -> dict:
     try:
         con.row_factory = sqlite3.Row
         пс = _столбцы(con, "projects")
-        поля = ["id", "name"] + [к for к in ("aliases", "parent_id", "is_active", "contract_chain") if к in пс]
+        поля = ["id", "name"] + [к for к in ("aliases", "parent_id", "is_active", "contract_chain", "kind") if к in пс]
         проекты = [dict(r) for r in con.execute(f"SELECT {', '.join(поля)} FROM projects ORDER BY id")]
         ус = _столбцы(con, "users")
         поля = ["full_name"] + [к for к in ("is_external", "organization", "confidence", "is_active", "department")
@@ -158,7 +158,8 @@ def проекты(store, project_id: int | None) -> list[dict]:
         return None
     out = []
     for р in данные:
-        if not (р.get("name") or "").strip() or р.get("is_active", 1) in (0, False) or свой(р) is not None:
+        if (not (р.get("name") or "").strip() or р.get("is_active", 1) in (0, False)
+                or р.get("kind") == "шифр" or свой(р) is not None):
             continue
         род = по_номеру.get(р.get("parent_id")) if р.get("parent_id") is not None else None
         parent_id = None

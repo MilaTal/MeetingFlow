@@ -17,17 +17,18 @@ def планёрка(path):
     con = sqlite3.connect(path)
     con.executescript("""
         CREATE TABLE projects (id INTEGER PRIMARY KEY, name TEXT, aliases TEXT, parent_id INTEGER, is_active BOOLEAN,
-                               contract_chain TEXT);
+                               contract_chain TEXT, kind TEXT);
         CREATE TABLE users (id INTEGER PRIMARY KEY, full_name TEXT, is_external BOOLEAN, organization TEXT,
                             confidence TEXT, is_active BOOLEAN, department TEXT);
     """)
-    con.executemany("INSERT INTO projects VALUES (?,?,?,?,?,?)", [
-        (1, "Севернефть", "«СНФ»", None, 1, "Северойл — Промснаб — Невалайн"),
-        (2, "Верхнедонск", "", 1, 1, ""),                       # площадка Севернефти
-        (3, "Склад", "", None, 1, ""),                           # есть в справочнике MeetFlow — свой главнее
-        (4, "Заречье", "", 3, 1, ""),                            # площадка проекта, который у MeetFlow свой
-        (5, "Старый объект", "", None, 0, ""),                   # снят
-        (6, "Калуга261", "", None, 1, ""),
+    con.executemany("INSERT INTO projects VALUES (?,?,?,?,?,?,?)", [
+        (1, "Севернефть", "«СНФ»", None, 1, "Северойл — Промснаб — Невалайн", "проект"),
+        (2, "Верхнедонск", "", 1, 1, "", "проект"),              # площадка Севернефти
+        (3, "Склад", "", None, 1, "", "проект"),                  # есть в справочнике MeetFlow — свой главнее
+        (4, "Заречье", "", 3, 1, "", "проект"),                   # площадка проекта, который у MeetFlow свой
+        (5, "Старый объект", "", None, 0, "", "проект"),          # снят
+        (6, "Калуга261", "", None, 1, "", "проект"),
+        (7, "Аккую211", "", 1, 1, "", "шифр"),                    # код договора — в подсказку не идёт
     ])
     con.executemany("INSERT INTO users (full_name, is_external, organization, confidence, is_active) VALUES (?,?,?,?,?)", [
         ("Брусникин Олег Петрович", 1, "Промснаб", "confirmed", 1),
@@ -86,6 +87,13 @@ def test_проекты_свой_главнее_площадки_и_снятые
 def test_свой_вариант_с_кодом_перекрывает_общий(store, база):
     store.insert("projects", name="Калуга", theme="erp_rollout")
     assert "Калуга261" not in {п["name"] for п in ob.проекты(store, база["общ"])}
+
+
+def test_шифры_внешнего_списка_не_берутся(store, база):
+    """Коды договоров (`kind="шифр"`) — не названия площадок: в подсказку и словарь не идут (09.11.2026)."""
+    имена = {п["name"] for п in ob.проекты(store, база["общ"])}
+    assert "Аккую211" not in имена
+    assert "Севернефть" in имена
 
 
 def test_база_только_на_чтение(store, база):
