@@ -33,6 +33,7 @@ class GolosaOchered:
         self._stop = threading.Event()
         self._thread: threading.Thread | None = None
         self.идёт: dict | None = None        # что разбирается сейчас — для /health
+        self.состояние = "не запущена"       # почему стоит или что делает — для /health и журнала
 
     @property
     def running(self) -> bool:
@@ -44,6 +45,8 @@ class GolosaOchered:
         self._stop.clear()
         self._thread = threading.Thread(target=self._цикл, name="meetflow-voices", daemon=True)
         self._thread.start()
+        self.состояние = "запущена"
+        self._лог("очередь запущена")
 
     def stop(self) -> None:
         self._stop.set()
@@ -58,20 +61,35 @@ class GolosaOchered:
         while not self._stop.is_set():
             try:
                 if self.intake is not None and self.intake.busy():
+                    self.состояние = "ждёт: идёт проход приёмника"
                     self._stop.wait(self.pause)      # идёт проход приёмника — не отбираем процессор
                     continue
                 row = self.s.q("SELECT * FROM sources WHERE removed_at IS NULL AND voice_state=? ORDER BY id LIMIT 1",
                                (СОСТОЯНИЕ_ЖДЁТ,))
                 if not row:
+                    self.состояние = "ждёт: записей в очереди нет"
                     self._stop.wait(self.pause)
                     continue
+                self.состояние = f"работает: источник {row[0]['id']}"
+                self._лог(f"взят источник {row[0]['id']} (встреча {row[0]['meeting_id']})")
                 self._разобрать(row[0])
             except Exception as exc:  # noqa: BLE001 — фон не должен падать целиком
                 self.идёт = None
-                self.pipe.cards.open(None, "technical", "Сбой очереди голосов",
-                                     {"error": type(exc).__name__, "detail": str(exc)[:300]})
+                self.состояние = f"сбой: {type(exc).__name__}"
+                # Журнал — первой строкой: если сбой случится в самой карточке, поток не должен умереть молча
+                self._лог(f"СБОЙ: {type(exc).__name__}: {str(exc)[:400]}")
+                try:
+                    self.pipe.cards.open(None, "technical", "Сбой очереди голосов",
+                                         {"error": type(exc).__name__, "detail": str(exc)[:300]})
+                except Exception:  # noqa: BLE001 — карточка не важнее очереди
+                    pass
                 self._stop.wait(self.pause)
             self._stop.wait(5)
+
+    @staticmethod
+    def _лог(текст: str) -> None:
+        import sys
+        print(f"MeetFlow голоса: {текст}", file=sys.stderr, flush=True)
 
     def _разобрать(self, row: dict) -> None:
         sid, mid = int(row["id"]), int(row["meeting_id"])

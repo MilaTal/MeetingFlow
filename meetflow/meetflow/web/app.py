@@ -537,7 +537,7 @@ def create_app(theme_name: str | None = None, db_path: str | None = None, journa
         # `started_at` — когда поднялся процесс (09.11.2026): по нему видно, работает ли служба на текущем коде,
         # без ручного wmic и без времени в журнале обёртки
         return {"ok": True, "theme": theme.id, "busy": bool(что), "busy_что": что,
-                "голоса_ожидают": golosa.ожидают(),
+                "голоса_ожидают": golosa.ожидают(), "голоса_состояние": golosa.состояние,
                 "started_at": _ЗАПУСК.isoformat(timespec="seconds")}
 
 
