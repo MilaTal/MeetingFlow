@@ -125,6 +125,10 @@ class ProtocolVersionIn(BaseModel):
     version: int
 
 
+class ParticipantsIn(BaseModel):
+    names: str = Field("", max_length=4000)
+
+
 class LoginIn(BaseModel):
     login: str = Field(min_length=1, max_length=100)
     password: str = Field(min_length=1, max_length=200)
@@ -894,6 +898,18 @@ def create_app(theme_name: str | None = None, db_path: str | None = None, journa
         # итог сборки у каждой версии (правки ERP/Планёрки 03–06.11, п. 12): у ручных правок он свой
         return store.q("SELECT id, version, model, built_at, timings FROM protocol_versions WHERE meeting_id=? "
                        "ORDER BY version DESC", (mid,))
+
+    @app.patch("/api/meetings/{mid}/participants")
+    def set_participants(mid: int, body: ParticipantsIn, u: dict = Depends(admin)):
+        """Ручной список участников встречи (12.11.2026): сборка его не затирает, он идёт в раздел «Участники»."""
+        m = store.get("meetings", mid)
+        if not m:
+            raise HTTPException(404, "Встреча не найдена.")
+        текст = " ".join(str(body.names or "").split())
+        store.update("meetings", mid, participants_manual=текст)
+        store.insert("decisions", project_id=m["project_id"], what="Участники встречи — ручной список",
+                     decision=текст or "очищен", why="правка на экране", at=now())
+        return {"ok": True, "participants_manual": текст}
 
     @app.post("/api/meetings/{mid}/protocol/edit")
     def edit_protocol(mid: int, body: ProtocolEditIn, u: dict = Depends(admin)):

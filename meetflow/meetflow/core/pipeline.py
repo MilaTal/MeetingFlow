@@ -536,6 +536,69 @@ class MeetingPipeline:
         return [n for n in names if ключ(n) in подписи]
 
     @staticmethod
+    def _с_контекстом(names: list[str], lines: list[str], team) -> list[str]:
+        """Добавить участников, к которым в записи прямо обращаются и кого «Команда» знает однозначно.
+
+        Решение владелицы 12.11.2026: участников фиксируем сразу по голосам, а если в разговоре ясно звучит обращение —
+        добавляем и его. Смотрим предложения, а не целые строки распознавания (строки бывают по 5–7 тыс. знаков), и
+        только `addressee`: имя в третьем лице («Анастасия сказала…») не считается.
+        """
+        out = list(names)
+        видели = {" ".join((n or "").replace("ё", "е").lower().split()) for n in out}
+        # Быстрый путь: слова, которые вообще могут быть именем человека «Команды» (фамилия, имя, уменьшительное), —
+        # и только по ним спрашиваем `find`. Иначе на записи в 47 минут перебор всех слов занимал минуты.
+        слова_команды: set[str] = set()
+        for p in list(team.people) + list(team.unconfirmed):
+            части = (p.full_name or "").split()
+            if части:
+                слова_команды.add(части[0].lower())
+            if len(части) > 1:
+                слова_команды.add(части[1].lower())
+        for уменьш, полные in getattr(team, "_dim", {}).items():
+            слова_команды.add(уменьш.lower())
+            for полное in полные:
+                части = (полное or "").split()
+                if len(части) > 1:
+                    слова_команды.add(части[1].lower())
+        люди_по_слову: dict[str, str] = {}
+        обращение = re.compile(r"([А-ЯЁ][а-яё]{2,})\s*[,!]")
+        for строка in lines or []:
+            for предложение in re.split(r"(?<=[.!?…])\s+", строка):
+                if len(out) >= 20:
+                    break
+                for слово in обращение.findall(предложение):
+                    ключ_слова = слово.lower()
+                    if ключ_слова not in слова_команды:
+                        continue
+                    if ключ_слова not in люди_по_слову:
+                        m = team.find(слово)
+                        if m.person is None or not (m.person.full_name or "").strip():
+                            люди_по_слову[ключ_слова] = ""
+                            continue
+                        люди_по_слову[ключ_слова] = " ".join(m.person.full_name.split())
+                    полное = люди_по_слову[ключ_слова]
+                    if not полное:
+                        continue
+                    ключ = " ".join(полное.replace("ё", "е").lower().split())
+                    if ключ not in видели:
+                        видели.add(ключ)
+                        out.append(полное)
+        return out
+
+    @staticmethod
+    def _с_ручными(names: list[str], meeting: dict) -> list[str]:
+        """Добавить имена, которые человек внёс вручную (`participants_manual`); сборка их не затирает."""
+        out = list(names)
+        видели = {" ".join((n or "").replace("ё", "е").lower().split()) for n in out}
+        for часть in re.split(r"[,;\n]", str(meeting.get("participants_manual") or "")):
+            имя = " ".join(часть.split())
+            ключ = " ".join(имя.replace("ё", "е").lower().split())
+            if имя and ключ not in видели:
+                видели.add(ключ)
+                out.append(имя)
+        return out
+
+    @staticmethod
     def _participants_by_code(names: list[str], leader: str) -> list[str]:
         """Состав раздела «Участники» кодом: ведущий (если задан) и ФИО, опознанные по голосам правилом 0,65 / 0,10 и
         подтверждённые «Командой» (`voice_names`), без повторов, е = ё. Голосов нет — пусто: раздел пишет модель по
@@ -1468,13 +1531,14 @@ class MeetingPipeline:
                     # участник — тот, у кого в записи есть реплика (решение владелицы 28.10.2026: опознанный голос без
                     # единой строки расшифровки — ошибка опознания, а не участник; 26.10 — «Говорящий 6», 0 реплик)
                     participants = self._с_репликой(participants, source.lines)
-                    # «Участники» — кодом из опознанных голосов и «Команды» (27.10.2026). С 12.11.2026 раздел пишет
-                    # ТОЛЬКО код: без голосов модель писала «Светлана, Лена, Барч, Ира» — имена как услышано, не ФИО
-                    # из «Команды». Пока голоса не разобраны, в разделе честная строка «уточняются».
+                    # 12.11.2026: к голосам добавляем однозначные обращения из разговора и ручной список владелицы
+                    participants = self._с_контекстом(participants, source.lines, team)
                     from . import identity
                     люди_команды = [p.full_name for p in list(team.people) + list(team.unconfirmed) if p.full_name]
                     участники_кодом, отброшены = identity.имена_в_строю(
                         self._participants_by_code(participants, leader), люди_команды)
+                    участники_кодом = self._с_ручными(участники_кодом, meeting)
+                    participants = self._с_ручными(participants, meeting)
                     if отброшены:
                         self.cards.open(project_id, "technical", "В «Участниках» отброшены имена вне «Команды»",
                                         {"отброшено": отброшены[:20]}, meeting_id)
@@ -1918,6 +1982,13 @@ class MeetingPipeline:
                               if _беда else None))
                 self.s.update("meetings", meeting_id, protocol_md=protocol_md, protocol_built_at=built,
                               built_from=[s["name"] for s in srcs], build_note=_черновик)
+                # паспорт принятого протокола (12.11.2026): после пересборки сверяем числа и фразы; расхождение —
+                # карточка «Разбора», сборку не отменяет
+                try:
+                    from .pasport_protokola import карточка_при_расхождении
+                    карточка_при_расхождении(self, project_id, meeting_id)
+                except Exception as exc:  # noqa: BLE001 — сверка не должна ронять сохранённый протокол
+                    self.step_failed(project_id, meeting_id, "Паспорт протокола", exc)
                 # 09.11.2026: пустое название встречи, заведённой приёмом, берём из содержания протокола — «тема по
                 # содержанию + дата» (записка 08.11.2026, пункт 3). Ручное название не трогаем: заполняем только пустое,
                 # и только у встречи с именем файла (значит, её завёл приём, а не человек).

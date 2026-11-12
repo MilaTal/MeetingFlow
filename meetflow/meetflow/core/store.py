@@ -37,6 +37,8 @@ SCHEMA: dict[str, dict[str, str]] = {
                  "created_at": "TEXT", "leader_user_id": "INTEGER", "leader_source": "TEXT", "leader_note": "TEXT",
                  "leader_speaker": "TEXT", "merged": "TEXT DEFAULT '[]'", "protocol_hand_edited": "INTEGER DEFAULT 0",
                  "plan_hand_edited": "INTEGER DEFAULT 0", "build_note": "TEXT DEFAULT ''",
+                 # участники, добавленные человеком вручную (12.11.2026): сборка их не затирает
+                 "participants_manual": "TEXT DEFAULT ''",
                  "plan_sources": "TEXT DEFAULT '[]'",
                  # тема планёрки встречи (как ERP 24.10.2026): номер темы, откуда (день недели / вручную), когда и кто
                  "topic_id": "INTEGER", "topic_source": "TEXT DEFAULT ''", "topic_set_at": "TEXT",
@@ -85,6 +87,10 @@ SCHEMA: dict[str, dict[str, str]] = {
                           # итог сборки у каждой версии (правки ERP/Планёрки 03–06.11, п. 12): иначе «почему так
                           # вышло» не воспроизводится — статус, вызовы, цена, шаги, задачи, источники
                           "timings": "TEXT DEFAULT ''"},
+    # паспорт принятого протокола (12.11.2026): числа и фразы, которые обязаны сохраниться после пересборки;
+    # один паспорт на встречу, при снятии нового прежний заменяется
+    "protocol_passports": {"id": "INTEGER PRIMARY KEY", "meeting_id": "INTEGER", "version": "INTEGER",
+                           "facts": "TEXT DEFAULT '{}'", "created_at": "TEXT", "created_by": "TEXT DEFAULT ''"},
     # очередь сборок (находки стенда 41, 19): одна за раз, по датам встреч; строка «идёт» — запись о начале
     "build_queue": {"id": "INTEGER PRIMARY KEY", "project_id": "INTEGER", "meeting_id": "INTEGER",
                     "meeting_date": "TEXT DEFAULT ''", "status": "TEXT", "reason": "TEXT DEFAULT ''",
