@@ -204,34 +204,53 @@ class WhisperLocalASR(ASRConnector):
             raise ConnectorError("waiting_tools: распознавание не настроено — назначьте точку роли «Распознавание "
                                  "речи» в «Моделях»; запись ждёт")
         points, cooldown = routes
-        # очередь распознавания на одну машину — общая аренда ERP, Планёрки и MeetFlow (recognition_lease.py):
-        # пока распознаёт другой продукт, запись ждёт на месте и берётся на следующем проходе
-        with recognition_lease.держит_аренду("meetflow", path.name) as lease:
-            if not lease.взято:
-                raise ConnectorError(f"waiting_tools: очередь распознавания на машине — {lease.причина}; запись ждёт")
-            errors = []
-            segment_meta: dict = {}
-            for name, ep in points:
-                try:
-                    if ep["kind"] == "python":
-                        lines, duration, segment_meta = self._run_code(ep["callable"], path, ep.get("path", ""))
-                    elif ep["kind"] == "asr-service":
-                        lines, duration, segment_meta = self._run_service_shared(name, ep, path)
-                    else:
-                        lines, duration, segment_meta = self._run(
-                            self._load_point(ep["model"], ep.get("device", "auto")), path)
-                except Exception as e:  # noqa: BLE001 — любой сбой точки ведёт на следующую
-                    llm_routes.mark_down(name, cooldown, str(e))
-                    errors.append(f"{name}: {str(e)[:150]}")
-                    continue
-                llm_routes.mark_up(name)
-                self.last_route = name
-                # подсказка ушла только faster-whisper и сервису; свой код «модуль:функция» её не принимает
-                prompt_sent = bool(self.initial_prompt) and ep["kind"] != "python"
-                break
-            else:
-                raise ConnectorError("waiting_tools: ни одна точка распознавания не сработала, запись ждёт — "
-                                     + "; ".join(errors))
+        errors: list[str] = []
+        segment_meta: dict = {}
+        prompt_sent = False
+        duration = 0.0
+
+        def _попробовать(name: str, ep: dict):
+            if ep["kind"] == "python":
+                return self._run_code(ep["callable"], path, ep.get("path", ""))
+            if ep["kind"] == "asr-service":
+                return self._run_service_shared(name, ep, path)
+            return self._run(self._load_point(ep.get("model"), ep.get("device", "auto")), path)
+
+        # 12.11.2026 (слово владелицы, встреча 11.11): «Транс» — удалённый сервис, он не занимает процессор этой
+        # машины, поэтому его пробуем ДО общей аренды. Иначе запись стояла в очереди за локальным распознаванием
+        # Планёрки, хотя «Транс» был жив и свободен.
+        удалённые = [(n, e) for n, e in points if e.get("kind") == "asr-service"]
+        местные = [(n, e) for n, e in points if e.get("kind") != "asr-service"]
+        for name, ep in удалённые:
+            try:
+                lines, duration, segment_meta = _попробовать(name, ep)
+            except Exception as e:  # noqa: BLE001 — сбой точки ведёт на следующую
+                llm_routes.mark_down(name, cooldown, str(e))
+                errors.append(f"{name}: {str(e)[:150]}")
+                continue
+            llm_routes.mark_up(name)
+            self.last_route = name
+            prompt_sent = bool(self.initial_prompt)
+            break
+        else:
+            # локальные точки — под общей арендой: они занимают процессор машины
+            with recognition_lease.держит_аренду("meetflow", path.name) as lease:
+                if not lease.взято:
+                    raise ConnectorError(f"waiting_tools: очередь распознавания на машине — {lease.причина}; запись ждёт")
+                for name, ep in местные:
+                    try:
+                        lines, duration, segment_meta = _попробовать(name, ep)
+                    except Exception as e:  # noqa: BLE001 — сбой точки ведёт на следующую
+                        llm_routes.mark_down(name, cooldown, str(e))
+                        errors.append(f"{name}: {str(e)[:150]}")
+                        continue
+                    llm_routes.mark_up(name)
+                    self.last_route = name
+                    prompt_sent = bool(self.initial_prompt) and ep["kind"] != "python"
+                    break
+                else:
+                    raise ConnectorError("waiting_tools: ни одна точка распознавания не сработала, запись ждёт — "
+                                         + "; ".join(errors))
         dur_min = duration / 60
         if self.duration_min and dur_min < self.duration_min or self.duration_max and dur_min > self.duration_max:
             сколько = f"{dur_min * 60:.0f} с" if dur_min < 1 else f"{dur_min:.1f} мин".replace(".0 мин", " мин")
