@@ -386,9 +386,11 @@ class IntakeService:
                 "meetings", project_id=project_id, date=дата, label=метка, file_name=item.path.name,
                 project_how=чей.get("how") or "")
             встречи.append((mid, метка, часть))
-        # нарезка: части пишутся в свою папку по отпечатку записи — повторный проход берёт готовые
+        # Рабочие звуки — в папке данных рядом с базой, имена латиницей (12.11.2026): во временной папке путь шёл
+        # через короткое имя `EMOSKV~1`, и pyannote (libsndfile) не открывал 28-минутную часть — «System error».
+        # Папка по отпечатку записи: повторный проход берёт готовые части.
         отпечаток = hashlib.sha1(f"{item.path.name}|{item.path.stat().st_size}".encode()).hexdigest()[:10]
-        куда = Path(tempfile.gettempdir()) / "meetflow_переговорка" / отпечаток
+        куда = Path(self.s.path).parent / "переговорка" / отпечаток
         # Голоса вторым этапом — для длинных записей (12.11.2026). Запись нужна шагу голосов, а исходник уедет в
         # «обработано»: держим свою копию по отпечатку. Копируем байт в байт, а не перекодируем — отпечаток тот же,
         # и уже сделанная расшифровка не распознаётся заново.
@@ -398,7 +400,7 @@ class IntakeService:
         if разбор["нужна_нарезка"]:
             self._beat(project_id, "нарезка записи", item.path.name)
             try:
-                нарезано = peregovorka.нарезать(item.path, части, куда)
+                нарезано = peregovorka.нарезать(item.path, части, куда, имена="part")
             except Exception as exc:  # noqa: BLE001 — не режем, но запись не теряем
                 self.pipe.cards.open(project_id, "technical", f"Не удалось нарезать запись «{item.path.name}»",
                                      {"file": str(item.path), "detail": f"{type(exc).__name__}: {str(exc)[:300]}"})
@@ -407,7 +409,7 @@ class IntakeService:
             try:
                 import shutil
                 куда.mkdir(parents=True, exist_ok=True)
-                копия = куда / item.path.name
+                копия = куда / f"audio{item.path.suffix.lower()}"
                 if not копия.exists() or копия.stat().st_size != item.path.stat().st_size:
                     shutil.copy2(item.path, копия)
             except OSError as exc:
@@ -418,7 +420,8 @@ class IntakeService:
         сборки = []
         for i, (mid, метка, часть) in enumerate(встречи):
             путь = нарезано[i]["path"] if нарезано else (копия or item.path)
-            имя = путь.name
+            # имя источника — для человека, а файл на диске — латиницей (libsndfile)
+            имя = (f"{тема} — часть {i}.wav" if нарезано else item.path.name)
             self._beat(project_id, "распознавание записи", f"{item.path.name} → {метка}")
             try:
                 res = self.pipe.ingest(project_id, mid, имя, None, path=путь, окно_мин=peregovorka.МИН_МИНУТ,

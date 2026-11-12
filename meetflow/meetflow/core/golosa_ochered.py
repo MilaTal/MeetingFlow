@@ -88,11 +88,13 @@ class GolosaOchered:
             return
         from .types import SourceDoc, SourceKind
         doc = SourceDoc(row.get("name") or "", SourceKind.TRANSCRIPT, row.get("text") or "", meta)
+        разобралось = False
         try:
             self.pipe._voice_step(project_id, mid, путь, doc, row.get("name") or "")
             причина = str(doc.meta.get("voice_error") or "")
             self.s.update("sources", sid, text=doc.text, meta=json.dumps(doc.meta, ensure_ascii=False),
                           voice_state=("сбой: " + причина[:300]) if причина else "готово")
+            разобралось = not причина
             if причина:
                 # деградация видна человеку: протокол остался без подписей, причина названа
                 self.pipe.cards.open(project_id, "technical", "Голоса не разобраны — протокол остался без подписей",
@@ -110,10 +112,13 @@ class GolosaOchered:
                                  {"source_id": sid, "file": str(путь)}, mid)
         finally:
             self.идёт = None
-        # запись нужна была только шагу голосов: после разбора её можно удалить (расшифровка уже в базе)
-        try:
-            if путь.is_file():
-                путь.unlink()
-                self.s.update("sources", sid, removed_reason="запись распознана и разобрана по голосам, файл удалён")
-        except OSError:
-            pass
+        # Запись убираем только после удачного разбора (12.11.2026): при сбое она остаётся — иначе повтор шага
+        # невозможен без новой отправки (урок встречи 9: `BrokenProcessPool`, файл удалён).
+        if разобралось:
+            try:
+                if путь.is_file():
+                    путь.unlink()
+                    self.s.update("sources", sid,
+                                  removed_reason="запись распознана и разобрана по голосам, файл удалён")
+            except OSError:
+                pass
