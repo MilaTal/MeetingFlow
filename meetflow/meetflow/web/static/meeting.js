@@ -345,14 +345,21 @@ async function renderMeetingReader(id, запрошеннаяВкладка) {
     if (панель) await открыть("agreements", панель);
   }
   // «⋯» — одно меню со встречей (Б4): те же пункты, что в реестре и подготовке.
-  const допПункты = [{ act: "plan-next", label: "План следующей" },
-                     { act: "recognition-export", label: "Итоги распознавания" }];
+  // Порядок и подписи — как в «Ещё» Планёрки (задание владелицы 16.11.2026): сначала выгрузка распознавания,
+  // затем подготовка этой встречи; «План следующей» остаётся ниже.
+  const допПункты = [{ act: "recognition-export", label: "Выгрузить итоги распознавания" },
+                     { act: "prep", label: "Подготовка этой планёрки" },
+                     { act: "plan-next", label: "План следующей" }];
   if (админ && hasMin) допПункты.push({ act: "notes", label: `Замечания${замечания ? ` — ${замечания}` : ""}` });
   document.getElementById("meeting-more")?.addEventListener("click", () => менюВстречи(document.getElementById("meeting-more"), встреча,
-    { все: встреча, перерисовать: () => renderMeetingReader(id, tab), доп: допПункты,
+    { все: встречи, перерисовать: () => renderMeetingReader(id, tab), доп: допПункты,
       приВыборе: (акт) => {
         if (акт === "recognition-export") {
           window.open(`/meetings/${id}/recognition/export`, "_blank");
+          return;
+        }
+        if (акт === "prep") {                 // как «Подготовка этой планёрки» в Планёрке — рабочее место этой встречи
+          location.hash = `#prep/${id}`;
           return;
         }
         const к = document.querySelector(`.mt-btn[data-drawer="${акт === "plan-next" ? "plan" : "notes"}"]`);

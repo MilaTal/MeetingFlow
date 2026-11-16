@@ -398,7 +398,7 @@ function renderPrepВыборПроекта() {
   подключитьСозданиеПроекта();
 }
 
-async function renderPrep() {
+async function renderPrep(rest) {
   if (!canPrepare()) { location.replace("#meetings"); return; }     // никто не выбран в «Вы работаете как»
   // MeetFlow: встреча заводится в одном проекте. При «Все проекты» — выбор проекта и «Создать проект», а не голая подсказка
   // (решение владелицы 28.10.2026; было — `нуженПроект("Подготовка встречи")`)
@@ -411,11 +411,15 @@ async function renderPrep() {
   const $b = document.getElementById("prep-body");
   if (!$b) return;
   const сегодня = датаISO(new Date());
+  // «Подготовка этой планёрки» из меню «Ещё» (задание владелицы 16.11.2026): #prep/<id> показывает и прошедшую
+  // встречу с готовым протоколом — это её рабочее место, как в Планёрке. Остальные правила прежние.
+  const фокус = rest && rest[0] && /^\d+$/.test(String(rest[0])) ? Number(rest[0]) : null;
   // «Подготовка встречи» — только будущее и сегодня (пакет Б, Б3, 05.11.2026): прошлое и архив живут в «Реестре встреч».
   // Сравниваем даты строкой, как сегодняISO(): сегодняшняя встреча до 03:00 не должна считаться прошедшей.
   // 09.11.2026 (слово владелицы): прошедшая встреча с готовым протоколом в «Подготовке» не показывается — она уже
   // в «Реестре встреч». Сегодняшняя без протокола остаётся: с ней ещё работают.
-  const встречиПодготовки = встречи.filter(m => String(m.date).slice(0, 10) >= сегодня && !m.has_minutes);
+  const встречиПодготовки = встречи.filter(m => m.id === фокус ||
+    (String(m.date).slice(0, 10) >= сегодня && !m.has_minutes));
   const авто = m => m.label === "дата ориентировочная";
   // Д13 (проходы 1 и 3, 21.10.2026): вторая встреча в тот же день заводится только галочкой — она не дубль, и «Свести в одну»
   // ей не предлагается. Дубль — две и больше встреч на дату без своего названия (№26 «дата ориентировочная» и №27 без
@@ -470,6 +474,7 @@ async function renderPrep() {
     const двеНаДату = !отменена && (наДату[m.date] || []).length > 1;
     const дубль = двеНаДату && дубльДаты(m.date) && !отдельная(m);
     const ближняя = !!ближайшая && ближайшая.id === m.id;
+    const этоФокус = фокус === m.id;
     // Д9: идущая сборка видна в списке; Д14: ближайшая выделена; Д13: вторая встреча (с названием или по подтверждению) —
     // без акцента и без сводки
     const пометки = [ближняя ? '<span class="prep-mark prep-mark-acc">ближайшая</span>' : "",
@@ -489,7 +494,7 @@ async function renderPrep() {
       : `<span class="reg-menu-wrap"><button type="button" class="pl-more prep-more" data-mid="${m.id}" aria-label="Действия со встречей ${esc(fmtRuDate(m.date))}" aria-haspopup="menu">…</button></span>`;
     // Д8 (проходы 1 и 3): отдельной колонки «Название» нет — название в ячейке даты, ячейка переносится; кнопки не уходят
     // за правый край при ширине до 1440 px
-    return `<tr data-meeting-id="${m.id}" class="${[отменена ? "prep-cancelled" : "", ближняя ? "prep-nearest-row" : ""].filter(Boolean).join(" ")}">
+    return `<tr data-meeting-id="${m.id}"${этоФокус ? ' id="prep-focus"' : ""} class="${[отменена ? "prep-cancelled" : "", (ближняя || этоФокус) ? "prep-nearest-row" : ""].filter(Boolean).join(" ")}">
       <td>${esc(fmtRuDate(m.date))} <span class="prep-muted">№${m.id}</span>${своёНазвание(m) ? ` <span class="prep-label">${esc(cleanLabel(m.label))}</span>` : ""}${пометки}</td>
       <td>${план}</td><td>${протокол}</td>
       <td>${действие}</td></tr>`;
@@ -498,9 +503,10 @@ async function renderPrep() {
       <thead><tr><th>Дата</th><th>План встречи</th><th>Протокол</th><th></th></tr></thead>
       <tbody>${строки.map(строка).join("")}</tbody></table></div></div>`;
   $b.innerHTML = `${карточка}${форма}
-    ${по_дате.length ? `<h2 class="feed-section">Будущие и сегодняшние встречи <span class="cnt">${по_дате.length}</span></h2>${таблица(по_дате)}` : ""}
+    ${по_дате.length ? `<h2 class="feed-section">${фокус ? "Встреча для подготовки" : "Будущие и сегодняшние встречи"} <span class="cnt">${по_дате.length}</span></h2>${таблица(по_дате)}` : ""}
     ${создатьПроектHtml()}`;
   подключитьСозданиеПроекта();                     // «Создать проект» — в конце страницы (решение владелицы 28.10.2026)
+  if (фокус) document.getElementById("prep-focus")?.scrollIntoView({ block: "center" });
 
   // --- создание: одна точка, предупреждение до отправки, ключ повтора
   const перейтиВПлан = (mid) => { location.hash = `#meetings/${mid}/planprep?from=prep`; };
