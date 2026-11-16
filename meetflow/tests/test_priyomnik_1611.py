@@ -123,3 +123,34 @@ def test_проход_переносит_файл_и_не_падает(store, pr
     assert "Заметки 16.11.2026.txt" in итог.get("ingested", []), итог
     assert (tmp_path / "обработано" / "Заметки 16.11.2026.txt").is_file()
     assert not (tmp_path / "Заметки 16.11.2026.txt").exists()
+
+
+def test_повторный_файл_не_распознаётся(make_pipe, store, project, meeting, tmp_path):
+    """Тот же файл, положенный в другую встречу, узнаётся до распознавания: «уже обработан — встреча N».
+
+    Слово владелицы 16.11.2026: повторная загрузка не должна запускать распознавание заново и плодить встречу-дубль.
+    """
+    import hashlib
+
+    файл = tmp_path / "запись.wav"
+    файл.write_bytes(b"RIFF" + b"\x00" * 4096)
+    отпечаток = hashlib.sha256(файл.read_bytes()).hexdigest()
+    другая = store.insert("meetings", project_id=project, date="2026-11-10", label="Другая встреча")
+    store.insert("file_digests", digest=отпечаток, meeting_id=другая, name="запись.wav", at="2026-11-10T00:00:00")
+
+    конвейер = make_pipe()
+    итог = конвейер.ingest(project, meeting, "запись.wav", path=файл)
+
+    assert итог["status"] == "duplicate", итог
+    assert итог["existing_meeting"] == другая
+    assert not store.q("SELECT id FROM sources WHERE meeting_id=?", (meeting,))   # распознавания не было
+
+
+def test_предпросмотр_папки_совпадает_с_проходом(tmp_path):
+    """Экран настройки обещает то же, что заберёт проход: файл с названием по теме считается пригодным."""
+    from meetflow.core.intake import preview_folder
+    _файл(tmp_path, "Тема без даты.mp3")
+    _файл(tmp_path, "Очень старая запись.mp3", возраст_дней=200)
+    п = preview_folder(tmp_path)
+    assert п["first_pass"] == 1, п
+    assert п["no_date"] == ["Очень старая запись.mp3"], п

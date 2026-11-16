@@ -47,6 +47,23 @@ STOPPED_DIR = "остановлено"   # прогон остановлен п�
 SKIP_WORDS = ("не брать",)
 
 
+def дата_по_времени(файл: Path, сегодня: date | None = None) -> date | None:
+    """День записи по времени изменения файла — только когда оно правдоподобно (16.11.2026).
+
+    Не в будущем и не старше 120 дней: старое или «завтрашнее» время значит, что файл скопировали или время сбито,
+    и угадывать день встречи нельзя — файл остаётся и человек получает карточку. Одна проверка на приём и на
+    предпросмотр папки, чтобы обещания экрана совпадали с тем, что заберёт проход.
+    """
+    try:
+        изменён = datetime.fromtimestamp(файл.stat().st_mtime)
+    except OSError:
+        return None
+    сегодня = сегодня or date.today()
+    if изменён.date() > сегодня or (сегодня - изменён.date()).days > 120:
+        return None
+    return изменён.date()
+
+
 def check_folder_path(path: Path, home: Path | None = None) -> None:
     p = path.resolve()
     home = (home or Path.home()).resolve()
@@ -132,19 +149,8 @@ class FolderIntake:
         return self.done(path, STOPPED_DIR)
 
     def _дата_по_времени(self, f: Path) -> date | None:
-        """День записи по времени изменения файла — только когда оно правдоподобно.
-
-        Не в будущем и не старше 120 дней: старое или «завтрашнее» время значит, что файл скопировали или время
-        сбито, и угадывать день встречи нельзя — файл остаётся и человек получает карточку.
-        """
-        try:
-            изменён = datetime.fromtimestamp(f.stat().st_mtime)
-        except OSError:
-            return None
-        сегодня = self.today or date.today()
-        if изменён.date() > сегодня or (сегодня - изменён.date()).days > 120:
-            return None
-        return изменён.date()
+        """День записи по времени изменения файла — та же проверка правдоподобия, что и в предпросмотре папки."""
+        return дата_по_времени(f, self.today)
 
     def done(self, path: Path, subdir: str = DONE_DIR) -> Path:
         target_dir = self.folder / subdir

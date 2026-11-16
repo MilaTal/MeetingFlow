@@ -32,7 +32,7 @@ from . import hod
 from . import peregovorka
 from .nazvanie_vstrechi import тема_из_приёмника
 from ..connectors.watch_folder import (DONE_DIR, MARKER, SKIP_WORDS, STOPPED_DIR, FolderIntake, IntakeItem,
-                                       check_folder_path, is_marker, single_date)
+                                       check_folder_path, is_marker, single_date, дата_по_времени)
 from .store import now
 
 HINT_FILE = "ЧТО СЮДА КЛАСТЬ.md"
@@ -125,7 +125,9 @@ def preview_folder(p: Path) -> dict[str, Any]:
                 or f.suffix.lower() == ".md" or any(w in f.name.lower() for w in SKIP_WORDS)):
             continue
         files.append(f.name)
-        (take if (single_date(f.name) or single_date(f.parent.name)) else no_date).append(f.name)
+        # та же логика даты, что и у прохода: имя → папка дня → время файла (16.11.2026), иначе экран обещал бы
+        # «файлов без даты», которые проход на самом деле заберёт
+        (take if (single_date(f.name) or single_date(f.parent.name) or дата_по_времени(f)) else no_date).append(f.name)
     return {"files": len(files), "first_pass": len(take), "examples": take[:5], "no_date": no_date[:5],
             "big": len(take) > BIG_FIRST_PASS, "big_limit": BIG_FIRST_PASS}
 
@@ -243,10 +245,16 @@ class IntakeService:
             self.pipe.cards.open(project_id, "technical", "Папка-приёмник недоступна", {"folder": path})
             self.s.set_setting("watch_last_scan", result, project_id)
             return result
-        result.update(waiting=scan.waiting, no_date=scan.no_date, duplicates=scan.duplicates)
+        result.update(waiting=scan.waiting, no_date=scan.no_date, duplicates=scan.duplicates,
+                      # дата взята по времени файла — видно в отчёте прохода (16.11.2026)
+                      дата_по_времени=scan.дата_по_времени)
         for name in scan.no_date:
-            self.pipe.cards.open(project_id, "technical", f"В имени файла нет одной даты: {name}",
-                                 {"folder": path, "file": name})
+            # Даты нет ни в имени, ни в папке дня, и время файла не годится (старше 120 дней или в будущем) —
+            # говорим, что делать, а не только «нет даты» (16.11.2026)
+            self.pipe.cards.open(project_id, "technical", f"В имени файла нет даты, и время файла не годится: {name}",
+                                 {"folder": path, "file": name,
+                                  "что_делать": "переименуйте с датой встречи («Встреча 01.10.2026.mp4») или положите "
+                                                "в папку дня (2026-11-12)"})
         from . import proekt_zapisi as pz
         другие = pz.папки_других(self.s, project_id)
         перенесены: set[str] = set()          # отпечатки файлов, уже уехавших в «обработано» при приёме
