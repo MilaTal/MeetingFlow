@@ -75,6 +75,7 @@ class ScanResult:
     waiting: list[str] = field(default_factory=list)     # ещё пишется
     no_date: list[str] = field(default_factory=list)     # сообщить один раз
     duplicates: list[str] = field(default_factory=list)
+    дата_по_времени: list[str] = field(default_factory=list)   # дата взята по времени файла (16.11.2026)
 
 
 class FolderIntake:
@@ -107,8 +108,13 @@ class FolderIntake:
                 res.waiting.append(f.name)
                 continue
             d = single_date(f.name, self.today) or single_date(f.parent.name, self.today)
-            if d is None and self.дата_по_времени:
-                d = datetime.fromtimestamp(f.stat().st_mtime).date()
+            if d is None:
+                # Дата по времени файла (16.11.2026): записи с рекордера и из переговорки приходят с названием по теме,
+                # без даты, и правило «дата только из имени» оставляло их в папке навсегда (12.11 и 16.11 — по пять
+                # файлов). Время изменения файла — это день записи; берём его, если оно правдоподобно.
+                d = self._дата_по_времени(f)
+                if d is not None:
+                    res.дата_по_времени.append(f.name)
             if d is None:
                 if f.name not in self._reported_no_date:
                     self._reported_no_date.add(f.name)
@@ -124,6 +130,21 @@ class FolderIntake:
 
     def stopped(self, path: Path) -> Path:
         return self.done(path, STOPPED_DIR)
+
+    def _дата_по_времени(self, f: Path) -> date | None:
+        """День записи по времени изменения файла — только когда оно правдоподобно.
+
+        Не в будущем и не старше 120 дней: старое или «завтрашнее» время значит, что файл скопировали или время
+        сбито, и угадывать день встречи нельзя — файл остаётся и человек получает карточку.
+        """
+        try:
+            изменён = datetime.fromtimestamp(f.stat().st_mtime)
+        except OSError:
+            return None
+        сегодня = self.today or date.today()
+        if изменён.date() > сегодня or (сегодня - изменён.date()).days > 120:
+            return None
+        return изменён.date()
 
     def done(self, path: Path, subdir: str = DONE_DIR) -> Path:
         target_dir = self.folder / subdir

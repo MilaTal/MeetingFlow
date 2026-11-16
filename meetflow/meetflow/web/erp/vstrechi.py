@@ -183,6 +183,20 @@ def mount(r: APIRouter, ctx: Ctx) -> None:
             return f"в очереди сборок, место {b['place']}"
         srcs = text_sources(m["id"])
         if srcs:
+            # Короче 3 минут протокол не собирается (слово владелицы 12.11.2026) — говорим прямо, а не «можно
+            # собирать»: иначе список обещает действие, которого система сама не сделает.
+            try:
+                import json as _json
+                секунды = 0.0
+                for s in srcs:
+                    try:
+                        секунды = max(секунды, float((_json.loads(s.get("meta") or "{}") or {}).get("media_seconds") or 0))
+                    except (TypeError, ValueError):
+                        continue
+                if 0 < секунды < 180:
+                    return "короткая запись (меньше 3 минут) — протокол не собирается"
+            except Exception:  # noqa: BLE001 — строка состояния не важнее списка
+                pass
             lb = last_build(m["id"])
             if lb and lb.get("status") == "failed":
                 return "сборка протокола не удалась — соберите заново кнопкой «Сформировать протокол»"
@@ -229,9 +243,10 @@ def mount(r: APIRouter, ctx: Ctx) -> None:
         if full:
             from ...core.intake import автозапуск_включён
             out.update({"состояние_протокола": state_line(m), "tasks_count": задач_встречи,
-                        # «черновик» — протокол собран без голосов: имена ещё уточняются (12.11.2026)
-                        "draft_pending": str(m.get("build_note") or "").startswith("черновик"),
-                        "draft_note": m.get("build_note") if str(m.get("build_note") or "").startswith("черновик") else None,
+                        # Готовность — по содержанию протокола, как в Планёрке и ERP (слово владелицы 16.11.2026:
+                        # «протокол должен собираться автоматически, ничего не ждать»). Замечания по именам идут
+                        # карточками и готовность не задерживают: прежний «черновик» скрывал собранные протоколы.
+                        "draft_pending": False, "draft_note": None,
                         "building": bool(b["running"]), "предложена_пересборка": False,
                         "has_plan": bool(m.get("plan_md")), "plan_generated_at": iso_dt(m.get("plan_built_at")),
                         "materials_count": len(sources_of(m["id"], True)),

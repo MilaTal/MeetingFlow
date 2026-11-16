@@ -317,6 +317,13 @@ class IntakeService:
                                                           "how": чей["how"]})
             if st in ("ok", "duplicate"):
                 fi.known.add(item.digest)
+                if st == "duplicate" and res.get("existing_meeting"):
+                    # тот же файл уже принят в другой встрече (16.11.2026) — говорим, а не молчим
+                    self.pipe.cards.open(project_id, "event",
+                                         f"Файл «{item.path.name}» уже обработан — встреча {res['existing_meeting']}",
+                                         {"existing_meeting": res["existing_meeting"],
+                                          "что_делать": "пересобрать протокол — кнопкой на этой встрече"},
+                                         int(res["existing_meeting"]))
                 moved = None
                 if item.path.exists():  # запись мог уже удалить конвейер после распознавания
                     moved = fi.done(item.path)
@@ -373,6 +380,10 @@ class IntakeService:
             итог["без_звука"] = True
             итог["минут"] = round(разбор["длительность_с"] / 60, 1)
             return итог
+        # Тот же файл уже принят (16.11.2026): владелица кладёт запись в приёмник повторно — распознавать заново
+        # бессмысленно и дорого, встреча-дубль тоже не нужна. Отпечаток сверяем после того, как определены встречи
+        # файла: если принятая встреча — одна из них, это повторный проход (запись ждала инструментов), его не режем.
+        отпечаток_содержимого = hashlib.sha256(item.path.read_bytes()).hexdigest()
         тема = тема_из_приёмника(item.path.name) or item.path.stem
         дата = item.meeting_date.isoformat()
         части = разбор["части"]
@@ -386,6 +397,17 @@ class IntakeService:
                 "meetings", project_id=project_id, date=дата, label=метка, file_name=item.path.name,
                 project_how=чей.get("how") or "")
             встречи.append((mid, метка, часть))
+        # Повтор уже принятого файла — стоп до нарезки и распознавания. Встречи этого файла определены выше: если
+        # принятая встреча среди них, это повторный проход (запись ждала инструментов) — идём дальше.
+        уже = self.s.q("SELECT meeting_id, name FROM file_digests WHERE digest=?", (отпечаток_содержимого,))
+        if уже and int(уже[0]["meeting_id"]) not in [m for m, _, _ in встречи]:
+            было_в = int(уже[0]["meeting_id"])
+            self.pipe.cards.open(project_id, "event", f"Файл «{item.path.name}» уже обработан — встреча {было_в}",
+                                 {"existing_meeting": было_в,
+                                  "что_делать": "протокол этой встречи уже есть; пересобрать — кнопкой на встрече"},
+                                 было_в)
+            return {"status": "duplicate", "existing_meeting": было_в,
+                    "reason": f"этот файл уже обработан — встреча {было_в}"}
         # Рабочие звуки — в папке данных рядом с базой, имена латиницей (12.11.2026): во временной папке путь шёл
         # через короткое имя `EMOSKV~1`, и pyannote (libsndfile) не открывал 28-минутную часть — «System error».
         # Папка по отпечатку записи: повторный проход берёт готовые части.
@@ -445,6 +467,9 @@ class IntakeService:
                 статус = "duplicate" if статус == "ok" else статус
             else:
                 статус = "held"
+        # Отпечаток исходного файла — в общий список: повторная загрузка будет узнана до распознавания
+        if встречи and статус != "held":
+            self.pipe._запомнить_отпечаток(отпечаток_содержимого, встречи[0][0], item.path.name)
         # итог в проход — для экрана мониторинга
         result.setdefault("переговорка", []).append({
             "file": item.path.name, "минут": round(разбор["длительность_с"] / 60, 1),

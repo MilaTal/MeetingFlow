@@ -63,6 +63,11 @@ SCHEMA: dict[str, dict[str, str]] = {
                 # отпечаток файла записи и состояние голосов (06.11.2026): расшифровка сохраняется до голосов,
                 # повторный проход по тому же файлу берёт её и идёт сразу в голоса
                 "file_digest": "TEXT DEFAULT ''", "voice_state": "TEXT DEFAULT ''"},
+    # Отпечатки уже принятых файлов записей — по всей базе, а не по встрече (16.11.2026). Владелица повторно кладёт
+    # тот же файл в приёмник (не первый раз): прежде проверка повтора была только внутри одной встречи, и запись
+    # распознавалась заново — часы работы и встреча-дубль. Теперь «этот файл уже обработан» видно сразу.
+    "file_digests": {"digest": "TEXT PRIMARY KEY", "meeting_id": "INTEGER", "name": "TEXT DEFAULT ''",
+                     "at": "TEXT DEFAULT ''"},
     "people": {"id": "INTEGER PRIMARY KEY", "project_id": "INTEGER", "full_name": "TEXT",
                "role": "TEXT DEFAULT ''", "department": "TEXT DEFAULT ''", "aliases": "TEXT DEFAULT '[]'",
                "external": "INTEGER DEFAULT 0", "confirmed": "INTEGER DEFAULT 1",

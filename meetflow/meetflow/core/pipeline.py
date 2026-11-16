@@ -389,6 +389,18 @@ class MeetingPipeline:
         with self._locks_guard:
             return self._locks.setdefault(key, threading.Lock())
 
+    def _запомнить_отпечаток(self, отпечаток: str, meeting_id: int, filename: str) -> None:
+        """Файл принят — запоминаем его отпечаток по всей базе (16.11.2026).
+
+        Нужно, чтобы повторно положенный в приёмник файл не распознавался заново: проверка «тот же файл» идёт до
+        распознавания и не зависит от того, в какую встречу его положат.
+        """
+        try:
+            if not self.s.q("SELECT digest FROM file_digests WHERE digest=?", (отпечаток,)):
+                self.s.insert("file_digests", digest=отпечаток, meeting_id=meeting_id, name=filename or "", at=now())
+        except Exception:  # noqa: BLE001 — учёт отпечатков не должен мешать приёму записи
+            pass
+
     def _сохранённая_расшифровка(self, meeting_id: int, отпечаток: str | None) -> dict | None:
         """Расшифровка этой записи, сохранённая прошлым проходом (06.11.2026). Берём только недоделанную: голоса
         «готово» — значит запись уже разобрана целиком, повторять её незачем."""
@@ -817,6 +829,14 @@ class MeetingPipeline:
         # голосам, и любая остановка на этом шаге начинала запись с нуля: 06.11 так потеряли 2,5 часа. Теперь по
         # отпечатку файла видно, что текст уже есть, — «Транс» второй раз не зовём, идём сразу в голоса.
         отпечаток = _отпечаток_файла(path) if isinstance(c, ASRConnector) and path is not None else None
+        # Тот же файл уже принят в другой встрече (16.11.2026): владелица повторно кладёт запись в приёмник, и раньше
+        # она распознавалась заново — часы работы и встреча-дубль. Проверка по всей базе, не по одной встрече.
+        if отпечаток:
+            было = self.s.q("SELECT meeting_id, name FROM file_digests WHERE digest=?", (отпечаток,))
+            if было and int(было[0]["meeting_id"]) != int(meeting_id):
+                return {"status": "duplicate",
+                        "reason": f"этот файл уже обработан — встреча {int(было[0]['meeting_id'])}",
+                        "existing_meeting": int(было[0]["meeting_id"])}
         сохранено = self._сохранённая_расшифровка(meeting_id, отпечаток) if отпечаток else None
         try:
             if isinstance(c, ASRConnector):
@@ -913,6 +933,10 @@ class MeetingPipeline:
             sid = self.s.insert("sources", meeting_id=meeting_id, name=doc.name, kind=doc.kind.value, text=doc.text,
                                 digest=doc.content_digest, created_at=now(), local_asr=int(isinstance(c, ASRConnector)),
                                 meta=json.dumps(doc.meta, ensure_ascii=False))
+        # Отпечаток принятого файла — в общий список (16.11.2026): повторная загрузка того же файла в приёмник
+        # распознаётся как «уже обработано», а не как новая встреча
+        if отпечаток:
+            self._запомнить_отпечаток(отпечаток, meeting_id, filename)
         media = doc.meta.get("media_path")
         # 09.11.2026: если голоса не разобрались, запись НЕ удаляем — иначе повтор невозможен без новой отправки
         # (встреча 9: сбой `BrokenProcessPool`, файл удалён, причину смерти процесса уже не проверить).
@@ -1988,11 +2012,13 @@ class MeetingPipeline:
                                      "что_делать": "замените на «Фамилия Имя Отчество» из «Команды»; до решения протокол — "
                                                    "черновик"}, meeting_id)
                 _беда = чужие_фамилии or имена_разговорные
-                _черновик = ("черновик: голоса разбираются — имена уточняются" if голоса_ждут else
-                             ("черновик: имена не по шаблону — " + ", ".join((чужие_фамилии + имена_разговорные)[:3])
-                              if _беда else None))
+                # Слово владелицы 16.11.2026: «протокол должен собираться автоматически, ничего не ждать». Примечание —
+                # только справка в журнале сборки; готовность протокола от него не зависит (как в Планёрке и ERP).
+                _примечание = ("имена уточняются: идёт разбор записи по голосам" if голоса_ждут else
+                               ("проверка имён: замечания — " + ", ".join((чужие_фамилии + имена_разговорные)[:3])
+                                if _беда else None))
                 self.s.update("meetings", meeting_id, protocol_md=protocol_md, protocol_built_at=built,
-                              built_from=[s["name"] for s in srcs], build_note=_черновик)
+                              built_from=[s["name"] for s in srcs], build_note=_примечание)
                 # паспорт принятого протокола (12.11.2026): после пересборки сверяем числа и фразы; расхождение —
                 # карточка «Разбора», сборку не отменяет
                 try:
