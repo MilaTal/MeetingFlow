@@ -80,3 +80,46 @@ def test_рабочая_копия_и_её_уборка(store, tmp_path):
     служба._убрать_копию(копия)
     assert not копия.exists()
     assert исходник.exists()          # исходник остаётся — его переносит приёмник в «обработано»
+
+
+class _Источник:
+    kind = "text"
+
+
+class _Плагины:
+    def resolve_source(self, имя):
+        return _Источник() if имя.lower().endswith(".txt") else None
+
+
+class _ПайпСПриёмом(_Пайп):
+    """Конвейер-заглушка: приём текста сразу «успешен», без распознавания и моделей."""
+
+    def __init__(self, store):
+        super().__init__(store)
+        self.plugins = _Плагины()
+        self.queue = None
+        self.принято = []
+
+    def ingest(self, project_id, meeting_id, filename, data=None, path=None, **kwargs):
+        self.принято.append(filename)
+        return {"status": "ok", "kind": "transcript"}
+
+
+def test_проход_переносит_файл_и_не_падает(store, project, tmp_path):
+    """Сквозная проверка прохода: файл уезжает в «обработано», проход завершается, рабочая копия убрана.
+
+    Тест ловит класс ошибок «переехало и упало»: 16.11.2026 проход падал с NameError после переноса файла, и
+    владелица видела «файл исчез, а в базе ничего».
+    """
+    meeting_date = date.today().isoformat()
+    _файл(tmp_path, "Заметки 16.11.2026.txt", содержимое="[00:01:00] Игнатов Иван: подготовьте отчёт".encode())
+    приёмник = FolderIntake(tmp_path, set())
+    приёмник.scan()
+    store.set_setting("watch_folder", str(tmp_path), project, "тест")   # папка-приёмник проекта
+    служба = IntakeService(_ПайпСПриёмом(store))
+    служба.scan_project(project)                     # первый проход: файл «не осел», только запоминаем размер
+    итог = служба.scan_project(project)               # второй: размер не менялся — берём
+    assert итог.get("status") == "ok", итог
+    assert "Заметки 16.11.2026.txt" in итог.get("ingested", []), итог
+    assert (tmp_path / "обработано" / "Заметки 16.11.2026.txt").is_file()
+    assert not (tmp_path / "Заметки 16.11.2026.txt").exists()

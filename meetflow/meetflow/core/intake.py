@@ -31,8 +31,8 @@ from ..connectors.base import ConnectorError
 from . import hod
 from . import peregovorka
 from .nazvanie_vstrechi import тема_из_приёмника
-from ..connectors.watch_folder import (DONE_DIR, MARKER, SKIP_WORDS, STOPPED_DIR, FolderIntake, check_folder_path, is_marker,
-                                       single_date)
+from ..connectors.watch_folder import (DONE_DIR, MARKER, SKIP_WORDS, STOPPED_DIR, FolderIntake, IntakeItem,
+                                       check_folder_path, is_marker, single_date)
 from .store import now
 
 HINT_FILE = "ЧТО СЮДА КЛАСТЬ.md"
