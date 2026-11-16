@@ -16,6 +16,7 @@
 """
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 import re
@@ -35,9 +36,9 @@ from ..connectors.watch_folder import (DONE_DIR, MARKER, SKIP_WORDS, STOPPED_DIR
 from .store import now
 
 HINT_FILE = "ЧТО СЮДА КЛАСТЬ.md"
-HINT_TEXT = ("# Папка-приёмник встреч\n\nСюда кладутся записи и расшифровки встреч. В имени файла — одна дата "
-             "встречи, например «Встреча 01.10.2026.mp4». Обработанные файлы уезжают в подпапку «обработано». "
-             "Файл без даты остаётся на месте, о нём придёт сообщение.\n")
+HINT_TEXT = ("# Папка-приёмник встреч\n\nСюда кладутся записи и расшифровки встреч. Дата встречи берётся из имени "
+             "файла (например, «Встреча 01.10.2026.mp4»), иначе из имени папки дня, иначе по времени файла. "
+             "Принятые файлы сразу уезжают в подпапку «обработано» — это и значит «забрали».\n")
 DEFAULT_INTERVAL = 900
 MIN_INTERVAL = 30
 BIG_FIRST_PASS = int(os.environ.get("MEETFLOW_WATCH_BIG_FIRST_PASS", "25"))
@@ -248,9 +249,19 @@ class IntakeService:
                                  {"folder": path, "file": name})
         from . import proekt_zapisi as pz
         другие = pz.папки_других(self.s, project_id)
+        перенесены: set[str] = set()          # отпечатки файлов, уже уехавших в «обработано» при приёме
         for item in scan.ready:
             if pz.под_другим(item.path, другие):
                 continue                     # подпапка — приёмник другого проекта: её обходит тот проект
+            # Файл принят — сразу в «обработано» (слово владелицы 16.11.2026, как в Планёрке: «файл уходит, как только
+            # принят»). Прежде он висел в папке всё распознавание — 82-минутная запись часами. Работаем с рабочей
+            # копией; не удалось скопировать — работаем по исходнику, как раньше.
+            рабочий = self._рабочая_копия(item.path)
+            if рабочий is not None:
+                fi.known.add(item.digest)
+                fi.done(item.path)
+                перенесены.add(item.digest)
+                item = IntakeItem(рабочий, item.meeting_date, item.digest)
             # Проект записи (27.10.2026): подпапка проекта или подпроекта — он; корень общей папки — по названию в имени
             # файла; не определился — встреча с пометкой «проект не определён» и карточка, сборка ждёт выбора
             чей = pz.проект_файла(self.s, project_id, Path(path), item.path)
@@ -269,10 +280,12 @@ class IntakeService:
                 итог = self._переговорка(проект_приёма, item, чей, result)
                 if итог is not None:
                     if итог.get("status") == "held":
-                        result["held"].append(item.path.name)      # запись ждёт инструментов — остаётся на месте
+                        result["held"].append(item.path.name)      # ждёт инструментов: рабочая копия остаётся
                     else:
                         fi.known.add(item.digest)
-                        if item.path.exists():
+                        if item.digest in перенесены:
+                            self._убрать_копию(item.path)   # исходник уже в «обработано»
+                        elif item.path.exists():
                             fi.done(item.path)
                         result["ingested" if итог.get("status") == "ok" else "duplicates"].append(item.path.name)
                     continue
@@ -325,7 +338,9 @@ class IntakeService:
                                           "что_делать": "пересобрать протокол — кнопкой на этой встрече"},
                                          int(res["existing_meeting"]))
                 moved = None
-                if item.path.exists():  # запись мог уже удалить конвейер после распознавания
+                if item.digest in перенесены:
+                    self._убрать_копию(item.path)          # исходник уже в «обработано» при приёме
+                elif item.path.exists():  # запись мог уже удалить конвейер после распознавания
                     moved = fi.done(item.path)
                 result["ingested" if st == "ok" else "duplicates"].append(item.path.name)
                 # запись, проект которой не определён, собирается сразу в проекте папки (решение владелицы 28.10.2026);
@@ -356,13 +371,45 @@ class IntakeService:
         return result
 
     # ------------------------------------------------------------ переговорка (12.11.2026)
+    def _рабочая_копия(self, path: Path) -> Path | None:
+        """Копия записи для обработки: исходник сразу уезжает в «обработано» (как в Планёрке, 16.11.2026).
+
+        Иначе файл висит в папке-приёмнике всё распознавание: 82-минутная запись — часами, и владелица видит «не
+        забрали». Копия живёт рядом с базой (`data/приёмник`) и удаляется после приёма; при «ждёт инструментов» —
+        остаётся, чтобы повтор работал без новой загрузки.
+        """
+        try:
+            import shutil
+            папка = Path(self.s.path).parent / "приёмник" / hashlib.sha1(
+                f"{path.name}|{path.stat().st_size}".encode()).hexdigest()[:10]
+            папка.mkdir(parents=True, exist_ok=True)
+            цель = папка / path.name
+            if not цель.exists() or цель.stat().st_size != path.stat().st_size:
+                shutil.copy2(path, цель)
+            return цель
+        except OSError as exc:
+            self.pipe.cards.open(None, "technical", f"Не удалось сделать рабочую копию «{path.name}»",
+                                 {"detail": f"{type(exc).__name__}: {str(exc)[:200]}",
+                                  "что_делать": "файл обработан на месте, как раньше"})
+            return None
+
+    def _убрать_копию(self, path: Path) -> None:
+        """Рабочая копия больше не нужна: запись принята, исходник лежит в «обработано»."""
+        try:
+            if path.is_file() and "приёмник" in str(path).lower():
+                path.unlink()
+                папка = path.parent
+                if not any(папка.iterdir()):
+                    папка.rmdir()
+        except OSError:
+            pass
+
     def _переговорка(self, project_id: int, item, чей: dict, result: dict) -> dict | None:
         """Запись из переговорки: измерить, разрезать по паузам, завести по встрече на часть.
 
         Возвращает итог {"status": "ok|duplicate|held"}; None — разбор не удался, запись идёт обычным путём
         (не теряем её из-за собственного сбоя измерения).
         """
-        import hashlib
         import tempfile
         from ..core.nazvanie_vstrechi import тема_из_приёмника
         from . import proekt_zapisi as pz
