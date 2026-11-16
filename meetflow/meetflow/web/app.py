@@ -906,6 +906,11 @@ def create_app(theme_name: str | None = None, db_path: str | None = None, journa
         if not m:
             raise HTTPException(404, "Встреча не найдена.")
         текст = " ".join(str(body.names or "").split())
+        # Битая кодировка (12.11.2026): кириллица, пришедшая не в UTF-8, превращается в «???? ??????». Такое имя
+        # молча сохранять нельзя — иначе «все участники перечислены», а в списке мусор. Пустая строка — очистка.
+        части = [ч.strip() for ч in текст.replace(";", ",").replace("\n", ",").split(",") if ч.strip()]
+        if any(not any(ch.isalpha() for ch in ч) for ч in части):
+            raise HTTPException(422, "Имя участника не распознано: в нём нет букв. Отправьте список в UTF-8.")
         store.update("meetings", mid, participants_manual=текст)
         store.insert("decisions", project_id=m["project_id"], what="Участники встречи — ручной список",
                      decision=текст or "очищен", why="правка на экране", at=now())

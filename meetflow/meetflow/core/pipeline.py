@@ -604,6 +604,10 @@ class MeetingPipeline:
         видели = {" ".join((n or "").replace("ё", "е").lower().split()) for n in out}
         for часть in re.split(r"[,;\n]", str(meeting.get("participants_manual") or "")):
             имя = " ".join(часть.split())
+            # Битый ручной список (12.11.2026): клиент прислал кириллицу не в UTF-8, в базе остались «???? ??????».
+            # Такое имя не человек — в «Участники» его не пускаем; сама ручка теперь отвечает 422 (см. `set_participants`).
+            if not any(ch.isalpha() for ch in имя):
+                continue
             ключ = " ".join(имя.replace("ё", "е").lower().split())
             if имя and ключ not in видели:
                 видели.add(ключ)
