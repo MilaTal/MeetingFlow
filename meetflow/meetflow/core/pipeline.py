@@ -151,6 +151,62 @@ def _span(text: str) -> int:
     return marks[-1] - marks[0] if len(marks) >= 2 and marks[-1] >= marks[0] else 0
 
 
+def контроль_расшифровки(transcripts: list[dict], base: dict | None) -> dict:
+    """Контрольная расшифровка Whisper (решение владелицы 17.11.2026, как Планёрка и ERP).
+
+    Основа — своя локальная; Whisper текстом не идёт: из него берутся расхождения по числам/датам/названиям, значения,
+    которых в основной нет, и участники, которых основная не называет; его реплики закрывают провалы по времени основной
+    (в тексте помечены «[из контрольной расшифровки]»). Нет Whisper — шаг пропущен с причиной: сборка идёт по основной,
+    это штатный путь, а не сбой. Возвращает сведения; текст основы при вставках меняется на сводный."""
+    from . import kachestvo_rasshifrovki as кк, kontrol_raschifrovki as кр, vybor_rasshifrovki as вр
+
+    итог = {"есть": False, "причина": "", "сводная": None, "блок": "", "строка": "",
+            "качество": None, "все": []}
+    if base is None:
+        итог["причина"] = "нет текста сборки — контрольной расшифровке не с чем сверяться"
+        return итог
+    for s in transcripts or []:
+        итог["все"].append(кк.измерить(s.get("name") or "расшифровка", s.get("text") or "",
+                                       роль=вр.роль(s.get("name"), s.get("text")), мусор=False))
+    итог["качество"] = next((к for к, s in zip(итог["все"], transcripts or []) if s is base), None)
+    контр = None
+    for s in transcripts or []:
+        if s is base:
+            continue
+        if вр.роль(s.get("name"), s.get("text")) == вр.РОЛЬ_КОНТРОЛЬНАЯ and (s.get("text") or "").strip():
+            контр = s
+            break
+    if контр is None:
+        итог["причина"] = "контрольной расшифровки (Whisper) нет — шаг пропущен"
+        return итог
+    итог["есть"] = True
+    св = кр.сводная(base.get("text") or "", контр.get("text") or "")
+    итог["сводная"] = св
+    if св.вставлено_реплик:
+        base["text"] = св.текст
+    осн_сравн = "\n".join(р.текст for р in кр.разобрать(base.get("text") or ""))
+    контр_сравн = "\n".join(р.текст for р in кр.разобрать(контр.get("text") or ""))
+    спорные: list = []
+    только: list = []
+    имена: list = []
+    if контр_сравн.strip():
+        спорные = вр.расхождения(осн_сравн, контр_сравн)
+        только = кр.только_в_контроле(base.get("text") or "", контр.get("text") or "")
+        имена = кр.сверить_имена(base.get("text") or "", контр.get("text") or "")
+    блоки = []
+    if спорные:
+        блоки.append("Расхождения (оба значения; молча не выбирать):\n"
+                     + "\n".join(f"- контрольная: {п['выгрузка']} — основная: {п['запись']}" for п in спорные))
+    if только:
+        блоки.append("Чего нет в основной (проверить, не потеряно ли):\n" + "\n".join(f"- {v}" for v in только))
+    if имена:
+        блоки.append("Участники, которых основная не называет: " + ", ".join(имена))
+    итог["блок"] = "\n\n".join(блоки)
+    итог["строка"] = (f"контрольная Whisper: расхождений {len(спорные)}, значений только в контроле {len(только)}, "
+                      f"вставок в провалы {св.вставлено_реплик}")
+    return итог
+
+
 def teksty_sborki(transcripts: list[dict]) -> tuple[dict | None, dict | None, str]:
     """(основная, вторая, причина) — расшифровки сборки (записка 05.11.2026, п. 1).
 
@@ -160,7 +216,11 @@ def teksty_sborki(transcripts: list[dict]) -> tuple[dict | None, dict | None, st
     base, reason = choose_transcript(transcripts)
     second = None
     if base is not None and base.get("local_asr"):
-        second = vks_vtoroy_tekst.вторая_расшифровка(transcripts)
+        from . import vybor_rasshifrovki as вр
+        # Контрольная Whisper (17.11.2026) — не «вторая выгрузка ВКС»: у неё своя ветка (`контроль_расшифровки`).
+        без_контроля = [s for s in transcripts
+                        if вр.роль(s.get("name"), s.get("text")) != вр.РОЛЬ_КОНТРОЛЬНАЯ]
+        second = vks_vtoroy_tekst.вторая_расшифровка(без_контроля)
     return base, second, reason
 
 
@@ -171,7 +231,11 @@ def choose_transcript(transcripts: list[dict]) -> tuple[dict | None, str]:
     if not transcripts:
         return None, ""
     local = next((s for s in transcripts if s.get("local_asr")), None)
-    other = next((s for s in transcripts if s is not local), None)
+    from . import vybor_rasshifrovki as вр
+    # Контрольная Whisper не кандидат в основную (17.11.2026): иначе длинный контрольный текст по «страховке» подменял
+    # бы свою расшифровку и уходил в модель целиком.
+    other = next((s for s in transcripts if s is not local
+                  and вр.роль(s.get("name"), s.get("text")) != вр.РОЛЬ_КОНТРОЛЬНАЯ), None)
     if local is None:
         return transcripts[0], "своей локальной расшифровки нет — текстом первая доступная"
     text = (local.get("text") or "").strip()
@@ -816,6 +880,53 @@ class MeetingPipeline:
         return polnota.короче_обычной(len(base.get("text") or ""), обычные,
                                       polnota.основа_сравнения(tp["name"] if tp else None, d.isoweekday()))
 
+    def _контрольная_расшифровка(self, project_id: int, meeting_id: int, path: Path | None, filename: str,
+                                 основной) -> int:
+        """Вторая расшифровка той же записи — локальный Whisper (решение владелицы 17.11.2026, как Планёрка и ERP).
+
+        Основная идёт своей цепочкой распознавания; контрольная — только `whisper_local`. Её текст протокол не заменяет:
+        из него берутся расхождения по числам/датам/названиям, «чего нет в основной» и провалы по времени. Нет Whisper
+        (не установлен, он же был основным) — шаг пропускается, сборка идёт по основной: это штатный путь, не сбой.
+        Возвращает id источника контрольной расшифровки (0 — шаг пропущен)."""
+        from ..connectors.asr_whisper import WhisperLocalASR
+
+        if os.environ.get("WEBAPP_CONTROL_TRANSCRIPT", "1").strip().lower() in ("0", "false", "нет"):
+            return 0
+        if path is None or isinstance(основной, WhisperLocalASR):
+            return 0
+        w = next((c for c in self.plugins.all("asr") if isinstance(c, WhisperLocalASR)), None)
+        причина = ""
+        if w is None:
+            причина = "локального Whisper нет в конфигурации"
+        elif not w.available():
+            причина = "faster-whisper не установлен на этой машине"
+        if причина:
+            self.journal.write(purpose="control_transcript", meeting_id=meeting_id, состояние="пропущено",
+                               причина=причина)
+            return 0
+        if self.s.q("SELECT id FROM sources WHERE meeting_id=? AND name LIKE '%контрольная Whisper%' "
+                    "AND removed_at IS NULL", (meeting_id,)):
+            return 0
+        try:
+            hod.ход.подшаг("контрольная расшифровка Whisper")
+            doc = w.transcribe(Path(path))
+        except Exception as exc:  # noqa: BLE001 — контроль не должен ронять основную сборку
+            self.journal.write(purpose="control_transcript", meeting_id=meeting_id, ok=False,
+                               reason=f"{type(exc).__name__}: {str(exc)[:500]}")
+            self.cards.open(project_id, "technical", "Контрольная расшифровка не удалась",
+                            {"detail": "Основная расшифровка на месте, протокол собран по ней. Техническая причина: "
+                                       f"{type(exc).__name__}: {str(exc)[:500]}"}, meeting_id)
+            return 0
+        finally:
+            hod.ход.сбросить()
+        имя = f"{Path(filename).stem} — контрольная Whisper.txt"
+        sid = self.s.insert("sources", meeting_id=meeting_id, name=имя, kind=SourceKind.TRANSCRIPT.value,
+                            text=doc.text, digest=doc.content_digest, created_at=now(), local_asr=0,
+                            voice_state="", meta=json.dumps(doc.meta, ensure_ascii=False))
+        self.journal.write(purpose="control_transcript", meeting_id=meeting_id, ok=True, name=имя,
+                           знаков=len(doc.text))
+        return sid
+
     def ingest(self, project_id: int, meeting_id: int, filename: str, data: bytes | None = None,
                path: Path | None = None, окно_мин: float | None = None, голоса_потом: bool = False) -> dict:
         """Ручная загрузка / папка-приёмник. Возвращает {"status", ...}.
@@ -913,6 +1024,10 @@ class MeetingPipeline:
                                     text=doc.text, digest=doc.content_digest, created_at=now(), local_asr=1,
                                     file_digest=отпечаток, voice_state="ожидают голоса",
                                     meta=json.dumps(doc.meta, ensure_ascii=False))
+            # Контрольная расшифровка той же записи (решение владелицы 17.11.2026): второй проход на локальном Whisper,
+            # пока запись на диске. Шаг необязательный: нет Whisper — пропускается, сборка идёт по основной.
+            if not сохранено:
+                self._контрольная_расшифровка(project_id, meeting_id, path, filename, c)
             # Голоса — после сохранения текста и до удаления записи: разделению и отрывкам нужен звук. Сбой шага не
             # отменяет распознанный текст, причина уходит в журнал и карточку.
             if голоса_потом:
@@ -1056,6 +1171,7 @@ class MeetingPipeline:
     def _run(self, project_id: int, meeting_id: int, limits: BudgetLimits | None) -> RunReport:
         rep = RunReport(meeting_id)
         self._второй_текст = ""          # выгрузка ВКС вторым текстом — по источникам, ниже (записка 05.11.2026)
+        self._контроль_блок = ""         # сверка с контрольной Whisper (17.11.2026) — не речь, отдельным блоком
         # признак сборки: номер встречи повторяется (стенд, удаление), по нему счёт вызовов не складывается
         self.journal.run_id = f"{meeting_id}-{datetime.now():%Y%m%dT%H%M%S}-{threading.get_ident()}"
         rep.run_id = self.journal.run_id
@@ -1099,6 +1215,26 @@ class MeetingPipeline:
         base, вторая, rep.source_reason = teksty_sborki(transcripts) if transcripts else (None, None, "")
         if base is None:
             base = notes[0]
+        # Контрольная расшифровка Whisper (решение владелицы 17.11.2026, как Планёрка и ERP): сводная (вставки в провалы
+        # по времени), расхождения по числам/датам/названиям и качество основы. Нет Whisper — шаг пропущен с причиной.
+        контроль = контроль_расшифровки(transcripts, base) if transcripts else {}
+        self._контроль_блок = (контроль.get("блок") or "") if контроль else ""
+        if контроль:
+            if контроль.get("строка"):
+                rep.source_reason = "; ".join(x for x in (rep.source_reason, контроль["строка"]) if x)
+            elif контроль.get("причина"):
+                self.journal.write(purpose="control_transcript", meeting_id=meeting_id,
+                                   состояние="пропущено", причина=контроль["причина"])
+            _к = контроль.get("качество")
+            if _к is not None and _к.замечания:
+                _заголовок = "Качество расшифровки ниже нормы"
+                if not self.s.q("SELECT id FROM cards WHERE meeting_id=? AND title=? AND status='open'",
+                                (meeting_id, _заголовок)):
+                    self.cards.open(project_id, "technical", _заголовок,
+                                    {"transcript": _к.имя, "metrics": _к.строка(),
+                                     "detail": "; ".join(_к.замечания),
+                                     "note": "Протокол собран по этой расшифровке; проверьте запись или приложите "
+                                             "расшифровку получше."}, meeting_id)
         self._второй_текст = (вторая.get("text") or "") if вторая is not None else ""
         if self._второй_текст:
             rep.source_reason = "; ".join(x for x in (rep.source_reason, "выгрузка ВКС вторым текстом") if x)
@@ -1587,7 +1723,8 @@ class MeetingPipeline:
                     sysm, user = self.pb.protocol(скелет_модели, safe_source.text, notes_text,
                                                   participants=participants, leader=leader,
                                                   topic_hint=topics.подсказка_протокола(self._topic(meeting)),
-                                                  второй=getattr(self, "_второй_текст", ""))
+                                                  второй=getattr(self, "_второй_текст", ""),
+                                                  контроль=getattr(self, "_контроль_блок", ""))
                     try:
                         out = self._call(self.gen, budget, "protocol", sysm, user, meeting_id)
                         sections = {k: str(v)[:20000] for k, v in _dict(out, "sections").items()

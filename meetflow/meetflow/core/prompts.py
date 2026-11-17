@@ -264,7 +264,7 @@ class PromptBuilder:
 
     def protocol(self, sections: list[str], source_text: str, notes_text: str = "",
                  participants: list[str] | None = None, leader: str = "", topic_hint: str = "",
-                 второй: str = "") -> tuple[str, str]:
+                 второй: str = "", контроль: str = "") -> tuple[str, str]:
         task = ("ЗАДАЧА: кратко изложи обсуждение по разделам протокола. Только то, что есть в "
                 "тексте встречи; задачи и таблицы не пиши — их вставит система. Без оценок и "
                 "домыслов, деловым языком.\nРАЗДЕЛЫ:\n" + "\n".join(f"- {s}" for s in sections) +
@@ -287,6 +287,12 @@ class PromptBuilder:
             task += ВТОРОЙ_ТЕКСТ_ПРАВИЛО
             wb, _ = fence(второй, "выгрузка ВКС той же встречи — второй текст, не замена своему")
             body = f"{body}\n\n{wb}"
+        if контроль:
+            # Контрольная расшифровка Whisper (17.11.2026): это значения для сверки, а не речь и не второй текст.
+            task += ("\n\nСверка со второй расшифровкой (Whisper) — не речь и не замена тексту встречи: при расхождении "
+                     "числа, даты или названия приведи оба значения и не выбирай молча.")
+            kb, _ = fence(контроль, "сверка с контрольной расшифровкой — значения, не текст речи")
+            body = f"{body}\n\n{kb}"
         return self._system(task), body + self.p.no_think_suffix
 
     def plan(self, sections: list[str], source_text: str, materials: list[str] | None = None) -> tuple[str, str]:
