@@ -562,6 +562,15 @@ class RoutedLLM(LLMConnector):
         known = [c for c in costs if c is not None]
         return max(known) if known else None
 
+    def worst_call_usd_primary(self, prompt_chars: int) -> float | None:
+        """Худший случай первой (рабочей) точки: запасная проверится своим вызовом, если основная откажет.
+
+        Нужно правке по замечаниям (17.11.2026): после дорогой проверки Qwen4 прогноз по всей цепочке
+        (`worst_call_usd`) не пускал дешёвый вызов DeepSeek — 0,33 $ ожидалось при остатке 0,30 $.
+        """
+        names = self.chain()
+        return self.connector(names[0]).worst_call_usd(prompt_chars) if names else None
+
     def health(self) -> dict:
         names = self.chain()
         now = time.time()

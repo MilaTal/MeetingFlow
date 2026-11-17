@@ -971,9 +971,15 @@ class MeetingPipeline:
         self.cards.open(project_id, "technical", f"Шаг сборки не выполнен: {step}", {"detail": detail}, meeting_id)
 
     def _call(self, llm: LLMConnector, budget: RunBudget, purpose: str, system: str, user: str,
-              meeting_id: int, fix_json=None) -> Any:
+              meeting_id: int, fix_json=None, primary_price: bool = False) -> Any:
         for attempt in (0, 1):
-            worst = llm.worst_call_usd(len(system) + len(user)) if hasattr(llm, "worst_call_usd") else None
+            # Для правки по замечаниям (17.11.2026) прогноз — по первой точке роли, а не по самой дорогой
+            # запасной: Qwen4 в проверке делал прогноз 0,33 $ и не пускал дешёвый DeepSeek.
+            if primary_price:
+                worst_fn = getattr(llm, "worst_call_usd_primary", None) or getattr(llm, "worst_call_usd", None)
+            else:
+                worst_fn = getattr(llm, "worst_call_usd", None)
+            worst = worst_fn(len(system) + len(user)) if worst_fn else None
             budget.check(len(system) + len(user), purpose, worst_usd=worst)
             try:
                 # остаток времени прогона — в вызов: один вызов не живёт дольше прогона (01/17)
@@ -2021,6 +2027,64 @@ class MeetingPipeline:
                 _примечание = ("имена уточняются: идёт разбор записи по голосам" if голоса_ждут else
                                ("проверка имён: замечания — " + ", ".join((чужие_фамилии + имена_разговорные)[:3])
                                 if _беда else None))
+                # 4.4 Проверка моделью и правка по замечаниям — ДО сохранения (слово владелицы 17.11.2026).
+                # Находки с цитатой правит та же сборка патчами; что не исправилось — остаётся карточкой человеку.
+                rep.findings = []
+                try:
+                    if stopped is not None:
+                        raise BudgetExceeded(str(stopped))
+                    sysm, user = self.pb.verify(protocol_md, safe_source.text)
+                    out = self._call(self.ver, budget, "verify", sysm, user, meeting_id)
+                    rep.findings = [{"issue": str(f.get("issue", ""))[:500], "quote": str(f.get("quote", ""))[:500],
+                                     "severity": str(f.get("severity", "minor"))[:10]}
+                                    for f in _list(out, "findings") if isinstance(f, dict)][:20]
+                except BudgetExceeded as e:
+                    limited = True
+                    rep.findings = [{"issue": f"Проверка не выполнена: {e}", "severity": "minor"}]
+                    if stopped is None:
+                        rep.detail = " ".join(x for x in (
+                            "Протокол сохранён, проверка остановлена по пределу; протокол проверен кодом "
+                            "(проект, исполнитель, срок, алфавит названий) — повторите пересборку.", rep.detail) if x)
+                except Exception as e:  # noqa: BLE001 — сбой проверки не отменяет сохранённое; оператору — карточка
+                    rep.findings = [{"issue": f"Проверка не выполнена: {type(e).__name__}", "severity": "minor"}]
+                    self.step_failed(project_id, meeting_id, "Проверка протокола", e)
+                    rep.detail = " ".join(x for x in (
+                        "Протокол сохранён, проверка не выполнена; протокол проверен кодом (проект, исполнитель, "
+                        "срок, алфавит названий) — повторите пересборку.", rep.detail) if x)
+                # 4.5 Правка по замечаниям: только пары «цитата → замена», протокол целиком не пересобираем.
+                try:
+                    from . import pravka_po_zamechaniyam as пз
+                    находки = пз.отобрать({"findings": rep.findings})
+                    if находки:
+                        sysm, user = пз.промпт(protocol_md, находки)
+                        ответ = self._call(self.gen, budget, "fix_findings", sysm, user, meeting_id,
+                                           primary_price=True)
+                        патчи = (ответ.get("patches") if isinstance(ответ, dict)
+                                 else (ответ if isinstance(ответ, list) else []))
+                        новый, применённые, пропущенные = пз.применить(protocol_md, патчи or [])
+                        причина = пз.стало_хуже(protocol_md, новый)
+                        if причина:
+                            self.cards.open(project_id, "technical",
+                                            f"Правка протокола по замечаниям не применена: {причина}",
+                                            {"reason": причина, "пропущено": пропущенные[:20]}, meeting_id)
+                        else:
+                            protocol_md = новый
+                            n_fixed = пз.отметить_исправленные(rep.findings, применённые)
+                            if n_fixed:
+                                строка = f"исправлено замечаний проверки — {n_fixed}"
+                                _примечание = "; ".join(x for x in (_примечание, строка) if x)
+                                self.cards.open(project_id, "technical",
+                                                f"Протокол встречи {meeting.get('date') or ''}: {строка}",
+                                                {"исправлено": n_fixed,
+                                                 "замены": [{"quote": (п.get("quote") or "")[:300],
+                                                             "replacement": (п.get("replacement") or "")[:300],
+                                                             "why": (п.get("why") or "")[:200]}
+                                                            for п in применённые][:20]}, meeting_id)
+                except BudgetExceeded as exc:
+                    limited = True
+                    self.step_failed(project_id, meeting_id, "Правка по замечаниям", exc)
+                except Exception as exc:  # noqa: BLE001 — правка не отменяет собранный протокол
+                    self.step_failed(project_id, meeting_id, "Правка по замечаниям", exc)
                 self.s.update("meetings", meeting_id, protocol_md=protocol_md, protocol_built_at=built,
                               built_from=[s["name"] for s in srcs], build_note=_примечание)
                 # паспорт принятого протокола (12.11.2026): после пересборки сверяем числа и фразы; расхождение —
@@ -2092,40 +2156,21 @@ class MeetingPipeline:
         rep.tasks_doubt = doubt
         rep.closing_cards, rep.protocol_saved = len(closing_cards), True
 
-        # 5. проверка после факта: замечания — справка, не шлюз. Строки, похожие на
-        # внедрённую инструкцию, проверяющей модели не показываются (01/12)
-        try:
-            if stopped is not None:
-                raise BudgetExceeded(str(stopped))
-            sysm, user = self.pb.verify(protocol_md, safe_source.text)
-            out = self._call(self.ver, budget, "verify", sysm, user, meeting_id)
-            rep.findings = [{"issue": str(f.get("issue", ""))[:500], "quote": str(f.get("quote", ""))[:500],
-                             "severity": str(f.get("severity", "minor"))[:10]}
-                            for f in _list(out, "findings") if isinstance(f, dict)][:20]
-        except BudgetExceeded as e:
-            limited = True
-            rep.findings = [{"issue": f"Проверка не выполнена: {e}", "severity": "minor"}]
-            if stopped is None:
-                rep.detail = " ".join(x for x in (
-                    "Протокол сохранён, проверка остановлена по пределу; протокол проверен кодом "
-                    "(проект, исполнитель, срок, алфавит названий) — повторите пересборку.", rep.detail) if x)
-        except Exception as e:  # любой сбой проверки не отменяет сохранённое; оператору — карточка (стенд 40)
-            rep.findings = [{"issue": f"Проверка не выполнена: {type(e).__name__}", "severity": "minor"}]
-            self.step_failed(project_id, meeting_id, "Проверка протокола", e)
-            rep.detail = " ".join(x for x in (
-                "Протокол сохранён, проверка не выполнена; протокол проверен кодом (проект, исполнитель, "
-                "срок, алфавит названий) — повторите пересборку.", rep.detail) if x)
-        # кодовые проверки черновика — то, что модель почти не ловит (письмо meeting-registry 18):
+        # 5. кодовые проверки после сохранения — то, что модель почти не ловит (письмо meeting-registry 18):
+        # модельные находки и правка уже прошли ДО сохранения (17.11.2026), здесь только детерминированные проверки.
         # оценочное слово без опоры в записи, факт из эпизода другого проекта. Справка, не шлюз.
         full_source = source.text + ("\n" + notes_text if notes_text else "")
         rep.findings = [{"issue": f["note"], "quote": f["quote"], "source_line": f["source_line"],
                          "severity": "major", "by": "код", "kind": f["kind"]}
                         for f in run_code_checks(protocol_md, full_source)] + rep.findings
         self.s.update("meetings", meeting_id, review_notes=rep.findings)
-        # каждая существенная находка проверяющей модели — карточкой оператору; протокол уже сохранён
+        # каждая неприменённая существенная находка проверяющей модели — карточкой оператору; исправленные
+        # правкой уже помечены и карточек не получают (17.11.2026). Протокол сохранён после правки
         # (решение владельца 03.10.26, письмо 38: в Планёрке находки 25.09 никуда не дошли)
         # и существенная находка кодовой проверки черновика — тоже карточка (письмо 40); мелкие — справкой
         for f in rep.findings:
+            if f.get("исправлено"):          # правка по замечанию применена — карточка не нужна (17.11.2026)
+                continue
             if str(f.get("severity", "")).lower() != "major":
                 continue
             by = "проверка кодом" if f.get("by") == "код" else "проверяющая модель"
