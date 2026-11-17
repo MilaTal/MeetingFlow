@@ -199,7 +199,7 @@ async function renderMeetingReader(id, запрошеннаяВкладка) {
     : встреча.draft_pending ? "черновик ждёт решения" : hasMin ? "протокол готов"
     : (встреча.состояние_протокола || "протокола нет");
   let назад = откуда === "reg" ? `<a href="#dashboard" class="mt-back">← Реестр задач</a>`
-    : откуда === "prep" ? `<a href="#prep" class="mt-back">← Подготовка встречи</a>`
+    : откуда === "prep" ? `<a href="#meetings" class="mt-back">← Реестр встреч</a>`
     : `<a href="#meetings" class="mt-back">← Реестр встреч</a>`;
   // Старый ?from=<номер встречи> (ссылки «план следующей», материалы к плану) — возврат на ту встречу, как прежде.
   if (/^\d+$/.test(откуда || "")) {
@@ -333,8 +333,6 @@ async function renderMeetingReader(id, запрошеннаяВкладка) {
         ${админ && протокол.generated_at ? `<div class="page-sub">собран ${esc(fmtRuDateTime(протокол.generated_at))}</div>` : ""}
         <a class="btn-link" href="#meetings/${id}">Страница этой встречи</a>
         <a class="btn-link" href="/meetings/${id}/recognition/export" target="_blank">Выгрузить итоги распознавания</a>
-        ${готовит ? `<a class="btn-link" href="#prep/${id}">Подготовка этой планёрки</a>` : ""}
-        <button type="button" class="btn-link" id="more-plan">План следующей</button>
         ${готовит ? `<button type="button" class="btn-link" id="more-actions">Действия со встречей…</button>` : ""}`;
     }
     $d.innerHTML = `<div class="mt-drawer-head"><button type="button" class="mt-close" id="mt-close" aria-expanded="true" aria-controls="mt-drawer" title="Свернуть панель (Esc)">Свернуть ▾</button></div>${тело}`;
@@ -346,8 +344,6 @@ async function renderMeetingReader(id, запрошеннаяВкладка) {
       ? `${Math.round(ряд.getBoundingClientRect().bottom - слой.getBoundingClientRect().top + 8)}px` : "";
     if (k === "materials") подключитьМатериалы(id, tab);
     if (k === "more") {
-      document.getElementById("more-plan")?.addEventListener("click", () =>
-        открыть("plan", document.getElementById("meeting-more")));
       document.getElementById("more-actions")?.addEventListener("click", () => менюВстречи(
         document.getElementById("more-actions"), встреча,
         { все: встречи, перерисовать: () => renderMeetingReader(id, tab) }));

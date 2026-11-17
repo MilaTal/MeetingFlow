@@ -64,28 +64,19 @@ async function renderProtocols() {
   // открывается щелчком в любом месте. Будущие даты в списке не показываются (у Планёрки — решение владельца 15.10.26
   // «будущее не надо показывать»): над списком — ближайшая встреча и её план.
   $main.innerHTML = `<div class="feed-head"><div class="feed-head-text"><h1>Реестр встреч</h1>
-      <div class="feed-sub">Нажмите на строку, чтобы открыть встречу и её протокол; в «…» строки — задачи и договорённости этой встречи.${canPrepare() ? " Новая встреча заводится в «Подготовке встречи»." : ""}</div></div></div>
-    <div id="nearest-slot"></div>
+      <div class="feed-sub">Нажмите на строку, чтобы открыть встречу и её протокол; в «…» строки — задачи и договорённости этой встречи. Встречи появляются при поступлении записи — плановых здесь нет.</div></div></div>
     <div id="proto-list"><div class="card empty-state">Загрузка…</div></div>`;
   const встречи = await api("/meetings");
   const $l = document.getElementById("proto-list");
   if (!$l) return;
   const сегодня = датаISO(new Date());
-  const ближайшая = ближайшаяВстреча(встречи, сегодня);
-  const $n = document.getElementById("nearest-slot");
-  if ($n) {
-    $n.innerHTML = ближайшая
-      ? `<div class="nearest-line"><a id="nearest-link" href="#meetings/${ближайшая.id}/planprep">Ближайшая встреча ${esc(fmtRuDate(ближайшая.date))} — план встречи</a>${ближайшая.has_plan ? "" : ' <span class="prep-muted">(плана пока нет)</span>'}</div>`
-      : canPrepare() ? `<div class="nearest-line prep-muted" id="nearest-link">Ближайшей встречи нет — заведите её в <a href="#prep">«Подготовке встречи»</a>.</div>` : "";
-  }
   if (!встречи.length) {
-    $l.innerHTML = `<div class="card empty-state reg-empty">${НАВ_ЗНАКИ.doc}<div class="reg-empty-title">Встреч пока нет</div>${canPrepare() ? '<div>Заведите встречу в <a href="#prep">«Подготовке встречи»</a>.</div>' : ""}</div>`;
+    $l.innerHTML = `<div class="card empty-state reg-empty">${НАВ_ЗНАКИ.doc}<div class="reg-empty-title">Встреч пока нет</div><div>Они появятся, когда придёт запись.</div></div>`;
     return;
   }
   const рубеж = new Date(); рубеж.setDate(рубеж.getDate() - НЕДЕЛЬ_ДО_АРХИВА * 7);
   const рубежISO = датаISO(рубеж);
   const по_дате = встречи.slice().sort((a, b) => b.date.localeCompare(a.date) || b.id - a.id);
-  const будущие = по_дате.filter(m => m.date > сегодня && m.status !== "cancelled");
   const прошедшие = по_дате.filter(m => m.date <= сегодня);
   const свежие = прошедшие.filter(m => m.date >= рубежISO), архив = прошедшие.filter(m => m.date < рубежISO);
   let месяцПрежний = "";
@@ -110,13 +101,11 @@ async function renderProtocols() {
   const список = (строки, ключ) => { месяцПрежний = ""; return `<div class="card reg-card feed-list"><ul class="proto-feed" data-list="${ключ}">${строки.map(строка).join("")}</ul></div>`; };
   const заСрок = НЕДЕЛЬ_ДО_АРХИВА === 1 ? "за последнюю неделю" : `за последние ${НЕДЕЛЬ_ДО_АРХИВА} ${недельВин(НЕДЕЛЬ_ДО_АРХИВА)}`;
   const старше = `${НЕДЕЛЬ_ДО_АРХИВА} ${недельРод(НЕДЕЛЬ_ДО_АРХИВА)}`;
-  const ещёБудущих = будущие.filter(m => !ближайшая || m.id !== ближайшая.id).length;
   // «Последние» — только когда они есть (как у Планёрки); иначе архив открыт сразу
   $l.innerHTML = `${свежие.length ? `<h2 class="feed-section">Последние встречи <span class="cnt">${свежие.length}</span> <span class="feed-h-note">${заСрок}</span></h2>
       ${список(свежие, "protocols")}` : ""}
     ${архив.length ? `<details class="feed-archive"${свежие.length ? "" : " open"}><summary class="feed-section">Архив — встречи старше ${старше} <span class="cnt">${архив.length}</span></summary>
-      ${список(архив, "protocols-archive")}</details>` : ""}
-    ${ещёБудущих && canPrepare() ? `<div class="feed-sub feed-future">Ещё встреч на будущие даты: ${ещёБудущих} — в <a href="#prep">«Подготовке встречи»</a>.</div>` : ""}`;
+      ${список(архив, "protocols-archive")}</details>` : ""}`;
   // Строка открывает встречу щелчком в любом месте; ссылки внутри строки работают сами
   $l.querySelectorAll(".proto-row").forEach(р => р.addEventListener("click", (e) => {
     if (e.target.closest("a, button")) return;
@@ -399,6 +388,10 @@ function renderPrepВыборПроекта() {
 }
 
 async function renderPrep(rest) {
+  // В MeetFlow нет плановых встреч (слово владелицы 17.11.2026): встреча появляется, когда приходит запись.
+  // Страница подготовки больше не точка создания — старые ссылки ведут в реестр.
+  location.replace("#meetings");
+  return;
   if (!canPrepare()) { location.replace("#meetings"); return; }     // никто не выбран в «Вы работаете как»
   // MeetFlow: встреча заводится в одном проекте. При «Все проекты» — выбор проекта и «Создать проект», а не голая подсказка
   // (решение владелицы 28.10.2026; было — `нуженПроект("Подготовка встречи")`)

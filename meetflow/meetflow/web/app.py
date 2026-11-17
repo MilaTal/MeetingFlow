@@ -683,6 +683,10 @@ def create_app(theme_name: str | None = None, db_path: str | None = None, journa
     @app.post("/api/projects/{pid}/meetings")
     def create_meeting(pid: int, m: MeetingIn, u: dict = Depends(admin)):
         project_or_404(pid)
+        # В MeetFlow нет плановых встреч (слово владелицы 17.11.2026): встреча появляется, когда приходит запись.
+        # Будущую дату вручную не заводим — иначе снова «ближайшая встреча ждёт запись».
+        if date_cls.fromisoformat(m.date) > date_cls.today():
+            raise HTTPException(400, "Плановые встречи в MeetFlow не создаются — встреча появится при поступлении записи.")
         return {"id": store.insert("meetings", project_id=pid, date=m.date, label=m.label)}
 
     @app.get("/api/projects/{pid}/prep")

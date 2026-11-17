@@ -1773,7 +1773,6 @@ function рисоватьПроекты() {
   const менюПроектаСтрокой = (п) => `<div class="pl-nested"${свёрнут() ? " hidden" : ""}>
       <a class="pl-nested-item pl-start" data-route="meetings" href="#meetings"><span class="pl-start-text">Реестр встреч<span class="pl-start-mark">начни здесь</span></span><span class="pl-start-arrow" aria-hidden="true">→</span></a>
       ${п.general ? "" : `<a class="pl-nested-item" data-route="dashboard" href="#dashboard">Реестр задач</a>`}
-      <a class="pl-nested-item" data-route="prep" href="#prep">Подготовка встречи</a>
       ${п.general ? "" : `<a class="pl-nested-item" data-route="agreements" href="#agreements">Договорённости по проекту</a>
       <a class="pl-nested-item" data-route="status" href="#status">Статус проекта</a>`}</div>`;
   const строка = (п) => `<div class="pl-row${п.id === тек ? " pl-on" : ""}" data-id="${п.id}">
@@ -2471,11 +2470,6 @@ async function render() {
   // «Команда» — администраторам (владелец 14.10.26, вопрос 1: участнику не показывать — в меню и по прямому адресу)
   const $teamNav = document.querySelector('.nav-item[data-route="team"]');
   if ($teamNav) $teamNav.hidden = !isAdmin();
-  // «Подготовка встречи» — всем ролям (решение владелицы 21.10.2026; с 13.10.26 было — администратору). С 25.10.2026 — пунктом
-  // блока под чертой, рядом с «Командой» (решение владелицы): сменилось место, права те же. С 28.10.2026 — вторым пунктом
-  // блока пользователей, за «Реестром встреч» (решение владелицы): права те же
-  const $prepNav = document.getElementById("nav-prep");
-  if ($prepNav) $prepNav.hidden = false;
   // «Договорённости» — пункт блока пользователей, всем ролям (решение владелицы 20.10.2026, п. 3; с 19.10.2026 — только
   // администраторам): прятать нечего
   // «Под вопросом» — пункт блока администратора с числом (решение владелицы 20.10.2026; было вкладкой реестра с 19.10.2026)
@@ -4609,7 +4603,7 @@ document.addEventListener("click", async (e) => {
   // подготовка — в подготовку (Б2/Б4, 05.11.2026).
   const маршрут = (location.hash || "").replace(/^#/, "").split("?")[0];
   const откуда = new URLSearchParams((location.hash || "").split("?")[1] || "").get("from");
-  const назад = откуда === "reg" ? "#dashboard" : откуда === "prep" ? "#prep"
+  const назад = откуда === "reg" ? "#dashboard" : откуда === "prep" ? "#meetings"
     : /^meetings(\/\d+(\/(protocol|planprep))?)?$/.test(маршрут) ? "#meetings" : "#prep";
   try {
     const проверка = await api(`/meetings/${id}/delete-check`);
