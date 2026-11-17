@@ -1442,6 +1442,10 @@ textarea.role-text { width: 100%; min-height: 5.2em; resize: vertical; line-heig
 .mt-layout { position: relative; }
 .mt-drawer[data-k="tasks"] { position: absolute; top: 0; right: 0; z-index: 20; width: min(560px, 45vw); background: var(--surface, #fff);
   border-left: 1px solid var(--reg-line); box-shadow: -8px 0 24px rgba(24, 24, 27, .08); padding: 0 0 12px 18px; max-height: calc(100vh - 24px); }
+/* «Ещё» — панель справа поверх документа, как в Планёрке (задание 17.11.2026) */
+.mt-layout:has(.mt-drawer[data-k="more"]:not([hidden])) { grid-template-columns: minmax(0, 1fr); }
+.mt-drawer[data-k="more"] { position: absolute; top: 0; right: 0; z-index: 20; width: min(400px, 40vw); background: var(--surface, #fff);
+  border-left: 1px solid var(--reg-line); box-shadow: -8px 0 24px rgba(24, 24, 27, .08); padding: 0 0 12px 18px; max-height: calc(100vh - 24px); }
 .mt-drawer h2 { font-size: 16px; margin: 0; }
 /* Шапка панели — заголовок слева, «Свернуть» справа (правка владелицы 20.10.2026, как в Планёрке: внизу/без заголовка кнопку
    не находили). Акцент системы приёмом метки .mt-state-acc: рамка и текст цветом акцента, без заливки. Шапка прилипает к верху. */
@@ -1460,6 +1464,7 @@ textarea.role-text { width: 100%; min-height: 5.2em; resize: vertical; line-heig
   /* узкий экран: панель — над документом, иначе после нажатия её не видно (замер 400 px: панель ниже документа на 5000 px) */
   .mt-drawer { position: static; order: -1; border-left: none; border-bottom: 1px solid var(--reg-line); padding: 0 0 12px; max-height: none; }
   .mt-drawer[data-k="tasks"] { position: static; width: auto; box-shadow: none; border-left: none; padding: 0 0 12px; max-height: none; }
+  .mt-drawer[data-k="more"] { position: static; width: auto; box-shadow: none; border-left: none; padding: 0 0 12px; max-height: none; }
 }
 
 /* ---- «Подготовка встречи» — путь встречи (стенд 13.10.26) ---------------------------------------------------- */

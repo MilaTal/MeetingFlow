@@ -272,7 +272,8 @@ async function renderMeetingReader(id, запрошеннаяВкладка) {
       ${документ ? `<a class="mt-btn" href="${экспорт}" target="_blank">${ВСТРЕЧА_ЗНАКИ.docx}Скачать .docx</a>` : ""}
       ${правкаДоступна ? полотноПереключатель(основаПолотна, режимПолотна, "reader-edit") : ""}
       ${плашкаНовее}
-      ${админ ? `<span class="reg-menu-wrap"><button type="button" class="mt-btn" id="meeting-more" aria-label="Ещё" aria-haspopup="menu">⋯</button></span>` : ""}
+      ${/* «Ещё» — как в Планёрке (задание 17.11.2026): панель справа, а не выпадающее меню; доступна всем, как там */ ""}
+      <span class="reg-menu-wrap"><button type="button" class="mt-btn" id="meeting-more" data-drawer="more" aria-label="Ещё" aria-expanded="false">⋯</button></span>
     </div>
     <div class="mt-layout">
       <article class="mt-doc">
@@ -323,6 +324,18 @@ async function renderMeetingReader(id, запрошеннаяВкладка) {
       тело = панельМатериаловHtml({ id, tab, источники, материалы, встреча, admin: админ });
     } else if (k === "notes") {
       тело = панельЗамечанийHtml({ ...протокол, date: встреча.date });
+    } else if (k === "more") {
+      // Панель «Ещё» — как в Планёрке (задание владелицы 17.11.2026): тот же вид справа, те же ссылки.
+      // «Экран этой планёрки» не добавляем: отдельного экрана живой встречи в MeetFlow нет.
+      const вёл = String(встреча.leader || встреча.leader_speaker || "").trim();
+      тело = `<h2>Ещё</h2>
+        <div class="page-sub">Вёл планёрку: ${esc(вёл && !/^говорящий/i.test(вёл) ? вёл : "не определён")}</div>
+        ${админ && протокол.generated_at ? `<div class="page-sub">собран ${esc(fmtRuDateTime(протокол.generated_at))}</div>` : ""}
+        <a class="btn-link" href="#meetings/${id}">Страница этой встречи</a>
+        <a class="btn-link" href="/meetings/${id}/recognition/export" target="_blank">Выгрузить итоги распознавания</a>
+        ${готовит ? `<a class="btn-link" href="#prep/${id}">Подготовка этой планёрки</a>` : ""}
+        <button type="button" class="btn-link" id="more-plan">План следующей</button>
+        ${готовит ? `<button type="button" class="btn-link" id="more-actions">Действия со встречей…</button>` : ""}`;
     }
     $d.innerHTML = `<div class="mt-drawer-head"><button type="button" class="mt-close" id="mt-close" aria-expanded="true" aria-controls="mt-drawer" title="Свернуть панель (Esc)">Свернуть ▾</button></div>${тело}`;
     const заголовокПанели = $d.querySelector(":scope > h2");
@@ -332,6 +345,13 @@ async function renderMeetingReader(id, запрошеннаяВкладка) {
     $d.style.top = k === "tasks" && ряд && слой && getComputedStyle($d).position === "absolute"
       ? `${Math.round(ряд.getBoundingClientRect().bottom - слой.getBoundingClientRect().top + 8)}px` : "";
     if (k === "materials") подключитьМатериалы(id, tab);
+    if (k === "more") {
+      document.getElementById("more-plan")?.addEventListener("click", () =>
+        открыть("plan", document.getElementById("meeting-more")));
+      document.getElementById("more-actions")?.addEventListener("click", () => менюВстречи(
+        document.getElementById("more-actions"), встреча,
+        { все: встречи, перерисовать: () => renderMeetingReader(id, tab) }));
+    }
     document.getElementById("mt-close").addEventListener("click", () => {
       $d.hidden = true; $d.dataset.k = ""; _открытаяПанельВстречи = "";
       кнопка?.setAttribute("aria-expanded", "false");
@@ -344,27 +364,6 @@ async function renderMeetingReader(id, запрошеннаяВкладка) {
     const панель = $main.querySelector('.mt-btn[data-drawer="agreements"]');
     if (панель) await открыть("agreements", панель);
   }
-  // «⋯» — одно меню со встречей (Б4): те же пункты, что в реестре и подготовке.
-  // Порядок и подписи — как в «Ещё» Планёрки (задание владелицы 16.11.2026): сначала выгрузка распознавания,
-  // затем подготовка этой встречи; «План следующей» остаётся ниже.
-  const допПункты = [{ act: "recognition-export", label: "Выгрузить итоги распознавания" },
-                     { act: "prep", label: "Подготовка этой планёрки" },
-                     { act: "plan-next", label: "План следующей" }];
-  if (админ && hasMin) допПункты.push({ act: "notes", label: `Замечания${замечания ? ` — ${замечания}` : ""}` });
-  document.getElementById("meeting-more")?.addEventListener("click", () => менюВстречи(document.getElementById("meeting-more"), встреча,
-    { все: встречи, перерисовать: () => renderMeetingReader(id, tab), доп: допПункты,
-      приВыборе: (акт) => {
-        if (акт === "recognition-export") {
-          window.open(`/meetings/${id}/recognition/export`, "_blank");
-          return;
-        }
-        if (акт === "prep") {                 // как «Подготовка этой планёрки» в Планёрке — рабочее место этой встречи
-          location.hash = `#prep/${id}`;
-          return;
-        }
-        const к = document.querySelector(`.mt-btn[data-drawer="${акт === "plan-next" ? "plan" : "notes"}"]`);
-        открыть(акт === "plan-next" ? "plan" : "notes", к);
-      } }));
   const наEsc = ev => {
     if (ev.key !== "Escape") return;
     if (!document.getElementById("mt-drawer")) { document.removeEventListener("keydown", наEsc); return; }
