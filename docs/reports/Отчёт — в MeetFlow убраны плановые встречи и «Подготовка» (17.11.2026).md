@@ -33,3 +33,5 @@
 
 Файлы: `web/app.py` (запрет будущей даты), `web/static/index.html`, `app.js`, `nav.js`, `meeting.js`.
 База — только снятие встречи № 10.
+
+Хэш коммита: **`1f0b575`** (GitHub `dogonyaem-planerku`).
