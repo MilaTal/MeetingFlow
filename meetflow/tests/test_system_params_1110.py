@@ -5,6 +5,8 @@
 «Параметры системы» (системные сообщения, ожидает ввода, состояние базы, диск и копии, пороги)."""
 from datetime import date, datetime, timedelta
 
+import os
+
 import pytest
 from conftest import TEAM, TRANSCRIPT
 from fastapi.testclient import TestClient
@@ -185,6 +187,10 @@ def test_awaiting_input_groups(client, tmp_path):
     d = tmp_path / "in"
     d.mkdir()
     (d / "без даты.txt").write_text("x", encoding="utf-8")
+    # время файла — старое: с 16.11.2026 дата берётся и по времени файла, а здесь нужен именно файл «без даты»
+    import time
+    старое = time.mktime((2020, 1, 1, 12, 0, 0, 0, 0, -1))
+    os.utime(d / "без даты.txt", (старое, старое))
     client.app.state.store.set_setting("watch_folder", str(d), client.pid)
     r = client.get("/api/monitoring/awaiting-input", headers=SUPER).json()
     g = {x["key"]: x for x in r["groups"]}

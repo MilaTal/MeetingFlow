@@ -145,7 +145,9 @@ def test_pipeline_end_to_end(store, project, meeting, make_pipe):
     assert ("| 1 | подготовьте регламент склада до 10.10 | в работе | Петрова А. | 10.10.2026 | 01.10.2026 | "
             "запись |") in proto
     cards = p.cards.list(project)
-    assert cards[0]["kind"] == "confirm_person" and cards[0]["payload"]["full_name"] == "Кузнецов Олег"
+    # порядок карточек не важен: контрольная расшифровка 17.11.2026 добавляет свою карточку качества
+    карточка = next(c for c in cards if c["kind"] == "confirm_person")
+    assert карточка["payload"]["full_name"] == "Кузнецов Олег"
 
 
 def test_pipeline_rerun_does_not_duplicate(store, project, meeting, make_pipe):

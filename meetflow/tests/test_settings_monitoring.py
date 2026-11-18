@@ -2,6 +2,7 @@
 и мониторинг (приём записей, база голосов, прогоны и расход)."""
 import hashlib
 import json
+import os
 import sqlite3
 import time
 from datetime import date, datetime
@@ -153,6 +154,9 @@ def test_first_step_changes_nothing_and_previews(client, tmp_path):
     (d / MARKER).write_text("метка", encoding="utf-8")
     (d / "Встреча 01.10.2026.txt").write_text(TRANSCRIPT, encoding="utf-8")
     (d / "без даты.txt").write_text("x", encoding="utf-8")
+    # Время файла — старое: с 16.11.2026 дата берётся и по времени файла, а «без даты» должен остаться без даты
+    старое = time.mktime((2020, 1, 1, 12, 0, 0, 0, 0, -1))
+    os.utime(d / "без даты.txt", (старое, старое))
     url = f"/api/projects/{client.pid}/settings/watch-folder"
     r = client.post(url, json={"path": str(d), "path_repeat": str(d)}, headers=SUPER).json()
     assert r["confirm_needed"] and r["preview"]["files"] == 2 and r["preview"]["first_pass"] == 1

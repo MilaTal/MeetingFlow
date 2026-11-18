@@ -219,12 +219,15 @@ def test_units_off_by_default_theme(store, project, theme):
     assert p.run(project, mid).units_added == 0 and _units(store, mid) == []
 
 
-def test_units_budget_out_keeps_protocol(store, project, make_pipe):
+def test_units_budget_out_reports_limit_and_saves_nothing(store, project, make_pipe):
+    """Предел вызовов на шаге единиц: собрать нечего — протокол пустой и не сохраняется (слово владелицы 12.11.2026),
+    но причина остановки видна в итоге. До 18.11.2026 тест ждал сохранения пустого протокола."""
     mid = _meeting(store, project, "2026-10-01")
     p = make_pipe()
     p.ingest(project, mid, "t 01.10.2026.txt", MEET1.encode())
     rep = p.run(project, mid, BudgetLimits(max_calls=2, verify_reserve=0))
-    assert rep.protocol_saved and "Единицы встречи не собраны" in rep.detail
+    assert not rep.protocol_saved and "Единицы встречи не собраны" in rep.detail
+    assert rep.units_added == 0 and rep.tasks_added == 0
 
 
 def test_rerun_keeps_human_removed(store, project, make_pipe):

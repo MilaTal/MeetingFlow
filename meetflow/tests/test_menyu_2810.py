@@ -61,10 +61,10 @@ def test_выбор_проекта_над_меню():
 
 
 def test_подготовка_при_всех_проектах_выбор_и_создать_проект():
-    prep = NAV[NAV.index("async function renderPrep()"):NAV.index("routes.prep = renderPrep;")]
+    prep = NAV[NAV.index("async function renderPrep(rest)"):NAV.index("routes.prep = renderPrep;")]
     assert "if (!выбранныйПроект()) { renderPrepВыборПроекта(); return; }" in prep
     assert 'if (нуженПроект("Подготовка встречи")) return;' not in prep        # голой подсказки больше нет
-    выбор = NAV[NAV.index("function renderPrepВыборПроекта()"):NAV.index("async function renderPrep()")]
+    выбор = NAV[NAV.index("function renderPrepВыборПроекта()"):NAV.index("async function renderPrep(rest)")]
     assert 'id="prep-project-select"' in выбор and "выбратьПроект(e.target.value)" in выбор
     assert "${создатьПроектHtml()}" in выбор and "подключитьСозданиеПроекта();" in выбор
     # при выбранном проекте — прежняя страница и «Создать проект» в конце

@@ -47,7 +47,16 @@ def app_with_deepseek(tmp_path, monkeypatch):
 
     def fake_urlopen(req, timeout=None):
         body = json.loads(req.data)
-        text = MockLLM().complete(body["messages"][0]["content"], body["messages"][1]["content"]).text
+        system, user = body["messages"][0]["content"], body["messages"][1]["content"]
+        # Назначение вызова в запросе не передаётся, поэтому определяем его по тексту задачи в системном сообщении:
+        # без этого мок отдавал {"echo": ""} — протокол выходил пустым (18.11.2026)
+        if "кратко изложи обсуждение по разделам протокола" in system:
+            назначение = "protocol"
+        elif "найди поручения в куске записи" in system:
+            назначение = "extract_tasks"
+        else:
+            назначение = ""
+        text = MockLLM().complete(system, user, purpose=назначение).text
         return _Resp(json.dumps({"model": "deepseek-flash", "choices": [{"message": {"content": text},
                                  "finish_reason": "stop"}], "usage": {"prompt_tokens": 100, "completion_tokens": 10}}).encode())
     monkeypatch.setattr(urllib.request, "urlopen", fake_urlopen)

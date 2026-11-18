@@ -115,9 +115,14 @@ def test_участники_кодом_по_голосам(store, project, meeti
     assert rep.participants.startswith("участники кодом: 2")
 
 
-def test_участники_без_голосов_как_раньше(store, project, meeting, theme, tmp_path):
+def test_участники_без_голосов_пишутся_кодом(store, project, meeting, theme, tmp_path):
+    """Перевёрнут 27.10.2026 (задание владелицы 26.10): участников пишет код, модель — никогда. Голосов нет, но
+    однозначное обращение по имени в разговоре (12.11.2026) — тоже участник: раздел заполняется кодом."""
     _p, gen, rep = _сборка(store, project, meeting, theme, tmp_path, voice=False)
-    assert "- Участники" in gen.protocol_system and not rep.participants
+    assert "- Участники" not in gen.protocol_system
+    assert rep.participants.startswith("участники кодом: 1")
+    proto = store.get("meetings", meeting)["protocol_md"] or ""
+    assert "## Участники" in proto and "не опознаны: в записи нет подписей по голосам" not in proto
 
 
 def test_finish_reason_в_журнале(store, project, meeting, theme, tmp_path):

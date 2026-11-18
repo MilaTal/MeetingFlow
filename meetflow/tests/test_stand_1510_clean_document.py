@@ -51,7 +51,7 @@ def test_more_than_60_goes_to_journal_not_document(store, project, make_pipe):
     mid = store.insert("meetings", project_id=project, date="2026-10-01", label="встреча")
     p.ingest(project, mid, FILE, "[00:01:00] Игнатов Иван: Пломбы цистерн на станции проверяем по графику.\n".encode())
     p.run(project, mid)
-    md = store.get("meetings", mid)["protocol_md"]
+    md = store.get("meetings", mid)["protocol_md"] or ""      # пустой протокол не сохраняется (12.11.2026) — это норма
     assert "сверк" not in md.lower()
     run = [r for r in p.journal.records if r.get("run") == mid][-1]
     assert run.get("closing_mentioned") == 65

@@ -35,7 +35,7 @@ def test_more_than_60_mentioned_is_one_protocol_line(store, project, make_pipe):
     p.ingest(project, mid, "t 01.10.2026.txt",
              "[00:01:00] Игнатов Иван: Пломбы цистерн на станции проверяем по графику.\n".encode())
     p.run(project, mid)
-    proto = store.get("meetings", mid)["protocol_md"]
+    proto = store.get("meetings", mid)["protocol_md"] or ""    # пустой протокол не сохраняется (12.11.2026) — это норма
     # перевёрнут 15.10.26 (находка стенда 30, правило владельца 13.10.26): документ чистый — пометка в журнале прогона
     assert "сверк" not in proto.lower()
     assert [r for r in p.journal.records if r.get("run") == mid][-1]["closing_mentioned"] == 65

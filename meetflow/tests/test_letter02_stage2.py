@@ -50,7 +50,7 @@ def test_task_removed_by_voice(store, project, make_pipe):
     t = store.get("tasks", ids[0])
     assert t["status"] == "dropped" and rep.tasks_dropped == 1
     # перевёрнут 27.10.2026 (ERP 26.10.2026: снятые задачи не показываются нигде, раздела «Снято по встрече» нет)
-    md = store.get("meetings", mid)["protocol_md"]
+    md = store.get("meetings", mid)["protocol_md"] or ""      # пустой протокол не сохраняется — None это норма
     assert "Снято" not in md and "регламент" not in md.lower()
     hist = store.q("SELECT * FROM task_history WHERE task_id=? ORDER BY id DESC", (ids[0],))[0]
     assert "снимаем" in hist["evidence_quote"] and hist["new_status"] == "dropped"

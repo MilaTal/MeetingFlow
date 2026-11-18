@@ -901,8 +901,8 @@ class MeetingPipeline:
         elif not w.available():
             причина = "faster-whisper не установлен на этой машине"
         if причина:
-            self.journal.write(purpose="control_transcript", meeting_id=meeting_id, состояние="пропущено",
-                               причина=причина)
+            # Шаг штатно пропущен: строку в журнал вызовов не пишем (18.11.2026) — журнал считает вызовы моделей
+            # «строка на вызов + итог», и служебная отметка ломала этот счёт. Причина видна в итоге сборки.
             return 0
         if self.s.q("SELECT id FROM sources WHERE meeting_id=? AND name LIKE '%контрольная Whisper%' "
                     "AND removed_at IS NULL", (meeting_id,)):
@@ -1150,6 +1150,25 @@ class MeetingPipeline:
         return {"markdown": markdown, "sections": sections, "calls": budget.calls,
                 "cost_usd": round(budget.cost_usd, 4), "model": self.gen.model}
 
+    def _журнал_итога(self, meeting_id: int, rep: RunReport, budget, closing_mentioned: int) -> None:
+        """Итог прогона в журнал вызовов — общий путь для обычной сборки и для пустого протокола (18.11.2026):
+        пустой протокол выходит раньше, и без этого записи с `run` не было — тесты и разбор не видели прогон."""
+        rep.calls, rep.cost_usd = budget.calls, round(budget.cost_usd, 4)
+        rep.step_calls = dict(budget.steps)
+        self.journal.write(run=meeting_id, status=rep.status, calls=rep.calls, step_calls=rep.step_calls,
+                           cost_usd=rep.cost_usd,
+                           added=rep.tasks_added, held=rep.tasks_held, closed=rep.tasks_closed,
+                           dropped=rep.tasks_dropped, skipped_by_rule=rep.skipped_by_rule,
+                           stopped_by=budget.stopped_by, stand=self.stand, closing_mentioned=closing_mentioned,
+                           **({"polnota_rasshifrovki": rep.completeness} if rep.completeness else {}),
+                           **({"tekst_po_zapisi": rep.text_check, "tekst_ubrano": rep.text_removed}
+                              if rep.text_check else {}),
+                           **({"zadachi_po_shagam": rep.tasks_by_steps} if rep.tasks_by_steps else {}),
+                           **({"ukrupnenie": rep.ukrupnenie} if rep.ukrupnenie else {}),
+                           **({"uchastniki": rep.participants} if rep.participants else {}),
+                           answered_by={k: sorted(set(v)) for k, v in budget.answered.items() if not k.startswith("_")},
+                           **self.tool_info)
+
     def run(self, project_id: int, meeting_id: int, limits: BudgetLimits | None = None) -> RunReport:
         lock = self._meeting_lock(meeting_id)
         if not lock.acquire(blocking=False):
@@ -1172,6 +1191,10 @@ class MeetingPipeline:
         rep = RunReport(meeting_id)
         self._второй_текст = ""          # выгрузка ВКС вторым текстом — по источникам, ниже (записка 05.11.2026)
         self._контроль_блок = ""         # сверка с контрольной Whisper (17.11.2026) — не речь, отдельным блоком
+        # Пометка об участниках для шапки (18.11.2026): присваивалась только в ветке сочинённого протокола, а читается
+        # ниже при любом исходе. Остановка по пределу оставляла её несвязанной, и сохранение падало
+        # UnboundLocalError — прогон отдавал «Сбой при сохранении» вместо «остановлено по пределу».
+        участники_примечание = ""
         # признак сборки: номер встречи повторяется (стенд, удаление), по нему счёт вызовов не складывается
         self.journal.run_id = f"{meeting_id}-{datetime.now():%Y%m%dT%H%M%S}-{threading.get_ident()}"
         rep.run_id = self.journal.run_id
@@ -1223,8 +1246,7 @@ class MeetingPipeline:
             if контроль.get("строка"):
                 rep.source_reason = "; ".join(x for x in (rep.source_reason, контроль["строка"]) if x)
             elif контроль.get("причина"):
-                self.journal.write(purpose="control_transcript", meeting_id=meeting_id,
-                                   состояние="пропущено", причина=контроль["причина"])
+                pass        # штатный пропуск шага: в журнал вызовов не пишем (18.11.2026)
             _к = контроль.get("качество")
             if _к is not None and _к.замечания:
                 _заголовок = "Качество расшифровки ниже нормы"
@@ -1307,6 +1329,8 @@ class MeetingPipeline:
         limited = False                           # дополнение (единицы, проверка) остановлено пределом (01/8)
         mass_closing = None
         участники_кодом: list[str] = []
+        голоса_ждут = False               # «идёт разбор голосов» — для примечания в итоге; ставится в ветке протокола,
+        #                                   а читается и при остановке по пределу (18.11.2026: UnboundLocalError)
         ures = None
         active: list[dict] = []
         try:
@@ -1929,6 +1953,9 @@ class MeetingPipeline:
                 for tid, quote in closings:
                     if self.reg.set_status(tid, TaskStatus.DONE, "meeting", quote, meeting_date=mdate):
                         closed += 1
+                # Счёт в отчёт — сразу: пустой протокол выходит раньше общей сборки отчёта (18.11.2026),
+                # и без этого закрытые задачи показывались как «0 закрыто».
+                rep.tasks_closed = closed
                 for tid, quote in removals:
                     if self.reg.set_status(tid, TaskStatus.DROPPED, "meeting", quote, meeting_date=mdate):
                         rep.tasks_dropped += 1
@@ -2108,14 +2135,23 @@ class MeetingPipeline:
                 # готовности»). По минутной записи переговорки сборка писала шапку и «Новых задач не зафиксировано» —
                 # реестр показывал «протокол готов», а внутри было пусто. Прежний непустой протокол не стираем.
                 from .protokol_sostoyanie import пустой as _протокол_пустой
-                if not added and _протокол_пустой(protocol_md):
+                # «Договорённости» — собранные единицы встречи: протокол с решениями, но без новых задач не пустой
+                # (18.11.2026: без этого протокол с четырьмя единицами считался пустым и не сохранялся)
+                if not added and _протокол_пустой(protocol_md, задач=0,
+                                                  договорённостей=int(rep.units_added or 0)):
                     прежний = meeting.get("protocol_md") or ""
                     self.s.update("meetings", meeting_id,
                                   protocol_md=прежний or None,
                                   protocol_built_at=meeting.get("protocol_built_at") if прежний else None,
                                   build_note="пустой протокол не сохранён: в записи нет ни задач, ни решений")
                     rep.protocol_saved = False
-                    rep.detail = "пустой протокол не сохранён: в записи нет ни задач, ни решений"
+                    # Причина остановки по пределу важнее: «пустой протокол» её не затирает (18.11.2026).
+                    if not rep.detail:
+                        rep.detail = "пустой протокол не сохранён: в записи нет ни задач, ни решений"
+                    if rep.status == "ok" and limited:
+                        rep.status = "ok_limited"
+                    # Итог прогона в журнал — до выхода: иначе записи с `run` не остаётся (18.11.2026)
+                    self._журнал_итога(meeting_id, rep, budget, closing_mentioned)
                     return rep
                 # Пересборка потеряла абзацы (варианты А и Б, слово владелицы 08.11.2026): сравнение дословное и кодом.
                 # А — карточка с прежним текстом, чтобы потеря не была молчаливой; Б — абзацы, опирающиеся на запись,
@@ -2281,9 +2317,9 @@ class MeetingPipeline:
                                          protocol_md=protocol_md, model=", ".join(dict.fromkeys(wrote)),
                                          built_at=built)
         except Exception as e:  # всё откатилось — реестр не наполовину
-            rep.status, rep.detail = "error", "Сбой при сохранении — изменения не применены."
-            self.cards.open(project_id, "technical", "Сбой сохранения прогона", {"error": type(e).__name__},
-                            meeting_id)
+            rep.status, rep.detail = "error", f"Сбой при сохранении — изменения не применены ({type(e).__name__}: {e})."
+            self.cards.open(project_id, "technical", "Сбой сохранения прогона",
+                            {"error": f"{type(e).__name__}: {e}"}, meeting_id)
             return rep
         rep.tasks_added, rep.tasks_closed = len(added), closed
         if stopped is None and "ноль на шаге" in rep.tasks_by_steps:
@@ -2315,23 +2351,9 @@ class MeetingPipeline:
             self.cards.open(project_id, "review_finding", title,
                             {"issue": f["issue"], "quote": f.get("quote", ""), "severity": "major", "by": by,
                              "source_line": f.get("source_line", "")}, meeting_id)
-        rep.calls, rep.cost_usd = budget.calls, round(budget.cost_usd, 4)
-        rep.step_calls = dict(budget.steps)
         if rep.status == "ok" and limited:
             rep.status = "ok_limited"         # сохранено, но часть остановлена пределом — не «успешный» (01/8)
-        self.journal.write(run=meeting_id, status=rep.status, calls=rep.calls, step_calls=rep.step_calls,
-                           cost_usd=rep.cost_usd,
-                           added=rep.tasks_added, held=rep.tasks_held, closed=rep.tasks_closed,
-                           dropped=rep.tasks_dropped, skipped_by_rule=rep.skipped_by_rule,
-                           stopped_by=budget.stopped_by, stand=self.stand, closing_mentioned=closing_mentioned,
-                           **({"polnota_rasshifrovki": rep.completeness} if rep.completeness else {}),
-                           **({"tekst_po_zapisi": rep.text_check, "tekst_ubrano": rep.text_removed}
-                              if rep.text_check else {}),
-                           **({"zadachi_po_shagam": rep.tasks_by_steps} if rep.tasks_by_steps else {}),
-                           **({"ukrupnenie": rep.ukrupnenie} if rep.ukrupnenie else {}),
-                           **({"uchastniki": rep.participants} if rep.participants else {}),
-                           answered_by={k: sorted(set(v)) for k, v in budget.answered.items() if not k.startswith("_")},
-                           **self.tool_info)
+        self._журнал_итога(meeting_id, rep, budget, closing_mentioned)
         # Итог сборки — к версии протокола (правки ERP/Планёрки 03–06.11, п. 12): у каждой версии свой, чтобы
         # «почему так вышло» воспроизводилось. Пишется в конце: к этому месту итог уже сложился целиком.
         if версия_id is not None:

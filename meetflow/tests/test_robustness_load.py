@@ -183,7 +183,14 @@ def test_same_core_three_themes(store, project, meeting):
         p.ingest(project, mid, f"{name}.txt", (TRANSCRIPT + f"\n[00:09:00] {name}\n").encode())
         rep = p.run(project, mid)
         proto = store.get("meetings", mid)["protocol_md"]
-        assert rep.status == "ok" and proto.startswith(f"# {th.word('protocol')}")
+        # 18.11.2026: с правилом «пустой протокол не сохраняем» (слово владелицы 12.11.2026) тема, где стражи сняли
+        # все задачи, протокола не даёт — это штатный исход, а не ошибка ядра. Ядро проверяется тем, что прогон
+        # завершается ok, а сохранённый протокол начинается с заголовка темы и держит порядок её разделов.
+        assert rep.status == "ok"
+        if not rep.protocol_saved:
+            assert proto is None and "пустой протокол не сохранён" in rep.detail
+            continue
+        assert proto.startswith(f"# {th.word('protocol')}")
         # перевёрнут 27.10.2026 (ERP 26.10.2026): раздел без строк не пишется — заглушки «Не обсуждалось» нет;
         # разделы, которые есть, идут в порядке скелета темы
         heads = [ln[3:] for ln in proto.splitlines() if ln.startswith("## ") and ln[3:] in th["protocol_skeleton"]]

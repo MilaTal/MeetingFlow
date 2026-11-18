@@ -257,7 +257,7 @@ class IntakeService:
                                                 "в папку дня (2026-11-12)"})
         from . import proekt_zapisi as pz
         другие = pz.папки_других(self.s, project_id)
-        перенесены: set[str] = set()          # отпечатки файлов, уже уехавших в «обработано» при приёме
+        перенесены: dict[str, Path] = {}      # отпечаток → куда файл уехал в «обработано» при приёме
         for item in scan.ready:
             if pz.под_другим(item.path, другие):
                 continue                     # подпапка — приёмник другого проекта: её обходит тот проект
@@ -267,8 +267,7 @@ class IntakeService:
             рабочий = self._рабочая_копия(item.path)
             if рабочий is not None:
                 fi.known.add(item.digest)
-                fi.done(item.path)
-                перенесены.add(item.digest)
+                перенесены[item.digest] = fi.done(item.path)
                 item = IntakeItem(рабочий, item.meeting_date, item.digest)
             # Проект записи (27.10.2026): подпапка проекта или подпроекта — он; корень общей папки — по названию в имени
             # файла; не определился — встреча с пометкой «проект не определён» и карточка, сборка ждёт выбора
@@ -288,7 +287,12 @@ class IntakeService:
                 итог = self._переговорка(проект_приёма, item, чей, result)
                 if итог is not None:
                     if итог.get("status") == "held":
-                        result["held"].append(item.path.name)      # ждёт инструментов: рабочая копия остаётся
+                        # Ждёт инструментов: исходник возвращаем в приёмник, рабочую копию убираем — иначе файл
+                        # «ушёл в обработано», а повторный проход его уже не увидит (18.11.2026)
+                        self._вернуть_в_приёмник(fi.folder, перенесены.get(item.digest))
+                        fi.known.discard(item.digest)
+                        self._убрать_копию(item.path)
+                        result["held"].append(item.path.name)
                     else:
                         fi.known.add(item.digest)
                         if item.digest in перенесены:
@@ -302,8 +306,11 @@ class IntakeService:
                 # само имя файла хранится отдельным полем
                 метка = тема_из_приёмника(item.path.name) or None
                 дата = item.meeting_date.isoformat()
-                все = self.s.q("SELECT id, label FROM meetings WHERE project_id=? AND date=? AND deleted_at IS NULL "
-                               "ORDER BY id", (общие, дата))
+                # Та же встреча дня ищется и в «Общих встречах», и в проекте папки: первая запись дня уже ушла из
+                # «Общих» в проект по содержанию (`_по_содержанию`), и без проекта папки вторая запись того же дня
+                # заводила вторую встречу — выгрузка ВКС рядом с записью переставала к ней прикрепляться (18.11.2026)
+                все = self.s.q("SELECT id, label FROM meetings WHERE project_id IN (?, ?) AND date=? AND deleted_at "
+                               "IS NULL ORDER BY id", (общие, project_id, дата))
                 # выгрузка ВКС рядом с записью — та же встреча, когда время в именах совпало (записка 05.11.2026, п. 6)
                 подходят = [r for r in все if self._по_времени(r["id"], item.path.name)]
                 таже = next((r for r in подходят if (r["label"] or None) == метка),
@@ -345,7 +352,7 @@ class IntakeService:
                                          {"existing_meeting": res["existing_meeting"],
                                           "что_делать": "пересобрать протокол — кнопкой на этой встрече"},
                                          int(res["existing_meeting"]))
-                moved = None
+                moved = перенесены.get(item.digest)
                 if item.digest in перенесены:
                     self._убрать_копию(item.path)          # исходник уже в «обработано» при приёме
                 elif item.path.exists():  # запись мог уже удалить конвейер после распознавания
@@ -367,8 +374,16 @@ class IntakeService:
                     if rep.get("status") != "queued":
                         self._after_build(project_id, mid, item.path.name, moved, rep)
             elif st == "held":
+                # Запись не обработана — возвращаем исходник в приёмник, чтобы повторный проход её нашёл
+                self._вернуть_в_приёмник(fi.folder, перенесены.get(item.digest))
+                fi.known.discard(item.digest)
+                self._убрать_копию(item.path)
                 result["held"].append(item.path.name)          # ждёт на месте
             else:
+                # Файл не принят — он тоже возвращается в приёмник: владелица видит его и может убрать (18.11.2026)
+                self._вернуть_в_приёмник(fi.folder, перенесены.get(item.digest))
+                fi.known.discard(item.digest)
+                self._убрать_копию(item.path)
                 result["rejected"].append(item.path.name)
                 self.pipe.cards.open(project_id, "technical", f"Файл из папки не принят: {item.path.name}",
                                      {"reason": res.get("reason", "")})
@@ -409,6 +424,25 @@ class IntakeService:
                 папка = path.parent
                 if not any(папка.iterdir()):
                     папка.rmdir()
+        except OSError:
+            pass
+
+    def _вернуть_в_приёмник(self, папка: Path, перенесённый: Path | None) -> None:
+        """Вернуть файл из «обработано» в корень приёмника: запись не обработана (ждёт инструментов или не принята).
+
+        Правило «файл уходит при приёме» (16.11.2026) касается принятых записей; необработанная должна остаться на
+        виду, иначе повторный проход её не найдёт — она уже в «обработано». Возврат с уникальным именем: в приёмнике
+        мог появиться новый файл с тем же именем.
+        """
+        if not перенесённый or not перенесённый.exists() or перенесённый.parent.name != DONE_DIR:
+            return
+        цель = папка / перенесённый.name
+        n = 1
+        while цель.exists():
+            цель = папка / f"{перенесённый.stem} ({n}){перенесённый.suffix}"
+            n += 1
+        try:
+            перенесённый.replace(цель)
         except OSError:
             pass
 

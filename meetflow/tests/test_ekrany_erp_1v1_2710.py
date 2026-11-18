@@ -68,11 +68,20 @@ def test_фронт_erp_целиком_светлая_тема_и_выбор_п�
 
 def test_встречи_без_формы_создания_и_подготовка_с_ближайшей():
     nav = (STATIC / "nav.js").read_text(encoding="utf-8")
-    proto = nav[nav.index("async function renderProtocols()"):nav.index("routes.meetings = ")]
-    # перевёрнуто 28.10.2026 (решение владелицы): было заголовком «Встречи по проекту», стало «Реестр встреч»
-    assert "<h1>Реестр встреч</h1>" in proto and "prep-new-form" not in proto and "Новая встреча заводится в «Подготовке встречи»" in proto
-    assert "Ближайшая встреча ${esc(fmtRuDate(ближайшая.date))} — план встречи" in proto
-    prep = nav[nav.index("async function renderPrep()"):nav.index("routes.prep = renderPrep;")]
+    # 18.11.2026: срез — сама функция до следующей функции; прежний конец по `routes.meetings =` захватывал
+    # подготовку и форму создания, и проверка «формы здесь нет» падала на чужом коде.
+    н = nav.index("async function renderProtocols()")
+    хвост = nav[н + 10:]
+    кандидаты = [x for x in (хвост.find(chr(10) + "function "), хвост.find(chr(10) + "async function ")) if x >= 0]
+    proto = nav[н:н + 10 + min(кандидаты)] if кандидаты else nav[н:nav.index("routes.meetings = ")]
+    # перевёрнуто 28.10.2026 (решение владелицы): было «Встречи по проекту», стало «Реестр встреч»; 17.11.2026 —
+    # встречи появляются при поступлении записи, плановых и формы создания здесь нет
+    assert "<h1>Реестр встреч</h1>" in proto and "prep-new-form" not in proto
+    assert "Встречи появляются при поступлении записи — плановых здесь нет" in proto
+    # 17.11.2026: в реестре встреч блока «Ближайшая встреча — план встречи» больше нет — он на странице
+    # «Подготовка встречи» (проверяется ниже), а реестр показывает только пришедшие записи
+    assert "Ближайшая встреча ${esc(fmtRuDate(ближайшая.date))} — план встречи" not in proto
+    prep = nav[nav.index("async function renderPrep(rest)"):nav.index("routes.prep = renderPrep;")]
     for s in ("Ближайшая встреча: ${esc(fmtRuDate(б.date))}, ${esc(деньНедели(б.date))}", "Открыть план встречи",
               "изменить дату", "Другая дата…", "сформировать план", "план собран", "протокол готов", "встреча ещё не прошла",
               "Будущие и сегодняшние встречи"):
