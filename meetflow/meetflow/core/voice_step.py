@@ -175,6 +175,9 @@ def process(wav_path: str | Path, text: str, meta: dict, *, meeting_id: int, mee
             except (voice_rule.BazaNeTa, voice_rule.NastroykaNeTa) as exc:
                 # Не та база или настройка — это не повод терять текст: строки останутся «Говорящий N».
                 notes.append(f"имена по голосу не подставлены: {exc}")
+        # Длинные строки — на предложения по голосам ДО подписи (перенос из Планёрки, 18.11.2026): иначе строка
+        # в 80 секунд с двумя говорящими получает одно имя — того, кто говорил дольше, хотя начинал другой.
+        lines, times = diarize.split_long_lines(lines, times, segments)
         # Метка времени — из времён реплик: `segment_lines` её не содержит, а в расшифровке она нужна и до, и после подписи.
         stamped = [f"{_stamp(a)}\t{phrase}" for phrase, (a, _b) in zip(lines, times)]
         labelled, signed = diarize.label_lines(stamped, times, segments, names=names)

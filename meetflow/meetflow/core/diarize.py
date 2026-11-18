@@ -13,6 +13,7 @@
 from __future__ import annotations
 
 import os
+import re
 import time
 from pathlib import Path
 
@@ -22,6 +23,8 @@ os.environ.setdefault("PYANNOTE_METRICS_ENABLED", "false")
 
 MODEL_NAME = "pyannote/speaker-diarization-3.1"
 NEAREST_SEC = 1.5
+LONG_LINE_SEC = 30.0     # строка длиннее — делим по предложениям и голосам (перенос из Планёрки, 18.11.2026)
+MIN_SEGMENT_SEC = 5.0    # голос короче не даёт имени строке: «Доброе утро» без отпечатка пропускается
 
 
 def enabled() -> bool:
@@ -120,11 +123,64 @@ def _diarize_here(wav_path: Path) -> tuple[list[dict], dict]:
                  "device": device, "path": "pyannote (закрытые модели)"}
 
 
+def _первый_голос(times: tuple[float, float], segments: list[dict]) -> str | None:
+    """Самый ранний голос строки не короче MIN_SEGMENT_SEC — запасное правило длинной строки (как Планёрка).
+
+    Строка дольше 30 секунд часто начинается с короткой реплики, а длиннее в ней говорит другой: правило
+    «наибольшего пересечения» подписало бы её вторым. Берём того, кто заговорил первым и держался не меньше
+    5 секунд; короткие «Доброе утро» без отпечатка пропускаются."""
+    начало, конец = float(times[0]), float(times[1])
+    подходящие = [seg for seg in segments
+                  if float(seg["end"]) - float(seg["start"]) >= MIN_SEGMENT_SEC
+                  and min(конец, float(seg["end"])) > max(начало, float(seg["start"]))]
+    if not подходящие:
+        return None
+    return min(подходящие, key=lambda seg: max(начало, float(seg["start"])))["speaker"]
+
+
+def split_long_lines(lines: list[str], times: list[tuple[float, float]], segments: list[dict],
+                     *, long_sec: float = LONG_LINE_SEC) -> tuple[list[str], list[tuple[float, float]]]:
+    """Длинную строку распознавания — на предложения по голосам (перенос из Планёрки, 18.11.2026).
+
+    Строка дольше 30 секунд почти всегда содержит несколько говорящих. Делим её по знакам конца предложения,
+    каждому предложению отводим долю времени по длине текста; голос потом берёт `label_lines` по пересечению с
+    этой долей. Пословных времён у распознавания нет, границы приблизительные — но внутри строки больше не
+    остаётся чужих реплик под одним именем. Возвращает строки и времена; порядок и число строк совпадают."""
+    spans = sorted(segments, key=lambda s: float(s["start"]))
+    out_lines, out_times = [], []
+    for line, (начало, конец) in zip(lines, times):
+        начало, конец = float(начало), float(конец)
+        if конец - начало <= long_sec or not (line or "").strip():
+            out_lines.append(line)
+            out_times.append((начало, конец))
+            continue
+        предложения = [x.strip() for x in re.split(r"(?<=[.!?])\s+", line) if x.strip()]
+        if len(предложения) < 2:
+            out_lines.append(line)                             # одно предложение — запасное правило в assign
+            out_times.append((начало, конец))
+            continue
+        всего = sum(len(x) for x in предложения) or 1
+        смещение = начало
+        for предложение in предложения:
+            доля = (конец - начало) * len(предложение) / всего
+            кусок_конец = min(конец, смещение + доля)
+            out_lines.append(предложение)
+            out_times.append((смещение, кусок_конец))
+            смещение = кусок_конец
+    return out_lines, out_times
+
+
 def assign(times: list[tuple[float, float]], segments: list[dict]) -> list[str | None]:
     """Голос для каждой реплики: с наибольшим пересечением по времени; без пересечения — ближайший не дальше
-    NEAREST_SEC; иначе None."""
+    NEAREST_SEC; иначе None. Для строки дольше LONG_LINE_SEC — самый ранний голос не короче MIN_SEGMENT_SEC
+    (правило Планёрки 12.11.2026: длинную строку начинал один, а говорил дольше другой)."""
     out: list[str | None] = []
     for start, end in times:
+        if float(end) - float(start) > LONG_LINE_SEC:
+            первый = _первый_голос((start, end), segments)
+            if первый:
+                out.append(первый)
+                continue
         best, best_overlap = None, 0.0
         for seg in segments:
             overlap = min(end, seg["end"]) - max(start, seg["start"])
