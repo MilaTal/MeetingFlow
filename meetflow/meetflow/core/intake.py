@@ -445,6 +445,18 @@ class IntakeService:
         # id встречи на часть: повторный проход (запись ждала инструментов) находит ту же встречу, а не плодит новую
         встречи = []
         for i, часть in enumerate(части, start=1):
+            длительность = float(часть["конец_с"]) - float(часть["начало_с"])
+            # Слово владелицы 17.11.2026: запись короче порога протокола — не встреча. В реестр не заводим,
+            # оставляем только карточку; иначе появляется «ждёт запись», хотя запись уже была и она короткая.
+            if peregovorka.короткая_для_протокола(часть):
+                self.pipe.cards.open(
+                    project_id, "technical",
+                    f"Запись «{item.path.name}»: фрагмент {длительность / 60:.1f} мин — короче "
+                    f"{peregovorka.ПОРОГ_ПРОТОКОЛА_МИН:g} мин",
+                    {"file": str(item.path), "минут": round(длительность / 60, 1),
+                     "порог_мин": peregovorka.ПОРОГ_ПРОТОКОЛА_МИН,
+                     "что_делать": "протокол не собираем, в реестр встреч не заводим"}, None)
+                continue
             метка = тема if len(части) == 1 else f"{тема} · {peregovorka.ччммсс(часть['начало_с'])}–{peregovorka.ччммсс(часть['конец_с'])}"
             была = self.s.q("SELECT id FROM meetings WHERE project_id=? AND date=? AND label=? AND deleted_at IS NULL "
                             "ORDER BY id LIMIT 1", (project_id, дата, метка))
@@ -452,6 +464,9 @@ class IntakeService:
                 "meetings", project_id=project_id, date=дата, label=метка, file_name=item.path.name,
                 project_how=чей.get("how") or "")
             встречи.append((mid, метка, часть))
+        if not встречи:
+            return {"status": "ok", "short": True,
+                    "reason": f"запись короче {peregovorka.ПОРОГ_ПРОТОКОЛА_МИН:g} мин — в реестр не заводим"}
         # Повтор уже принятого файла — стоп до нарезки и распознавания. Встречи этого файла определены выше: если
         # принятая встреча среди них, это повторный проход (запись ждала инструментов) — идём дальше.
         уже = self.s.q("SELECT meeting_id, name FROM file_digests WHERE digest=?", (отпечаток_содержимого,))

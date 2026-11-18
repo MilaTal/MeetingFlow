@@ -250,6 +250,14 @@ def mount(r: APIRouter, ctx: Ctx) -> None:
                         "building": bool(b["running"]), "предложена_пересборка": False,
                         "has_plan": bool(m.get("plan_md")), "plan_generated_at": iso_dt(m.get("plan_built_at")),
                         "materials_count": len(sources_of(m["id"], True)),
+                        # есть ли у встречи живой источник нужной длины: пустые «ждёт запись» и записи короче
+                        # 3 минут в реестр не показываем (слово владелицы 17.11.2026). Источник без media_seconds
+                        # (текст, заметки) показываем — это не короткая запись.
+                        "has_sources": any(
+                            (lambda sec: sec is None or float(sec) >= 180.0)(
+                                (loads(r["meta"], {}) or {}).get("media_seconds") if r["meta"] else None)
+                            for r in store.q("SELECT meta FROM sources WHERE meeting_id=? AND removed_at IS NULL",
+                                             (m["id"],))),
                         # автозапуск сборки после добавления материала (05.11.2026, находка 4): от него зависит,
                         # обещать ли «протокол соберётся сам» на пустом экране
                         "autorun": автозапуск_включён(store, m.get("project_id"))})

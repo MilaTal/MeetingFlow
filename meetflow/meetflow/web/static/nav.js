@@ -66,7 +66,9 @@ async function renderProtocols() {
   $main.innerHTML = `<div class="feed-head"><div class="feed-head-text"><h1>Реестр встреч</h1>
       <div class="feed-sub">Нажмите на строку, чтобы открыть встречу и её протокол; в «…» строки — задачи и договорённости этой встречи. Встречи появляются при поступлении записи — плановых здесь нет.</div></div></div>
     <div id="proto-list"><div class="card empty-state">Загрузка…</div></div>`;
-  const встречи = await api("/meetings");
+  // В реестре — только встречи с записью/расшифровкой или протоколом. Пустые «ждёт запись» и плановые не показываем
+  // (слово владелицы 17.11.2026); API отдаёт все, чтобы страница встречи и тесты видели и созданные.
+  const встречи = (await api("/meetings")).filter(m => m.has_sources || m.has_minutes);
   const $l = document.getElementById("proto-list");
   if (!$l) return;
   const сегодня = датаISO(new Date());
