@@ -8,7 +8,8 @@ const ТЕМА_ДНИ = ["пн", "вт", "ср", "чт", "пт", "сб", "вс"]
 const ТЕМА_ИСТОЧНИК = { "по дню недели": "по дню недели", "из эталона": "из шапки эталона секретаря", "вручную": "выбрано вручную" };
 // Слова темы — по системе (дефекты экранов перед видео 25.10.2026, п. 4): в Планёрке «Тема планёрки», в ERP это встреча —
 // «Тема встречи». Система — атрибут `data-sistema` у <html> в index.html каждой системы; файл остаётся близнецом до байта.
-const ТЕМА_СЛОВА = document.documentElement.dataset.sistema === "erp"
+// 19.11.2026: в MeetFlow это тоже встреча, а не планёрка — слово владелицы «тему встречи (не Планёрки)».
+const ТЕМА_СЛОВА = ["erp", "meetflow"].includes(document.documentElement.dataset.sistema)
   ? { тема: "Тема встречи", темы: "Темы встреч" }
   : { тема: "Тема планёрки", темы: "Темы планёрок" };
 let _темыКэш = null;
@@ -19,6 +20,8 @@ function темаСтили() {
   const s = document.createElement("style");
   s.id = "tema-css";
   s.textContent = `.topic-slot{display:inline-flex;align-items:center;gap:6px;font-size:13px;white-space:nowrap}
+.topic-host{margin:4px 0 12px}
+.topic-host .topic-slot{display:flex;flex-wrap:wrap;align-items:center}
 .topic-slot select{font-size:13px;padding:3px 6px;max-width:220px}
 .topic-slot .topic-src{color:#8a8f98;font-size:12px}
 .topic-row{display:flex;gap:10px;align-items:baseline;padding:6px 0;border-bottom:1px solid #eef0f3;flex-wrap:wrap}
@@ -139,7 +142,13 @@ function темаВстречиМесто() {
   // (#meetings/N, /protocol, /planprep). Ищем по id, а не по прежнему `.doc-head.prep-bar`.
   const erp = document.getElementById("meeting-tools");
   const m = location.hash.match(/^#meetings\/(\d+)(?:\/(?:protocol|planprep))?(?:[?]|$)/);
-  return erp && m ? { $бар: erp, id: m[1] } : null;
+  if (!erp || !m) return null;
+  // 19.11.2026 (слово владелицы): в MeetFlow тема встречи — в панели «Ещё», не в строке инструментов.
+  // Панель закрыта — темы на странице нет, и в строку она не встаёт.
+  const хост = document.querySelector("#mt-drawer .topic-host");
+  if (хост) return { $бар: хост, id: m[1] };
+  if (document.documentElement.dataset.sistema === "meetflow") return null;
+  return { $бар: erp, id: m[1] };
 }
 
 async function темаВстречиВставить() {

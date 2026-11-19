@@ -336,6 +336,7 @@ async function renderMeetingReader(id, запрошеннаяВкладка) {
       // «Экран этой планёрки» не добавляем: отдельного экрана живой встречи в MeetFlow нет.
       const вёл = String(встреча.leader || встреча.leader_speaker || "").trim();
       тело = `<h2>Ещё</h2>
+        <div class="topic-host" id="mt-topic-host"></div>
         <div class="page-sub">Вёл встречу: ${esc(вёл && !/^говорящий/i.test(вёл) ? вёл : "не определён")}</div>
         ${админ && протокол.generated_at ? `<div class="page-sub">собран ${esc(fmtRuDateTime(протокол.generated_at))}</div>` : ""}
         <a class="btn-link" href="/meetings/${id}/recognition/export" target="_blank">Выгрузить итоги распознавания</a>`;
@@ -344,6 +345,8 @@ async function renderMeetingReader(id, запрошеннаяВкладка) {
     const заголовокПанели = $d.querySelector(":scope > h2");
     if (заголовокПанели) $d.querySelector(".mt-drawer-head").prepend(заголовокПанели);
     $d.hidden = false;
+    // «Тема встречи» — в панели «Ещё» (слово владелицы 19.11.2026): панель открыли — ставим список в её место
+    if (k === "more" && typeof темаВстречиВставить === "function") await темаВстречиВставить();
     const ряд = $main.querySelector(".mt-title-row"), слой = $main.querySelector(".mt-layout");
     $d.style.top = k === "tasks" && ряд && слой && getComputedStyle($d).position === "absolute"
       ? `${Math.round(ряд.getBoundingClientRect().bottom - слой.getBoundingClientRect().top + 8)}px` : "";
