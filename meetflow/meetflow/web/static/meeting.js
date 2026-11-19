@@ -272,14 +272,14 @@ async function renderMeetingReader(id, запрошеннаяВкладка) {
       ${договорённости ? кнопка("agreements", ВСТРЕЧА_ЗНАКИ.agreements, "Договорённости", договорённости.length, true) : ""}
       ${/* «План следующей» и «Замечания» — в «⋯»: строка не должна быть шире окна (05.11.2026) */ ""}
       ${документ ? `<a class="mt-btn" href="${экспорт}" target="_blank">${ВСТРЕЧА_ЗНАКИ.docx}Скачать .docx</a>` : ""}
+      ${/* Уточнение владелицы 19.11.2026: «Просмотр|Правка и три точки — вернуть и поставить рядом со Скачать».
+           Оба стоят сразу за «Скачать .docx»; «Действия со встречей» остаются отдельным пунктом первой линии
+           у правого края. */ ""}
+      ${правкаДоступна ? полотноПереключатель(основаПолотна, режимПолотна, "reader-edit") : ""}
+      <span class="reg-menu-wrap"><button type="button" class="mt-btn tb-more" id="meeting-more" data-drawer="more" aria-label="Ещё" aria-expanded="false">⋯</button></span>
       ${плашкаНовее}
-      ${/* Правая группа (задание владелицы 19.11.2026, «вопросы по дизайну», уточнение 19.11: «три точки ближе к блоку
-           Правка–Просмотр, как в Планёрке»): «Действия со встречей» — отдельным пунктом первой линии с акцентом;
-           правее — переключатель «Просмотр|Правка», сразу за ним «⋯», как в строке протокола Планёрки. */ ""}
       <span class="mt-tools-right">
         ${готовит ? `<span class="reg-menu-wrap"><button type="button" class="btn-sm mt-actions" id="meeting-actions" aria-haspopup="menu" title="Переименовать, переместить, изменить дату, удалить встречу">Действия со встречей ▾</button></span>` : ""}
-        ${правкаДоступна ? полотноПереключатель(основаПолотна, режимПолотна, "reader-edit") : ""}
-        <span class="reg-menu-wrap"><button type="button" class="mt-btn tb-more" id="meeting-more" data-drawer="more" aria-label="Ещё" aria-expanded="false">⋯</button></span>
       </span>
     </div>
     <div class="mt-layout">
