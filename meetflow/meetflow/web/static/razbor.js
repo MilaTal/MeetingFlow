@@ -82,6 +82,7 @@ async function renderRazbor(rest) {
   $main.innerHTML = `<div class="toolbar" id="razbor-toolbar"><span class="tb-title">Разбор</span>
       <span class="tip" tabindex="0" role="button" aria-label="Что здесь"><span class="tip-ico" aria-hidden="true">i</span><span class="tip-body" role="tooltip">Всё, что ждёт решения человека, — одной очередью: сначала то, что меняет задачи и исполнителей, затем по сроку. Строка живёт ${д.days} дней; за день до конца — «истечёт завтра», после — уходит по правилу своего вида. Несколько строк одного вида одной встречи можно решить разом: отметьте их и выберите решение. Голос решается на странице «Разбор голосов».</span></span>
       <span class="tb-spacer"></span>
+      <button class="btn-sm" id="rz-clear-all" type="button" title="Тестовый режим: убрать все карточки разом — и открытые, и решённые. Журнал решений остаётся">Удалить все карточки</button>
       <span class="page-sub" id="razbor-norm">Открыто <b>${д.total}</b> (норма ≤ ${д.norm})${д.over ? ' <span class="badge badge-warning">больше нормы</span>' : ""}${д.expires_tomorrow ? ` · истечёт завтра: <b>${д.expires_tomorrow}</b>` : ""}</span></div>
     <nav class="rz-views" id="razbor-views" aria-label="Виды разбора">${полоса}</nav>
     ${строки.length ? `<div class="card card-output" id="razbor-tasks"><div class="rz-tools">
@@ -102,6 +103,13 @@ async function renderRazbor(rest) {
     <div id="conflicts-list" class="card empty-state" data-list="conflicts" data-list-item=".conflict-card">Загрузка…</div>`;
   // «Разбор голосов» у систем по разным адресам: в Планёрке — вкладка «Технических служб», в ERP — свой пункт меню
   document.querySelector("[data-rz-voice]")?.setAttribute("href", адресРазбораГолосов());
+  document.getElementById("rz-clear-all")?.addEventListener("click", async () => {
+    if (!(await confirmDialog(`Удалить все карточки — открытых ${д.total}? Уйдут насовсем и они, и решённые; журнал решений останется.`, "Удалить все"))) return;
+    try { const r = await api("/razbor/cards/delete-all", { method: "POST", auth: true }); toast(`Удалено карточек: ${r.deleted}`); }
+    catch (e) { toast(e.message, true); return; }
+    await renderRazbor(currentRouteParts().slice(1));
+    обновитьЗначки();
+  });
   навестиСтрокиРазбора();
   await loadAndRenderConflicts();
   if (location.hash !== мой) return;

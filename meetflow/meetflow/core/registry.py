@@ -169,6 +169,16 @@ class CardQueue:
             return self.s.insert("cards", project_id=project_id, meeting_id=meeting_id, kind=kind, title=title,
                                  payload=payload or {}, status=CardStatus.OPEN.value, created_at=now())
 
+    def delete_all(self) -> tuple[int, int]:
+        """Все карточки разом — тестовый режим (слово владелицы 19.11.2026: «карточки — все убрать сейчас»).
+
+        Удаляются и открытые, и решённые; журнал решений (`decisions`) остаётся. Возвращает (всего, открытых)."""
+        with self.s.tx() as c:
+            было = c.execute("SELECT COUNT(*) FROM cards").fetchone()[0]
+            открытых = c.execute("SELECT COUNT(*) FROM cards WHERE status='open'").fetchone()[0]
+            c.execute("DELETE FROM cards")
+        return int(было), int(открытых)
+
     def cleanup(self, project_id: int, days: int) -> int:
         """Нерешённые карточки старше N дней снимаются (решение 01.10, порог
         в теме operator.card_cleanup_days; 0 — не снимать). Снятие — статус,

@@ -71,10 +71,20 @@ class WhisperLocalASR(ASRConnector):
         except (ImportError, ValueError):
             return False
 
+    def model_ready(self, model: str | None = None) -> bool:
+        """Есть ли модель на диске. `available()` отвечает только за пакет faster-whisper, а распознаванию нужна ещё и
+        папка модели: без неё точка падает уже во время записи, и человек видит вопрос про Whisper (находка 19.11.2026,
+        слово владелицы: «не ставили Whisper обязательным — если его нет, просто пройти дальше»)."""
+        путь = Path(self._местная_модель(model or self.model_name))
+        return путь.is_dir()
+
     def health(self) -> dict:
-        ok = self.available()
+        ok = self.available() and self.model_ready()
+        причина = "" if self.available() else "faster-whisper не установлен"
+        if self.available() and not self.model_ready():
+            причина = f"модели «{self.model_name}» нет в наборе моделей"
         return {"name": self.name, "ok": ok, "offline": os.environ.get("HF_HUB_OFFLINE") == "1",
-                "detail": "" if ok else "faster-whisper не установлен: записи ждут (waiting_tools)"}
+                "detail": "" if ok else f"{причина}: записи ждут (waiting_tools)"}
 
     def _местная_модель(self, model: str) -> str:
         """Имя модели → папка локального набора `VOICE_MODELS_DIR` (без обращения к Hugging Face).
@@ -114,6 +124,9 @@ class WhisperLocalASR(ASRConnector):
         if key not in self._models:
             if not self.available():
                 raise ConnectorError("waiting_tools: инструменты распознавания не установлены, запись ждёт.")
+            if not self.model_ready(model):
+                # 19.11.2026: точки нет — идём к следующей, без вопроса человеку (слово владелицы: Whisper не обязателен)
+                raise ConnectorError(f"waiting_tools: модели «{model}» нет на диске — точка пропущена")
             from faster_whisper import WhisperModel
             if device == "cpu":
                 m = WhisperModel(model, device="cpu", compute_type="int8", local_files_only=True)
@@ -291,11 +304,16 @@ def asr_ping(ep: dict) -> tuple[bool, str]:
         except Exception as e:  # noqa: BLE001
             return False, f"код не загрузился: {str(e)[:150]}"
         return ok, "код найден" if ok else f"в модуле {mod} нет функции {fn}"
-    if not WhisperLocalASR().available():
+    w = WhisperLocalASR()
+    if not w.available():
         return False, "faster-whisper не установлен"
     model = str(ep.get("model", ""))
     if Path(model).exists():
         return True, f"модель на диске, устройство {ep.get('device', 'auto')}"
     if "/" in model or "\\" in model:
         return False, "папки модели нет"
-    return True, f"модель «{model}» берётся из локального кэша, устройство {ep.get('device', 'auto')}"
+    # 19.11.2026: раньше для короткого имени («large-v3») проверка отвечала «возьмётся из кэша», хотя распознавание
+    # ищет папку в наборе моделей и с local_files_only кэш Hugging Face не читает. Теперь проверяем ту же папку.
+    if not w.model_ready(model):
+        return False, f"модели «{model}» нет в наборе моделей"
+    return True, f"модель на диске, устройство {ep.get('device', 'auto')}"

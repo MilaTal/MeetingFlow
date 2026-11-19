@@ -348,6 +348,16 @@ def mount(r: APIRouter, ctx: Ctx) -> None:
     def razbor_count(request: Request):
         return {"total": razbor(request)["total"]}
 
+    @r.post("/razbor/cards/delete-all")
+    def cards_delete_all(request: Request):
+        """Все карточки разом — тестовый режим (слово владелицы 19.11.2026: «карточки — все убрать сейчас»).
+
+        Уходят насовсем и открытые, и решённые: экран «Разбора» чистый. Журнал решений (`decisions`) не трогаем —
+        по нему видно, что и когда решали. Права — как у «Разбора»: администратор."""
+        ctx.need_admin(request)
+        было, открытых = pipe.cards.delete_all()
+        return {"deleted": было, "open": открытых}
+
     @r.post("/razbor/batch")
     def batch(payload: BatchIn, request: Request):
         u = ctx.need_admin(request)

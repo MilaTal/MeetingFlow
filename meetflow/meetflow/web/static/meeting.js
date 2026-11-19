@@ -262,8 +262,10 @@ async function renderMeetingReader(id, запрошеннаяВкладка) {
     <div class="mt-title-row"><h1 class="mt-title">${esc(заголовок)}</h1></div>
     ${подпись ? `<div class="mt-sub">${esc(подпись)}</div>` : ""}
     <div class="doc-head prep-bar" id="meeting-tools">
-      ${показПротокола ? `<a class="doc-tab${tab === "protocol" ? " doc-tab-on" : ""}" href="#meetings/${id}/protocol${откуда ? `?from=${esc(откуда)}` : ""}">Протокол</a>` : ""}
-      ${показПлана ? `<a class="doc-tab${tab === "plan" ? " doc-tab-on" : ""}" href="#meetings/${id}/planprep${откуда ? `?from=${esc(откуда)}` : ""}">План</a>` : ""}
+      ${/* Вкладка — только когда есть из чего выбирать (находка 19.11.2026, «вопросы по дизайну»): одинокая
+           «Протокол» ничего не переключает и занимает место в строке, из-за неё действия уезжали на вторую линию. */ ""}
+      ${показПротокола && показПлана ? `<a class="doc-tab${tab === "protocol" ? " doc-tab-on" : ""}" href="#meetings/${id}/protocol${откуда ? `?from=${esc(откуда)}` : ""}">Протокол</a>` : ""}
+      ${показПротокола && показПлана ? `<a class="doc-tab${tab === "plan" ? " doc-tab-on" : ""}" href="#meetings/${id}/planprep${откуда ? `?from=${esc(откуда)}` : ""}">План</a>` : ""}
       ${главная}
       ${кнопка("materials", ВСТРЕЧА_ЗНАКИ.notes, "Материалы", всего)}
       ${кнопка("tasks", ВСТРЕЧА_ЗНАКИ.tasks, "Задачи", мои.length, true)}
@@ -272,8 +274,13 @@ async function renderMeetingReader(id, запрошеннаяВкладка) {
       ${документ ? `<a class="mt-btn" href="${экспорт}" target="_blank">${ВСТРЕЧА_ЗНАКИ.docx}Скачать .docx</a>` : ""}
       ${правкаДоступна ? полотноПереключатель(основаПолотна, режимПолотна, "reader-edit") : ""}
       ${плашкаНовее}
-      ${/* «Ещё» — как в Планёрке (задание 17.11.2026): панель справа, а не выпадающее меню; доступна всем, как там */ ""}
-      <span class="reg-menu-wrap"><button type="button" class="mt-btn" id="meeting-more" data-drawer="more" aria-label="Ещё" aria-expanded="false">⋯</button></span>
+      ${/* Правая группа (задание владелицы 19.11.2026, «вопросы по дизайну»): «Действия со встречей» — отдельным
+           пунктом первой линии с акцентом, «Ещё» (⋯) — самым правым, как в строке протокола Планёрки. Тема встречи
+           встаёт между ними (tema.js вставляет её перед .tb-more). */ ""}
+      <span class="mt-tools-right">
+        ${готовит ? `<span class="reg-menu-wrap"><button type="button" class="btn-sm mt-actions" id="meeting-actions" aria-haspopup="menu" title="Переименовать, переместить, изменить дату, удалить встречу">Действия со встречей ▾</button></span>` : ""}
+        <span class="reg-menu-wrap"><button type="button" class="mt-btn tb-more" id="meeting-more" data-drawer="more" aria-label="Ещё" aria-expanded="false">⋯</button></span>
+      </span>
     </div>
     <div class="mt-layout">
       <article class="mt-doc">
@@ -329,11 +336,9 @@ async function renderMeetingReader(id, запрошеннаяВкладка) {
       // «Экран этой планёрки» не добавляем: отдельного экрана живой встречи в MeetFlow нет.
       const вёл = String(встреча.leader || встреча.leader_speaker || "").trim();
       тело = `<h2>Ещё</h2>
-        <div class="page-sub">Вёл планёрку: ${esc(вёл && !/^говорящий/i.test(вёл) ? вёл : "не определён")}</div>
+        <div class="page-sub">Вёл встречу: ${esc(вёл && !/^говорящий/i.test(вёл) ? вёл : "не определён")}</div>
         ${админ && протокол.generated_at ? `<div class="page-sub">собран ${esc(fmtRuDateTime(протокол.generated_at))}</div>` : ""}
-        <a class="btn-link" href="#meetings/${id}">Страница этой встречи</a>
-        <a class="btn-link" href="/meetings/${id}/recognition/export" target="_blank">Выгрузить итоги распознавания</a>
-        ${готовит ? `<button type="button" class="btn-link" id="more-actions">Действия со встречей…</button>` : ""}`;
+        <a class="btn-link" href="/meetings/${id}/recognition/export" target="_blank">Выгрузить итоги распознавания</a>`;
     }
     $d.innerHTML = `<div class="mt-drawer-head"><button type="button" class="mt-close" id="mt-close" aria-expanded="true" aria-controls="mt-drawer" title="Свернуть панель (Esc)">Свернуть ▾</button></div>${тело}`;
     const заголовокПанели = $d.querySelector(":scope > h2");
@@ -343,11 +348,6 @@ async function renderMeetingReader(id, запрошеннаяВкладка) {
     $d.style.top = k === "tasks" && ряд && слой && getComputedStyle($d).position === "absolute"
       ? `${Math.round(ряд.getBoundingClientRect().bottom - слой.getBoundingClientRect().top + 8)}px` : "";
     if (k === "materials") подключитьМатериалы(id, tab);
-    if (k === "more") {
-      document.getElementById("more-actions")?.addEventListener("click", () => менюВстречи(
-        document.getElementById("more-actions"), встреча,
-        { все: встречи, перерисовать: () => renderMeetingReader(id, tab) }));
-    }
     document.getElementById("mt-close").addEventListener("click", () => {
       $d.hidden = true; $d.dataset.k = ""; _открытаяПанельВстречи = "";
       кнопка?.setAttribute("aria-expanded", "false");
@@ -355,6 +355,10 @@ async function renderMeetingReader(id, запрошеннаяВкладка) {
     document.getElementById("mt-all-tasks")?.addEventListener("click", () => реестрПоВстрече(id, встреча.date));
   };
   document.querySelectorAll(".mt-btn[data-drawer]").forEach(b => b.addEventListener("click", () => открыть(b.dataset.drawer, b)));
+  // «Действия со встречей» — отдельным пунктом первой линии (задание 19.11.2026): меню то же, что раньше в «Ещё»
+  document.getElementById("meeting-actions")?.addEventListener("click", () => менюВстречи(
+    document.getElementById("meeting-actions"), встреча,
+    { все: встречи, перерисовать: () => renderMeetingReader(id, tab) }));
   // 10.11.2026: ссылка из меню «…» — #meetings/N/agreements сразу открывает панель договорённостей этой встречи.
   if (/\/agreements(\?|$)/.test(location.hash)) {
     const панель = $main.querySelector('.mt-btn[data-drawer="agreements"]');
