@@ -67,7 +67,7 @@ def mount(r: APIRouter, ctx: Ctx) -> None:
     def need_polotno(request: Request) -> dict:
         u = ctx.need_user(request)
         if u.get("role") not in ADMIN_ROLES:
-            raise HTTPException(403, "Правка документа доступна администраторам проекта и директору")
+            raise HTTPException(403, "Правка документа доступна администраторам проекта и супер-администратору")
         return u
 
     def doc_of(mid: int, vid: str) -> tuple[dict, str]:
