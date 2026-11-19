@@ -169,7 +169,7 @@ async function renderMeetingReader(id, запрошеннаяВкладка) {
   }
   const генерация = canPrepare() ? await api(`/meetings/${id}/generation`).catch(() => ({})) : {};
   const ответДоговорённостей = протокол.available
-    ? await api(`/agreements?meeting_id=${id}`).catch(() => ({ items: [], mode: "shadow" })) : null;
+    ? await api(`/agreements?meeting_id=${id}&only=agreements`).catch(() => ({ items: [], mode: "shadow" })) : null;
   const договорённости = ответДоговорённостей && (isAdmin() || ответДоговорённостей.mode === "on")
     ? (ответДоговорённостей.items || []) : null;
   // Число у кнопки — только договорённости (решения и правила работы), как и в панели (19.11.2026)

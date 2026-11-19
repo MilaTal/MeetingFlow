@@ -73,7 +73,8 @@ def mount(r: APIRouter, ctx: Ctx) -> None:
 
     @r.get("/agreements")
     def agreements(request: Request, project: str = "", kind: str = "", date_from: str = "", date_to: str = "", q: str = "",
-                   status: str = "", meeting_id: int | None = None, offset: int = 0, limit: int | None = None):
+                   status: str = "", meeting_id: int | None = None, offset: int = 0, limit: int | None = None,
+                   only: str = ""):
         u = ctx.user(request)
         admin = ctx.is_admin(u)
         pid = ctx.project(request)
@@ -102,6 +103,10 @@ def mount(r: APIRouter, ctx: Ctx) -> None:
         if u is None or (not admin and mode() == "shadow"):
             return {"items": [], "total": 0, **base}
         where, args = ["u.status != 'removed'", "u.kind IN ('decision','agreement','open_question','clarification','milestone')"], []
+        # 19.11.2026: панель встречи просит только договорённости — фильтр на сервере, а не в браузере: иначе любой
+        # потребитель API видел вопросы и уточнения под названием «Договорённости». Реестр без `only` — как раньше.
+        if (only or "").strip().lower() == "agreements":
+            where.append("u.kind IN ('decision','agreement')")
         if meeting_id is not None:
             where.append("u.meeting_id=?")
             args.append(meeting_id)
