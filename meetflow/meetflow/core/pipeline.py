@@ -777,9 +777,35 @@ class MeetingPipeline:
                 team = [p.get("full_name") or "" for p in (st.get("people_list") or [])]
             except Exception:  # noqa: BLE001 — без «Команды» имена не подставляются, разбор продолжается
                 team = []
-            result = voice_step.process(
-                wav_path, doc.text, meta, meeting_id=meeting_id, meeting_date=meeting_date,
-                base_path=base, team=team, settings=None)
+            result = None
+            последняя = ""
+            for попытка in range(1, 6):
+                try:
+                    result = voice_step.process(
+                        wav_path, doc.text, meta, meeting_id=meeting_id, meeting_date=meeting_date,
+                        base_path=base, team=team, settings=None)
+                    break
+                except voice_step.VoiceStepError as exc:
+                    последняя = str(exc)
+                    meta["voice_retry"] = False
+                    break                         # нет инструментов/настройки — повтор не поможет
+                except Exception as exc:  # noqa: BLE001 — BrokenProcessPool и др. повторяем до 5 раз
+                    последняя = f"{type(exc).__name__}: {str(exc)[:300]}"
+                    meta["voice_retry"] = True
+                    logger.warning("Голоса: попытка %s из 5 не удалась (встреча id=%s): %s",
+                                   попытка, meeting_id, последняя)
+                    if попытка < 5:
+                        time.sleep(min(2 * попытка, 10))
+            if result is None:
+                meta["voice_error"] = последняя
+                meta["keep_media"] = True          # повтор без новой отправки записи
+                record["error"] = последняя
+                self.cards.open(project_id, "technical",
+                                f"Голоса не разобраны после 5 попыток: запись «{filename}»",
+                                {"detail": последняя[:400],
+                                 "деградация": "протокол собирается без разделения по голосам; запись сохранена"},
+                                meeting_id)
+                return
             doc.text = result["text"]
             meta.update({
                 "speakers": result.get("speakers"), "signed_lines": result.get("signed_lines"),
@@ -1748,11 +1774,14 @@ class MeetingPipeline:
                                                 else "не опознаны: в записи нет подписей по голосам")
                     скелет_модели = [s for s in self._skeleton(meeting) if not _раздел_участников(s)]
                     from . import topics
+                    from . import kontekst_protokola
+                    контекст = kontekst_protokola.паспорт(self.s, project_id, meeting, safe_source.text)
                     sysm, user = self.pb.protocol(скелет_модели, safe_source.text, notes_text,
                                                   participants=participants, leader=leader,
                                                   topic_hint=topics.подсказка_протокола(self._topic(meeting)),
                                                   второй=getattr(self, "_второй_текст", ""),
-                                                  контроль=getattr(self, "_контроль_блок", ""))
+                                                  контроль=getattr(self, "_контроль_блок", ""),
+                                                  context=контекст)
                     try:
                         out = self._call(self.gen, budget, "protocol", sysm, user, meeting_id)
                         sections = {k: str(v)[:20000] for k, v in _dict(out, "sections").items()
