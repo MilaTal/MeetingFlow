@@ -93,6 +93,20 @@ def mount(r: APIRouter, ctx: Ctx) -> None:
         body = app.state.ResolveIn(status=status, **kw)
         return app.state.resolve_card(cid, body, {"role": u.get("role"), "name": ctx.name(u), "login": u.get("login") or ""})
 
+    def rebuild_after_task(c: dict, task_id: int | None, reason: str, by: str) -> None:
+        """Ответ карточки изменил задачу — встреча-источник идёт в очередь пересборки («Тест2_Митфлоу», 20.11.2026).
+
+        Часть ответов «Разбора» меняет задачу напрямую, не через `resolve_card` (отметка исполнителя, выбор
+        человека по номеру записи). Для них пересборка ставится здесь; остальные виды ставит `resolve_card`."""
+        t = store.get("tasks", task_id) if task_id else None
+        mid = (t or {}).get("source_meeting_id") or c.get("meeting_id")
+        if not mid:
+            return
+        meeting = store.get("meetings", mid) or {}
+        queue = getattr(ctx, "queue", None) or getattr(pipe, "queue", None)
+        if meeting and queue is not None:
+            queue.enqueue(meeting.get("project_id"), mid, reason, by=by)
+
     def conflict_out(c: dict) -> dict:
         p = loads(c.get("payload"), {})
         kind = c["kind"]
@@ -210,6 +224,8 @@ def mount(r: APIRouter, ctx: Ctx) -> None:
                         pipe.reg.set_due(tid, d.isoformat(), who, "по отметке исполнителя")
             store.update("cards", c["id"], status="accepted" if act == "accept" else "rejected",
                          resolution="принято" if act == "accept" else "оставлено как есть", resolved_at=now())
+            if act == "accept" and tid and p.get("proposed"):
+                rebuild_after_task(c, tid, "отметка исполнителя подтверждена — пересборка протокола", who)
             return store.get("cards", c["id"])
         if kind == "project_undetermined" and act in ("accept", "confirm", "custom"):
             from ...core import proekt_zapisi as pz
@@ -260,6 +276,7 @@ def mount(r: APIRouter, ctx: Ctx) -> None:
                     if not hit and a.get("full_name") and p.get("task_id"):
                         pipe.reg.set_assignee(p["task_id"], a["full_name"], who, "выбор в «Разборе»")
                         store.update("cards", c["id"], status="accepted", resolution=a["full_name"], resolved_at=now())
+                        rebuild_after_task(c, p.get("task_id"), "исполнитель задачи уточнён — пересборка протокола", who)
                         return store.get("cards", c["id"])
             return resolve(c["id"], u, CardStatus.ACCEPTED, choice=choice, action="accept" if kind == "task_doubt" else "")
         if act == "custom":
@@ -288,6 +305,8 @@ def mount(r: APIRouter, ctx: Ctx) -> None:
                 if getattr(ctx, "sync_team", None):
                     ctx.sync_team(force=True)
                 store.update("cards", c["id"], status="accepted", resolution=val, resolved_at=now())
+                if kind in ("assign_person", "department_mismatch") and p.get("task_id"):
+                    rebuild_after_task(c, p.get("task_id"), "исполнитель задачи уточнён — пересборка протокола", who)
                 return store.get("cards", c["id"])
             return resolve(c["id"], u, CardStatus.ACCEPTED, resolution=val)
         raise HTTPException(400, "Неизвестное действие")

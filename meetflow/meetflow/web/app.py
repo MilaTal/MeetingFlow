@@ -915,9 +915,14 @@ def create_app(theme_name: str | None = None, db_path: str | None = None, journa
         части = [ч.strip() for ч in текст.replace(";", ",").replace("\n", ",").split(",") if ч.strip()]
         if any(not any(ch.isalpha() for ch in ч) for ч in части):
             raise HTTPException(422, "Имя участника не распознано: в нём нет букв. Отправьте список в UTF-8.")
+        было = " ".join(str(m.get("participants_manual") or "").split())
         store.update("meetings", mid, participants_manual=текст)
         store.insert("decisions", project_id=m["project_id"], what="Участники встречи — ручной список",
                      decision=текст or "очищен", why="правка на экране", at=now())
+        queue = getattr(pipe, "queue", None)
+        if текст != было and queue is not None:
+            queue.enqueue(m["project_id"], mid, "участники уточнены — пересборка протокола",
+                          by=u.get("name") or u.get("role") or "")
         return {"ok": True, "participants_manual": текст}
 
     @app.post("/api/meetings/{mid}/protocol/edit")
@@ -1080,7 +1085,10 @@ def create_app(theme_name: str | None = None, db_path: str | None = None, journa
         responsible = u["name"] and u["name"] == t["assignee"]
         if not can(u, "task_status") and not responsible:
             raise HTTPException(403, "Статус меняет ответственный или администратор.")
+        было = t.get("status")
         pipe.reg.set_status(tid, body.status, "web_form", by=u["name"] or u["role"])
+        if body.status.value != было:
+            _rebuild_task(t, "статус задачи изменён — пересборка протокола", u["name"] or u["role"])
         return task_out(store.get("tasks", tid), u)
 
     @app.post("/api/tasks/{tid}/operational")
@@ -1096,6 +1104,9 @@ def create_app(theme_name: str | None = None, db_path: str | None = None, journa
             store.insert("task_history", task_id=tid, old_status=None, new_status=None, source="web_form",
                          evidence_quote=f"{РУЧНАЯ_ПОМЕТКА} {'отмечена' if body.on else 'пометка снята'}",
                          changed_by=u["name"] or u["role"], at=now())
+        if bool(t.get("operational")) != body.on:
+            _rebuild_task(t, "пометка «оперативная» изменена — пересборка протокола", u["name"] or u["role"],
+                          задержка=2)
         return task_out(store.get("tasks", tid), u)
 
     @app.post("/api/tasks/{tid}/comment")
@@ -1124,6 +1135,67 @@ def create_app(theme_name: str | None = None, db_path: str | None = None, journa
             if c["kind"] == "task_doubt" and c["status"] == "open":
                 c["payload"] = {**c["payload"], "buttons": doubt_buttons_now(c)}
         return out
+
+    # Карточки «Разбора», решение которых меняет задачу, а значит и таблицу протокола. После ответа администратора
+    # встреча-источник идёт в очередь пересборки («Тест2_Митфлоу», 20.11.2026). Частичное подтверждение нескольких
+    # задач даёт одну строку очереди: `BuildQueue.enqueue` схлопывает повторы по встрече.
+    МЕНЯЮТ_ЗАДАЧУ = frozenset(("held_task", "task_doubt", "assign_person", "department_mismatch",
+                                "due_unconfirmed", "closing_candidate", "mass_closing"))
+
+    def _meetings_of_card(c: dict, payload: dict) -> set[int]:
+        if c["kind"] == "mass_closing":
+            ids = {(store.get("tasks", x.get("task_id")) or {}).get("source_meeting_id")
+                   for x in payload.get("closings") or []}
+            ids.discard(None)
+            if ids:
+                return ids
+        tid = payload.get("task_id")
+        task = store.get("tasks", tid) if tid else None
+        mid = (task or {}).get("source_meeting_id") or c.get("meeting_id")
+        return {mid} if mid else set()
+
+    def _rebuild_task(t: dict | None, reason: str, by: str, *, задержка: int = 0) -> None:
+        """Задача изменилась через старый API MeetFlow — встреча-источник в очередь пересборки."""
+        mid = (t or {}).get("source_meeting_id")
+        if not mid:
+            return
+        meeting = store.get("meetings", mid) or {}
+        queue = getattr(pipe, "queue", None)
+        if meeting and queue is not None:
+            kwargs = {}
+            if задержка:
+                from ..core.build_queue import later
+                kwargs["not_before"] = later(задержка)
+            queue.enqueue(meeting.get("project_id"), mid, reason, by=by, **kwargs)
+
+    def _rebuild_after_card(c: dict, payload: dict, body, by: str) -> None:
+        kind = c["kind"]
+        if kind not in МЕНЯЮТ_ЗАДАЧУ:
+            return
+        if kind not in ("held_task", "mass_closing") and not payload.get("task_id"):
+            return                                  # карточка про человека, а не про задачу — протокол не меняется
+        if kind == "task_doubt":
+            причина = ("задача подтверждена — пересборка протокола" if body.status == CardStatus.ACCEPTED
+                       else "задача снята — пересборка протокола")
+        elif body.status != CardStatus.ACCEPTED:
+            return
+        elif kind == "held_task":
+            причина = "задача принята — пересборка протокола"
+        elif kind == "mass_closing":
+            причина = "подтверждено выполнение задач — пересборка протокола"
+        elif kind == "closing_candidate":
+            причина = "задача выполнена — пересборка протокола"
+        elif kind in ("assign_person", "department_mismatch"):
+            причина = "исполнитель задачи уточнён — пересборка протокола"
+        else:
+            причина = "срок задачи уточнён — пересборка протокола"
+        queue = getattr(pipe, "queue", None)
+        if queue is None:
+            return
+        for mid in _meetings_of_card(c, payload):
+            meeting = store.get("meetings", mid) or {}
+            if meeting:
+                queue.enqueue(meeting.get("project_id"), mid, причина, by=by)
 
     def _apply_card(c: dict, payload: dict, chosen: dict | None, by: str, custom_text: str = "") -> None:
         """«Подтвердить» делает то, что карточка предлагала. Раньше решение
@@ -1251,6 +1323,7 @@ def create_app(theme_name: str | None = None, db_path: str | None = None, journa
             desc = json.loads(c["payload"] or "{}").get("description", "")
             rule = pipe.memory.answer(c["project_id"], "not_a_task", " ".join(sorted(set(stems(desc)))), "reject")
             out = dict(out, rule=rule["status_text"])
+        _rebuild_after_card(c, payload, body, by)
         return out
 
     app.state.resolve_card = resolve       # тот же разбор карточки — для «Разбора» фронта ERP (web/erp/razbor.py)

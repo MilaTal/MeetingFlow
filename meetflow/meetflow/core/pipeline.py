@@ -580,6 +580,40 @@ class MeetingPipeline:
                             {"объекты": итог["объекты"], "quote": окно[:1500], "description": описание}, meeting_id)
         return итог["описание"]
 
+    def _имена_ролей(self, meeting_id: int) -> list[str]:
+        """Люди из ролей единиц встречи — как записаны («Мария», «Светлана Барч», полное ФИО)."""
+        out: list[str] = []
+        видели: set[str] = set()
+        for row in self.s.q("SELECT roles FROM units WHERE meeting_id=?", (meeting_id,)):
+            try:
+                roles = json.loads((row.get("roles") if isinstance(row, dict) else row["roles"]) or "[]")
+            except (TypeError, ValueError):
+                continue
+            for x in roles if isinstance(roles, list) else []:
+                if not isinstance(x, dict) or x.get("role") not in ("участник", "ответственный"):
+                    continue
+                имя = " ".join(str(x.get("person") or "").split())
+                ключ = имя.replace("ё", "е").lower()
+                if имя and ключ not in видели:
+                    видели.add(ключ)
+                    out.append(имя)
+        return out
+
+    def _участники_из_единиц(self, meeting_id: int, team) -> list[str]:
+        """Полные ФИО участников из ролей единиц встречи — запасной путь, когда голоса не дали имён.
+        В ролях бывают «Мария», «Светлана Барч»; берём только тех, кого `Team.find` узнаёт однозначно."""
+        out: list[str] = []
+        видели: set[str] = set()
+        for имя_роли in self._имена_ролей(meeting_id):
+            m = team.find(имя_роли)
+            человек = getattr(m, "person", None)
+            имя = " ".join((getattr(человек, "full_name", "") or "").split())
+            ключ = имя.lower().replace("ё", "е")
+            if имя and ключ not in видели:
+                видели.add(ключ)
+                out.append(имя)
+        return out
+
     def _participants(self, meeting_id: int, meeting: dict) -> tuple[list[str], str]:
         """ФИО, опознанные по голосам в источниках встречи, и ведущий — для раздела «Участники».
 
@@ -659,6 +693,53 @@ class MeetingPipeline:
                     if ключ not in видели:
                         видели.add(ключ)
                         out.append(полное)
+        return out
+
+    @staticmethod
+    def _похоже_на_имя(имя: str) -> bool:
+        """Одна-три части с заглавной — похоже на имя человека, а не на отдел, метку или «Говорящий 1-1»."""
+        т = " ".join((имя or "").split())
+        if not т or re.search(r"\d", т):
+            return False
+        if re.match(r"(?i)^(говорящий|спикер|speaker|участник|неизвестный)\b", т):
+            return False
+        части = т.split()
+        if not (1 <= len(части) <= 3):
+            return False
+        return all(re.fullmatch(r"[А-ЯЁA-Z][а-яёa-zА-ЯЁ'’\-]*", ч) for ч in части)
+
+    @classmethod
+    def _услышанные(cls, участники: list[str], люди: list[str]) -> list[str]:
+        """Имена, которые не удалось однозначно сопоставить с «Командой», — как услышано (слово владелицы 20.11.2026).
+
+        Неоднозначное имя не выбрасывается: «Мария», «Антон», «Светлана Владимировна» остаются в «Участниках»
+        строкой как услышано, а карточка «Разбора» называет причину. Отделы и «Говорящий N» сюда не идут."""
+        from . import identity
+        out: list[str] = []
+        видели: set[str] = set()
+        for n in участники:
+            имя = " ".join((n or "").split())
+            if not cls._похоже_на_имя(имя):
+                continue
+            фио, _ = identity.найти_в_команде(имя, люди)
+            if фио:
+                continue
+            ключ = " ".join(имя.replace("ё", "е").lower().split())
+            if ключ not in видели:
+                видели.add(ключ)
+                out.append(имя)
+        return out
+
+    @staticmethod
+    def _с_услышанными(полные: list[str], услышано: list[str]) -> list[str]:
+        """Полные ФИО и имена как услышано — без повторов; полное ФИО важнее короткой записи того же человека."""
+        out = list(полные)
+        видели = {" ".join((n or "").replace("ё", "е").lower().split()) for n in out}
+        for имя in услышано:
+            ключ = " ".join((имя or "").replace("ё", "е").lower().split())
+            if ключ and ключ not in видели:
+                видели.add(ключ)
+                out.append(имя)
         return out
 
     @staticmethod
@@ -1752,6 +1833,10 @@ class MeetingPipeline:
 
                     # 3. протокол — разделы пишет модель, таблицы и шапку — код
                     participants, leader = self._participants(meeting_id, meeting)
+                    if not participants:
+                        # Голосов с именами нет — участники из ролей единиц встречи. Роли уже прошли «Команду»,
+                        # поэтому в раздел идут полные ФИО, а не имена «как услышано» (решение владелицы 20.11.2026).
+                        participants = self._участники_из_единиц(meeting_id, team)
                     # участник — тот, у кого в записи есть реплика (решение владелицы 28.10.2026: опознанный голос без
                     # единой строки расшифровки — ошибка опознания, а не участник; 26.10 — «Говорящий 6», 0 реплик)
                     participants = self._с_репликой(participants, source.lines)
@@ -1761,11 +1846,23 @@ class MeetingPipeline:
                     люди_команды = [p.full_name for p in list(team.people) + list(team.unconfirmed) if p.full_name]
                     участники_кодом, отброшены = identity.имена_в_строю(
                         self._participants_by_code(participants, leader), люди_команды)
+                    if not участники_кодом:
+                        # Голоса дали только «Говорящий N» или пусто — берём роли единиц, уже сверенные с «Командой».
+                        из_единиц = self._участники_из_единиц(meeting_id, team)
+                        if из_единиц:
+                            участники_кодом, ещё_отброшены = identity.имена_в_строю(из_единиц, люди_команды)
+                            отброшены += ещё_отброшены
+                    # 20.11.2026: неоднозначное имя не выбрасываем — показываем как услышано. Полное ФИО, если оно
+                    # нашлось, важнее короткой записи; «Мария», «Антон», «Светлана Владимировна» остаются строкой.
+                    участники_кодом = self._с_услышанными(
+                        участники_кодом,
+                        self._услышанные(participants + self._имена_ролей(meeting_id), люди_команды))
                     участники_кодом = self._с_ручными(участники_кодом, meeting)
                     participants = self._с_ручными(participants, meeting)
                     if отброшены:
-                        self.cards.open(project_id, "technical", "В «Участниках» отброшены имена вне «Команды»",
-                                        {"отброшено": отброшены[:20]}, meeting_id)
+                        self.cards.open(project_id, "technical",
+                                        "В «Участниках» имена как услышано — нет однозначной «Команды»",
+                                        {"как_услышано": отброшены[:20]}, meeting_id)
                     голоса_ждут = bool(self.s.q("SELECT id FROM sources WHERE meeting_id=? AND removed_at IS NULL "
                                                 "AND voice_state LIKE 'ждут%'", (meeting_id,)))
                     участники_примечание = ""
@@ -2255,7 +2352,7 @@ class MeetingPipeline:
                 # 4.5 Правка по замечаниям: только пары «цитата → замена», протокол целиком не пересобираем.
                 try:
                     from . import pravka_po_zamechaniyam as пз
-                    находки = пз.отобрать({"findings": rep.findings})
+                    находки = пз.отобрать({"findings": rep.findings}, protocol_md)
                     if находки:
                         sysm, user = пз.промпт(protocol_md, находки)
                         ответ = self._call(self.gen, budget, "fix_findings", sysm, user, meeting_id,
@@ -2286,6 +2383,18 @@ class MeetingPipeline:
                     self.step_failed(project_id, meeting_id, "Правка по замечаниям", exc)
                 except Exception as exc:  # noqa: BLE001 — правка не отменяет собранный протокол
                     self.step_failed(project_id, meeting_id, "Правка по замечаниям", exc)
+                # Таблица задач принадлежит реестру (21.11.2026): правка по замечаниям не может вернуть прежнюю
+                # формулировку или исполнителя. Пересобираем её кодом после всех правок — уже с текущими задачами.
+                try:
+                    строки_таблицы = tablica_zadach.строки_встречи(
+                        self.s, meeting,
+                        lambda t: due_text(t.get("due_date"), t.get("date_set"), t.get("due_kind")) or "",
+                        "запись" if source.kind.value == SourceKind.TRANSCRIPT.value else "заметки",
+                        текст_записи=safe_source.text if source.kind.value == SourceKind.TRANSCRIPT.value else None)
+                    protocol_md = tablica_zadach.пересобрать_раздел_задач(
+                        protocol_md, строки_таблицы, колонки=tablica_zadach.колонки(self.theme))
+                except Exception as exc:  # noqa: BLE001 — таблица не должна отменять сохранённый протокол
+                    self.step_failed(project_id, meeting_id, "Таблица задач из реестра", exc)
                 self.s.update("meetings", meeting_id, protocol_md=protocol_md, protocol_built_at=built,
                               built_from=[s["name"] for s in srcs], build_note=_примечание)
                 # паспорт принятого протокола (12.11.2026): после пересборки сверяем числа и фразы; расхождение —
@@ -2505,6 +2614,14 @@ class MeetingPipeline:
         # поэтому тема `mf_protocol` выключает её флагом `protocol.title_with_topic: false`.
         с_темой = (tp and self.theme.get("protocol.title_with_topic", True))
         out = [f"# {th.word('protocol')} {date_h}" + (f". {tp['name'].strip().rstrip('.')}." if с_темой else ""), ""]
+        if participants and people:
+            # Последняя страховка: полное ФИО из «Команды» — каноническим видом; неоднозначное имя не выбрасываем,
+            # а оставляем как услышано (слово владелицы 20.11.2026). «Говорящий N» и отделы сюда не попадают.
+            from . import identity
+            полные, _ = identity.имена_в_строю(participants, list(people))
+            новые = self._с_услышанными(полные, self._услышанные(participants, list(people)))
+            if новые:
+                participants = новые
         участники_строкой: list[str] = []
         for sec in self._skeleton(meeting):
             if _раздел_участников(sec):
@@ -2539,8 +2656,5 @@ class MeetingPipeline:
             lambda t: due_text(t.get("due_date"), t.get("date_set"), t.get("due_kind")) or "", откуда,
             текст_записи=record if base_kind == SourceKind.TRANSCRIPT.value else None)
         out += tablica_zadach.раздел_задач(строки, колонки=tablica_zadach.колонки(self.theme))
-        if closings:
-            out += [f"## {th.word('closed_tasks')}", ""]
-            for i, (_tid, q) in enumerate(closings, 1):
-                out.append(f"{i}. {q.strip()}")
+        # 21.11.2026: раздел «Закрытые задачи» не пишем — выполненные после завершения в протоколе не показываем.
         return "\n".join(out).rstrip("\n") + "\n"

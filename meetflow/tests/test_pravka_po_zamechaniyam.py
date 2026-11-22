@@ -125,8 +125,8 @@ def test_правка_до_сохранения_и_карточка(store, proje
     class Fixing(MockLLM):
         def complete(self, system, user, *, json_mode=True, temperature=0.0, purpose="", deadline=None):
             if purpose == "verify":
-                # цитата — из таблицы задач протокола: по ней код найдёт место и поставит замену
-                quote = "подготовьте регламент склада до 10.10"
+                # цитата — из тела протокола, не из таблицы задач: строку таблицы правит только реестр (21.11.2026)
+                quote = "Петрова Анастасия."
                 out = {"clean": False, "findings": [
                     {"issue": "Заменить формулировку", "quote": quote, "severity": "major"}]}
                 return LLMResult(json.dumps(out, ensure_ascii=False), self.model, 10, 10, 0.0, 0.0)
@@ -146,9 +146,14 @@ def test_правка_до_сохранения_и_карточка(store, proje
     assert rep.protocol_saved
     text = store.get("meetings", meeting)["protocol_md"]
     assert "(исправлено)" in text
+    # Таблица задач собрана из реестра: правка по замечаниям не меняет строку и не возвращает прежнюю формулировку.
+    assert "| 1 | подготовьте регламент склада до 10.10 |" in text
+    assert "подготовьте регламент склада до 10.10 (исправлено)" not in text
     notes = json.loads(store.get("meetings", meeting)["review_notes"] or "[]")
     assert any(n.get("исправлено") for n in notes)
     assert "исправлено замечаний проверки — 1" in (store.get("meetings", meeting)["build_note"] or "")
     titles = [r["title"] or "" for r in store.q("SELECT title FROM cards WHERE meeting_id=?", (meeting,))]
     assert not any("Заменить формулировку" in t for t in titles)
     assert any("исправлено" in t for t in titles)
+    # пересборка таблицы из реестра обязана отработать, а не уйти в карточку «Шаг сборки не выполнен»
+    assert not any("Таблица задач из реестра" in t for t in titles)

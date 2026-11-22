@@ -152,6 +152,24 @@ def mount(r: APIRouter, ctx: Ctx) -> None:
     store, pipe = ctx.store, ctx.pipe
     lock = threading.Lock()
 
+    def rebuild_source(t: dict | None, reason: str, by: str, *, задержка: int = 0) -> None:
+        """Задача изменилась — встреча-источник идёт в очередь пересборки («Тест2_Митфлоу», 20.11.2026).
+
+        Протокол MeetFlow хранится готовым текстом, поэтому любое уточнение задачи (статус, формулировка, исполнитель,
+        срок, проект, пометка «оперативная», удаление) обновляет документ. `BuildQueue.enqueue` схлопывает повторы:
+        частичное подтверждение нескольких задач даёт одну строку очереди на встречу. Для правок полей — короткая
+        задержка 2 с: несколько правок подряд дают одну сборку, а не несколько."""
+        source_id = (t or {}).get("source_meeting_id")
+        if not source_id:
+            return
+        source = store.get("meetings", source_id) or {}
+        if source:
+            kwargs = {}
+            if задержка:
+                from ...core.build_queue import later
+                kwargs["not_before"] = later(задержка)
+            ctx.queue.enqueue(source.get("project_id"), source_id, reason, by=by, **kwargs)
+
     def team_ids() -> dict[str, int]:
         return {_norm(a["full_name"]): a["id"] for a in store.q("SELECT id, full_name FROM accounts") if a.get("full_name")}
 
@@ -345,6 +363,8 @@ def mount(r: APIRouter, ctx: Ctx) -> None:
                            payload.date_set.isoformat() if payload.date_set else date.today().isoformat())
         store.update("tasks", tid, status_detail=payload.status_detail or "")
         history(tid, "active", "active", "web_form", "заведена вручную", ctx.name(admin))
+        if payload.source_meeting_id:
+            rebuild_source(store.get("tasks", tid), "задача заведена — пересборка протокола", ctx.name(admin), задержка=2)
         return fresh(tid, admin, request)
 
     @r.get("/tasks/{tid}")
@@ -370,8 +390,10 @@ def mount(r: APIRouter, ctx: Ctx) -> None:
         comment = (payload.comment or "").strip() or None
         if payload.new_status is None and not comment and not (payload.status_detail or "").strip():
             raise HTTPException(422, "Нечего менять: укажите новый статус (поле «new_status») или комментарий (поле «comment»)")
+        было = None
         with lock:
             t = get_or_404(tid)
+            было = t.get("status")
             take(t, payload.version, ctx.name(admin))
             if payload.new_status:
                 try:
@@ -392,6 +414,14 @@ def mount(r: APIRouter, ctx: Ctx) -> None:
                     pipe.reg.set_status(tid, TaskStatus.DROPPED, "web_form", comment, by=ctx.name(admin))
                 pipe.reg.comment(tid, comment, ctx.name(admin))
                 store.update("tasks", tid, last_comment_by=ctx.name(admin), last_comment_date=date.today().isoformat())
+        # Подтверждённое выполнение (или снятие) меняет таблицу протокола: пересобираем встречу-источник.
+        # Решение владелицы 20.11.2026, «Тест2_Митфлоу»: после ответа администратора протокол должен обновиться сразу.
+        # Частичное подтверждение нескольких задач даёт одну строку очереди — `BuildQueue.enqueue` схлопывает повторы.
+        if payload.new_status and st is not None and было != st.value:
+            причина = ("задача выполнена — пересборка протокола" if st == TaskStatus.DONE
+                       else "задача снята — пересборка протокола" if st == TaskStatus.DROPPED
+                       else "статус задачи изменён — пересборка протокола")
+            rebuild_source(t, причина, ctx.name(admin))
         return fresh(tid, admin, request)
 
     @r.patch("/tasks/{tid}/responsible")
@@ -399,6 +429,7 @@ def mount(r: APIRouter, ctx: Ctx) -> None:
         admin = ctx.need_admin(request)
         with lock:
             t = get_or_404(tid)
+            было = (t.get("assignee") or "").strip()
             take(t, payload.version, ctx.name(admin))
             who = (payload.responsible_text or "").strip() or None
             if payload.responsible_user_id:
@@ -411,6 +442,8 @@ def mount(r: APIRouter, ctx: Ctx) -> None:
             else:
                 store.update("tasks", tid, assignee=None)
                 history(tid, t["status"], t["status"], "operator", "исполнитель снят (вручную)", ctx.name(admin))
+        if (who or "").strip() != было:
+            rebuild_source(t, "исполнитель задачи изменён — пересборка протокола", ctx.name(admin), задержка=2)
         return fresh(tid, admin, request)
 
     @r.patch("/tasks/{tid}/due")
@@ -418,11 +451,14 @@ def mount(r: APIRouter, ctx: Ctx) -> None:
         admin = ctx.need_admin(request)
         with lock:
             t = get_or_404(tid)
+            было = t.get("due_date")
             take(t, payload.version, ctx.name(admin))
             new = payload.due_date.isoformat() if payload.due_date else None
             if t.get("due_date") and new and t["due_date"] != new and not t.get("due_original"):
                 store.update("tasks", tid, due_original=t["due_date"])
             pipe.reg.set_due(tid, new, ctx.name(admin), "вручную")
+        if new != было:
+            rebuild_source(t, "срок задачи изменён — пересборка протокола", ctx.name(admin), задержка=2)
         return fresh(tid, admin, request)
 
     @r.patch("/tasks/{tid}/project")
@@ -430,6 +466,7 @@ def mount(r: APIRouter, ctx: Ctx) -> None:
         admin = ctx.need_admin(request)
         with lock:
             t = get_or_404(tid)
+            было = t.get("project_id")
             take(t, payload.version, ctx.name(admin))
             if payload.project_id is None:
                 raise HTTPException(400, "В «Встречах Невалаб» задача всегда в проекте — выберите проект из списка")
@@ -438,6 +475,8 @@ def mount(r: APIRouter, ctx: Ctx) -> None:
                 raise HTTPException(400, "Такого проекта нет в справочнике — выберите из списка")
             store.update("tasks", tid, project_id=p["id"])
             history(tid, t["status"], t["status"], "operator", f"проект: {ctx.project_label(p['id'])}", ctx.name(admin))
+        if p["id"] != было:
+            rebuild_source(t, "проект задачи изменён — пересборка протокола", ctx.name(admin), задержка=2)
         return fresh(tid, admin, request)
 
     @r.patch("/tasks/{tid}/subproject")
@@ -445,6 +484,7 @@ def mount(r: APIRouter, ctx: Ctx) -> None:
         admin = ctx.need_admin(request)
         with lock:
             t = get_or_404(tid)
+            было = t.get("project_id")
             take(t, payload.version, ctx.name(admin))
             # подпроект — запись справочника проектов под тем же проектом верхнего уровня (как ERP podproekty.проверить:
             # только из справочника; пусто — весь проект); задача переходит в подпроект целиком (project_id)
@@ -462,6 +502,8 @@ def mount(r: APIRouter, ctx: Ctx) -> None:
             store.update("tasks", tid, project_id=target)
             history(tid, t["status"], t["status"], "operator",
                     f"подпроект -> {ctx.project_names(target)[1] or 'весь проект'}", ctx.name(admin))
+        if target != было:
+            rebuild_source(t, "подпроект задачи изменён — пересборка протокола", ctx.name(admin), задержка=2)
         return fresh(tid, admin, request)
 
     @r.patch("/tasks/{tid}/description")
@@ -469,11 +511,14 @@ def mount(r: APIRouter, ctx: Ctx) -> None:
         admin = ctx.need_admin(request)
         with lock:
             t = get_or_404(tid)
+            было = (t.get("description") or "").strip()
             take(t, payload.version, ctx.name(admin))
             pipe.reg.set_description(tid, payload.description, ctx.name(admin), "правка формулировки")
             store.insert("doc_corrections", meeting_id=t.get("source_meeting_id"), doc="task", who=ctx.name(admin), at=now(),
                          place=f"формулировка задачи №{tid}", old_text=t.get("description") or "",
                          new_text=payload.description, fix=1)
+        if payload.description.strip() != было:
+            rebuild_source(t, "формулировка задачи изменена — пересборка протокола", ctx.name(admin), задержка=2)
         return fresh(tid, admin, request)
 
     def _удалить_насовсем(tid: int) -> dict | None:
@@ -502,6 +547,7 @@ def mount(r: APIRouter, ctx: Ctx) -> None:
             ctx.sys_msg(f"Задача №{tid} удалена из реестра насовсем",
                         f"Удалил: {ctx.name(admin)}. Формулировка: «{(t.get('description') or '')[:300]}». Встреча-источник: "
                         f"{t.get('source_meeting_id') or 'нет'}. Удаление необратимо.", "tasks")
+        rebuild_source(t, "задача удалена — пересборка протокола", ctx.name(admin), задержка=2)
         return Response(status_code=204)
 
     @r.post("/tasks/bulk-delete")
@@ -511,6 +557,7 @@ def mount(r: APIRouter, ctx: Ctx) -> None:
         admin = ctx.need_admin(request)
         ids = list(dict.fromkeys(int(i) for i in payload.ids))[:500]
         удалены: list[int] = []
+        источники: dict[int, dict] = {}
         отказано = 0
         with lock:
             for tid in ids:
@@ -519,11 +566,15 @@ def mount(r: APIRouter, ctx: Ctx) -> None:
                     отказано += 1
                 else:
                     удалены.append(tid)
+                    if t.get("source_meeting_id"):
+                        источники.setdefault(int(t["source_meeting_id"]), t)
             if удалены:
                 ctx.sys_msg(f"Удалены задачи насовсем: {len(удалены)}",
                             f"Удалил: {ctx.name(admin)}. Номера: {', '.join('№' + str(i) for i in удалены[:100])}"
                             f"{' и др.' if len(удалены) > 100 else ''}. Удаление необратимо; подтверждение было одно.",
                             "tasks")
+        for t in источники.values():
+            rebuild_source(t, "задачи удалены — пересборка протокола", ctx.name(admin), задержка=2)
         return {"deleted": len(удалены), "refused": отказано, "ids": удалены}
 
     @r.post("/tasks/{tid}/operational")
@@ -538,6 +589,7 @@ def mount(r: APIRouter, ctx: Ctx) -> None:
             store.update("tasks", tid, operational=int(payload.value))
             history(tid, t["status"], t["status"], "web_form",
                     f"{РУЧНАЯ_ПОМЕТКА} {'отмечена' if payload.value else 'пометка снята'}", ctx.name(admin))
+        rebuild_source(t, "пометка «оперативная» изменена — пересборка протокола", ctx.name(admin), задержка=2)
         return fresh(tid, admin, request)
 
     @r.post("/tasks/{tid}/revert")
@@ -550,6 +602,7 @@ def mount(r: APIRouter, ctx: Ctx) -> None:
             take(t, version, ctx.name(admin))
             pipe.reg.set_status(tid, TaskStatus.ACTIVE, "web_form", "возвращена в работу", by=ctx.name(admin))
             store.update("tasks", tid, status_detail="")
+        rebuild_source(t, "задача возвращена в работу — пересборка протокола", ctx.name(admin))
         return fresh(tid, admin, request)
 
     @r.post("/tasks/{tid}/under-question")
@@ -576,6 +629,8 @@ def mount(r: APIRouter, ctx: Ctx) -> None:
                     store.update("cards", c["id"], status="accepted" if payload.action == "confirm" else "rejected",
                                  resolution=f"Задача {'оставлена' if payload.action == 'confirm' else 'снята'} — из «Разбора»",
                                  resolved_at=now())
+        rebuild_source(t, "задача подтверждена — пересборка протокола" if payload.action == "confirm"
+                       else "задача снята — пересборка протокола", ctx.name(admin))
         return fresh(tid, admin, request)
 
     @r.post("/tasks/{tid}/note")
@@ -595,12 +650,15 @@ def mount(r: APIRouter, ctx: Ctx) -> None:
             if not text:
                 raise HTTPException(422, "Выберите готовый ответ или напишите, как идёт дело")
             who = ctx.name(u)
+            изменено = False
             if admin and payload.kind == "text" and re.search(r"\b(снято|неактуально)\b", text, re.I):
                 pipe.reg.set_status(tid, TaskStatus.DROPPED, "web_form", text, by=who)
+                изменено = True
             if admin and payload.kind == "reschedule" and payload.due_date:
                 if t.get("due_date") and not t.get("due_original"):
                     store.update("tasks", tid, due_original=t["due_date"])
                 pipe.reg.set_due(tid, payload.due_date.isoformat(), who, "отметка ведущего")
+                изменено = True
             pipe.reg.comment(tid, text, who)
             store.update("tasks", tid, last_comment_by=who, last_comment_date=date.today().isoformat())
             if not admin:
@@ -614,6 +672,8 @@ def mount(r: APIRouter, ctx: Ctx) -> None:
                 pipe.cards.open(t["project_id"], "member_note", f"Отметка по задаче: {text[:120]}",
                                 {"task_id": tid, "description": t.get("description"), "note": text, "kind": payload.kind,
                                  "proposed": proposed, "by": who, "by_user_id": u["id"]}, t.get("source_meeting_id"))
+        if изменено:
+            rebuild_source(t, "задача уточнена — пересборка протокола", ctx.name(u))
         return fresh(tid, u, request)
 
     ctx.task_out = lambda t, u, request: rows_out([t], u, request)[0]

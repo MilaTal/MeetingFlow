@@ -287,6 +287,23 @@ def test_замок_версии_и_правки(env):
     assert c.get(f"/tasks/{tid}", headers=h()).status_code == 404
 
 
+def test_статус_задачи_ставит_пересборку_протокола(env, monkeypatch):
+    """«Тест2_Митфлоу» 20.11.2026: администратор подтвердил выполнение — протокол встречи-источника пересобирается."""
+    c, h, st = env, env.h, env.st
+    mid = st.insert("meetings", project_id=env.pid, date=iso(-1), label="Встреча для пересборки")
+    tid = _task(env, source_meeting_id=mid)
+    calls = []
+    monkeypatch.setattr(c.app.state.queue, "enqueue",
+                        lambda *a, **kw: calls.append((a, kw)) or 1, raising=False)
+    r = c.patch(f"/tasks/{tid}/status", json={"new_status": "done"}, headers=h())
+    assert r.status_code == 200 and r.json()["status"] == "done"
+    assert calls and calls[0][0][1] == mid and "пересборка" in calls[0][0][2]
+    # частичное подтверждение второй задачи — та же встреча, очередь схлопнется (enqueue вызывается ещё раз)
+    tid2 = _task(env, description="Вторая задача", source_meeting_id=mid)
+    c.patch(f"/tasks/{tid2}/status", json={"new_status": "done"}, headers=h())
+    assert calls[-1][0][1] == mid
+
+
 def test_актуализировать_ответственный_и_карточка_ведущему(env):
     c, h, st = env, env.h, env.st
     tid = _task(env)

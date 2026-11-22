@@ -47,6 +47,52 @@ def available() -> tuple[bool, str]:
     return (not missing), "; ".join(missing)
 
 
+def free_memory_bytes() -> int | None:
+    """Сколько физической памяти свободно сейчас, байт; None — измерить не удалось.
+
+    Нужно перед pyannote (21.11.2026): на машине 32 ГБ, но при браузере, двух серверах и проверке местами
+    остаётся меньше гигабайта. Дочерний процесс тогда убивает система, а сборка получает `BrokenProcessPool`
+    и повторяет разбор пять раз. Лучше честно сказать «мало памяти» и сохранить запись, чем терять причину.
+    """
+    if os.name == "nt":
+        try:
+            import ctypes
+            from ctypes import wintypes
+
+            class Память(ctypes.Structure):
+                _fields_ = [("длина", wintypes.DWORD), ("загрузка", wintypes.DWORD),
+                            ("всего_физ", ctypes.c_ulonglong), ("свободно_физ", ctypes.c_ulonglong),
+                            ("всего_файл", ctypes.c_ulonglong), ("свободно_файл", ctypes.c_ulonglong),
+                            ("всего_вирт", ctypes.c_ulonglong), ("свободно_вирт", ctypes.c_ulonglong),
+                            ("свободно_расш", ctypes.c_ulonglong)]
+
+            с = Память()
+            с.длина = ctypes.sizeof(Память)
+            if ctypes.windll.kernel32.GlobalMemoryStatusEx(ctypes.byref(с)):
+                return int(с.свободно_физ)
+        except Exception:  # noqa: BLE001 — измерение не должно мешать разбору
+            return None
+        return None
+    try:
+        return int(os.sysconf("SC_AVPHYS_PAGES") * os.sysconf("SC_PAGE_SIZE"))
+    except (AttributeError, ValueError, OSError):
+        return None
+
+
+def проверить_память() -> None:
+    """Перед pyannote: хватает ли свободной физической памяти. Меньше порога — `NotEnoughMemory`.
+
+    Порог `VOICE_MIN_FREE_MB`, по умолчанию 2500 МБ. Проверка стоит здесь, а не в шаге голосов: тесты и вызовы,
+    где `diarize` подменён, не должны зависеть от памяти машины.
+    """
+    порог_мб = int(os.environ.get("VOICE_MIN_FREE_MB", "2500") or 2500)
+    свободно = free_memory_bytes()
+    if свободно is not None and свободно < порог_мб * 1024 * 1024:
+        raise NotEnoughMemory(
+            f"мало свободной памяти для разделения по голосам: {свободно / 1024 ** 3:.1f} ГБ, нужно не меньше "
+            f"{порог_мб / 1024:.1f} ГБ. Закройте лишние программы и повторите; расшифровка сохранена, запись не удалена.")
+
+
 def state() -> dict:
     """Состояние для панели: ready / not-used / broken и фраза человеку."""
     st = local_models.pyannote_state()
@@ -68,6 +114,10 @@ def assert_local_model(name: str) -> str:
 
 class CloudModelRefused(RuntimeError):
     """Попытка загрузить модель, которая считает не на этой машине."""
+
+
+class NotEnoughMemory(RuntimeError):
+    """Свободной памяти меньше порога: pyannote в дочернем процессе не запускаем."""
 
 
 def _diarization_config() -> dict:
@@ -93,6 +143,10 @@ def diarize(wav_path: Path) -> tuple[list[dict], dict]:
     """Куски речи [{"start", "end", "speaker": "Говорящий N"}] и сводка {"speakers", "elapsed_seconds", "device"}.
     Номера голосов — по порядку первого появления в записи."""
     from . import otdelnyy_process
+
+    # pyannote на процессоре просит несколько гигабайт; при нехватке система убивает дочерний процесс, и сборка
+    # получает `BrokenProcessPool` вместо причины. Проверяем память заранее (21.11.2026) и сохраняем запись.
+    проверить_память()
 
     # Предел (11.11.2026): без него зависший дочерний процесс держал разбор часами — в Планёрке так вышло
     # 87 минут без движения CPU. По пределу — понятная ошибка, встреча идёт дальше без подписей.

@@ -96,10 +96,13 @@ class Модель(MockLLM):
         return out
 
 
-def _сборка(store, project, meeting, theme, tmp_path, tasks=None, voice=True, text=TRANSCRIPT):
+def _сборка(store, project, meeting, theme, tmp_path, tasks=None, voice=True, text=TRANSCRIPT, voice_names=None):
     gen = Модель(tasks)
     p = MeetingPipeline(theme, store, default_registry(), gen, MockLLM(), journal_path=tmp_path / "j.jsonl")
-    meta = {"voice_names": {"Говорящий 1": "Игнатов Иван", "Говорящий 2": "Петрова Анастасия"}} if voice else {}
+    if voice_names is not None:
+        meta = {"voice_names": voice_names}
+    else:
+        meta = {"voice_names": {"Говорящий 1": "Игнатов Иван", "Говорящий 2": "Петрова Анастасия"}} if voice else {}
     store.insert("sources", meeting_id=meeting, name="запись 01.10.2026", kind="transcript", text=text,
                  digest="d" + str(meeting), meta=json.dumps(meta, ensure_ascii=False), created_at="2026-10-01T10:00:00")
     rep = p.run(project, meeting)
@@ -113,6 +116,20 @@ def test_участники_кодом_по_голосам(store, project, meeti
     assert "Посторонний" not in proto
     assert "- Участники" not in gen.protocol_system           # модель раздел не пишет
     assert rep.participants.startswith("участники кодом: 2")
+
+
+def test_неоднозначное_имя_в_участниках_как_услышано(store, project, meeting, theme, tmp_path):
+    """Решение владелицы 20.11.2026: «Мария» при двух Мариях в «Команде» не выбрасывается из «Участников»,
+    а пишется как услышано рядом с полным ФИО."""
+    store.insert("people", project_id=project, full_name="Макарова Мария")
+    store.insert("people", project_id=project, full_name="Афанасьева Мария")
+    текст = TRANSCRIPT + "\n[00:06:00] Мария: Проверю этикетки."
+    _p, _gen, _rep = _сборка(store, project, meeting, theme, tmp_path,
+                             voice_names={"Говорящий 1": "Игнатов Иван", "Говорящий 2": "Мария"}, text=текст)
+    proto = store.get("meetings", meeting)["protocol_md"] or ""
+    участники = proto.split("## Участники", 1)[1].split("##", 1)[0] if "## Участники" in proto else ""
+    assert "Игнатов Иван" in участники and "Мария" in участники
+    assert "Афанасьева" not in участники and "Макарова" not in участники   # догадку не подставляем
 
 
 def test_участники_без_голосов_пишутся_кодом(store, project, meeting, theme, tmp_path):

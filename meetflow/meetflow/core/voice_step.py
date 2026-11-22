@@ -132,7 +132,10 @@ def process(wav_path: str | Path, text: str, meta: dict, *, meeting_id: int, mee
     try:
         # Подшаги для прибора «завис» (06.11.2026): видно, какая именно работа идёт и сколько ей осталось
         hod.ход.подшаг("разделение по голосам", прогноз_сек=длительность * hod.ДОЛЯ_ОЖИДАНИЯ or None)
-        segments, info = diarize.diarize(work_wav)          # отдельный процесс внутри
+        try:
+            segments, info = diarize.diarize(work_wav)      # отдельный процесс внутри
+        except diarize.NotEnoughMemory as exc:
+            raise VoiceStepError(str(exc)) from exc
         if not segments:
             raise VoiceStepError("разделение не нашло кусков речи")
 
