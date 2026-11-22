@@ -174,7 +174,8 @@ def test_docx_export_no_markdown_artifacts():
     d = Document(io.BytesIO(data))
     text = "\n".join(p.text for p in d.paragraphs)
     assert "**" not in text and "`" not in text and len(d.tables) == 1 and d.tables[0].cell(1, 1).text == "2"
-    assert d.styles["Normal"].font.name == "Times New Roman"
+    # 22.11.2026, решение владелицы: оформление DOCX — как в Планёрке (Calibri 11, корпоративный стандарт)
+    assert d.styles["Normal"].font.name == "Calibri"
 
 
 def test_md_export_roundtrip():

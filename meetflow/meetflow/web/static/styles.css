@@ -1013,10 +1013,10 @@ td.cell-status { min-width: 90px; max-width: 220px; overflow-wrap: anywhere; }
 .task-table { width: 100%; }
 /* Отметки для массовых действий (пункт 5 плана 08.11.2026): колонка первой, узкая; полоса — над списком, видна
    при одной отметке и больше. Право проверяет сервер, у участника ни колонки, ни полосы нет. */
-.task-table .task-check-cell { width: 1%; white-space: nowrap; padding-right: 0; }
+.task-table .task-check-cell { width: 34px; min-width: 34px; white-space: nowrap; padding-right: 6px; text-align: center; }
 .task-table .task-check-cell input[type="checkbox"] { width: 15px; height: 15px; cursor: pointer; vertical-align: middle; }
 .reg-bulk { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 12px; margin: 0 0 10px; padding: 8px 12px;
-  border: 1px solid var(--border); border-radius: 10px; background: var(--danger-soft); }
+  border: 1px solid var(--border); border-radius: 10px; background: transparent; }
 .reg-bulk-count { font-weight: 600; }
 .reg-bulk .reg-bulk-del { margin-left: auto; color: var(--danger); border-color: var(--danger); }
 /* № и дата постановки — одна ячейка (владелец 02.10.26): номер, под ним тонко дата. */
