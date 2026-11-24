@@ -104,6 +104,7 @@ class RunReport:
     tasks_added: int = 0
     tasks_held: int = 0
     tasks_doubt: int = 0        # заведено под вопросом (15.10.26)
+    tasks_dropped_duplicates: int = 0  # снято дублей «чуть-чуть другие» (23.11.2026)
     tasks_closed: int = 0
     tasks_dropped: int = 0
     due_dropped: int = 0        # срок от модели, которого во встрече не было
@@ -282,6 +283,21 @@ def _list(out: Any, key: str) -> list:
     return v
 
 
+def _тень_проверки(system: str, пользователь: str, label: str, итог: dict,
+                   meeting_id: int | None = None) -> None:
+    """qwen3.8 на spark-1 в тень (решение владелицы 24.11.2026): тот же черновик, тот же шаблон —
+    только строка журнала. Вердикт, правка по замечаниям и карточки не меняются.
+    Тень выключена — вызова нет; сбой тени сборку не роняет."""
+    try:
+        from . import proverka_ten
+        if not proverka_ten.включена():
+            return
+        proverka_ten.прогнать(system=system, пользователь=пользователь, label=label, основной=итог,
+                              источник="meetflow", meeting_id=meeting_id)
+    except Exception:  # noqa: BLE001 — тень не должна ронять сборку
+        pass
+
+
 def _dict(out: Any, key: str) -> dict:
     if not isinstance(out, dict):
         raise ShapeError(f"ответ модели не объект, а {type(out).__name__}")
@@ -341,6 +357,31 @@ def same_task_text(text: str, descriptions: list[str]) -> bool:
             return False
         return max(coverage(mine, theirs), coverage(theirs, mine)) >= 0.7
     return bool(mine) and any(same(d) for d in descriptions if d)
+
+
+_АДРЕСАТ_В_ТЕКСТЕ = re.compile(r"(?<![а-яё])(?:к|у|для|от)\s+([А-ЯЁ][а-яё-]{2,})")
+
+
+def разные_адресаты(первая: str, вторая: str) -> bool:
+    """«Направлять к Юле» и «Направлять к Антону» — не дубли: разный адресат при общей основе."""
+    а = {м.group(1).lower().replace("ё", "е") for м in _АДРЕСАТ_В_ТЕКСТЕ.finditer(первая or "")}
+    б = {м.group(1).lower().replace("ё", "е") for м in _АДРЕСАТ_В_ТЕКСТЕ.finditer(вторая or "")}
+    return bool(а and б and not (а & б))
+
+
+def похожи_как_дубли(первая: str, вторая: str) -> bool:
+    """«Чуть-чуть другие» формулировки одной задачи (22.11.2026): пересечение основ от 0,55 и не меньше трёх
+    общих слов. Строже `same_task_text` не годится: пары 377/383, 381/387 и 385/389 дают 0,60–0,67, но это дубли.
+    Разные адресаты («к Юле» / «к Антону») и разные номера — не дубли."""
+    if разные_адресаты(первая, вторая):
+        return False
+    mine = set(stems(_without_dates(первая or "")))
+    theirs = set(stems(_without_dates(вторая or "")))
+    if not mine or not theirs:
+        return False
+    if {t for t in mine if t.isdigit()} != {t for t in theirs if t.isdigit()}:
+        return False
+    return len(mine & theirs) >= 3 and max(coverage(mine, theirs), coverage(theirs, mine)) >= 0.55
 
 
 def noise_duplicate(reasons: list[str], unit_text: str, added_descriptions: list[str]) -> bool:
@@ -590,7 +631,7 @@ class MeetingPipeline:
             except (TypeError, ValueError):
                 continue
             for x in roles if isinstance(roles, list) else []:
-                if not isinstance(x, dict) or x.get("role") not in ("участник", "ответственный"):
+                if not isinstance(x, dict) or x.get("role") not in ("участник", "влияющий"):
                     continue
                 имя = " ".join(str(x.get("person") or "").split())
                 ключ = имя.replace("ё", "е").lower()
@@ -652,9 +693,46 @@ class MeetingPipeline:
         Решение владелицы 12.11.2026: участников фиксируем сразу по голосам, а если в разговоре ясно звучит обращение —
         добавляем и его. Смотрим предложения, а не целые строки распознавания (строки бывают по 5–7 тыс. знаков), и
         только `addressee`: имя в третьем лице («Анастасия сказала…») не считается.
+
+        23.11.2026: обращение, которое «Команда» не разрешила сразу, не выбрасывается и не угадывается. Если по
+        отделу/роли в контексте выбор однозначен — ставим полное ФИО (Марина + «1С» → Чекунова Марина Викторовна;
+        Юля + «склад/этикетки» → Габбасова Юлия Вячеславовна). Если контекст не различает — оставляем «как услышано».
         """
+        from . import identity
         out = list(names)
+        услышано: list[str] = []          # обращения, которые «Команда» не разрешила: в участники — как услышано
         видели = {" ".join((n or "").replace("ё", "е").lower().split()) for n in out}
+        имена_в_полных = {ч.lower().replace("ё", "е") for n in out for ч in (n or "").split()[1:2]}
+        люди_по_слову: dict[str, str] = {}
+        неясные: dict[str, dict] = {}
+
+        def без_подписи(значение: str) -> str:
+            return re.sub(r"(?i)^\s*предположительно\s+", "", значение or "")
+
+        def добавить_полное(полное: str) -> None:
+            чистый = без_подписи(полное)
+            ключ = " ".join(чистый.replace("ё", "е").lower().split())
+            if not ключ or ключ in видели:
+                return
+            видели.add(ключ)
+            out.append(полное)
+            имена_в_полных.update(ч.lower().replace("ё", "е") for ч in чистый.split()[1:2])
+
+        def контекстное_фио(полное: str, слово: str, по_контексту: bool = False) -> str:
+            """ФИО, выведенное по контексту (первое имя, отдел/роль), — с подписью «предположительно»."""
+            from .ispolnitel_strazh import разобрать
+            фамилия, _имя = разобрать(слово)
+            метка = по_контексту or not фамилия
+            return ("предположительно " if метка else "") + полное
+
+        def добавить_услышанное(слово: str) -> None:
+            ключ_слова = слово.lower().replace("ё", "е")
+            if (ключ_слова in имена_в_полных or ключ_слова in видели
+                    or not MeetingPipeline._похоже_на_имя(слово)):
+                return
+            видели.add(ключ_слова)
+            услышано.append(слово)
+
         # Быстрый путь: слова, которые вообще могут быть именем человека «Команды» (фамилия, имя, уменьшительное), —
         # и только по ним спрашиваем `find`. Иначе на записи в 47 минут перебор всех слов занимал минуты.
         слова_команды: set[str] = set()
@@ -670,30 +748,129 @@ class MeetingPipeline:
                 части = (полное or "").split()
                 if len(части) > 1:
                     слова_команды.add(части[1].lower())
-        люди_по_слову: dict[str, str] = {}
-        обращение = re.compile(r"([А-ЯЁ][а-яё]{2,})\s*[,!]")
-        for строка in lines or []:
+        обращение = re.compile(r"([А-ЯЁ][а-яё-]{2,}(?:\s+[А-ЯЁ][а-яё-]{2,})?)\s*[,!]")
+        # «…которую хочет Фадеева, и всё» — это не обращение, а имя в придаточном. Обращение стоит в начале фразы
+        # или после запятой/тире/вводного слова. Иначе любое «Фамилия,» в середине фразы попадало в участники.
+        перед_обращением = re.compile(r"(?i)(?:^|[,;:—–\-\]]|\b(?:да|ну|ай|слушай|здравствуйте|привет|спасибо))\s*$")
+        for номер, строка in enumerate(lines or []):
+            # Обращение без отдела в самой фразе («Да, Юля, ещё вопрос») разрешается по соседним репликам:
+            # «бланк приёмки», «сказали со склада». Берём небольшое окно, а не всю запись.
+            окно = " ".join((lines or [])[max(0, номер - 3): номер + 4])
             for предложение in re.split(r"(?<=[.!?…])\s+", строка):
                 if len(out) >= 20:
                     break
-                for слово in обращение.findall(предложение):
-                    ключ_слова = слово.lower()
-                    if ключ_слова not in слова_команды:
+                for найдено in обращение.finditer(предложение):
+                    слово = найдено.group(1)
+                    if not перед_обращением.search(предложение[:найдено.start()]):
                         continue
-                    if ключ_слова not in люди_по_слову:
-                        m = team.find(слово)
-                        if m.person is None or not (m.person.full_name or "").strip():
+                    # Имя может быть из двух слов («Петрова Анастасия, подготовьте…»): в «Команде» ищем полную
+                    # пару, а не только последнее слово.
+                    ключ_слова = " ".join(слово.lower().replace("ё", "е").split())
+                    if not any(ч.lower().replace("ё", "е") in слова_команды for ч in слово.split()):
+                        continue
+                    if ключ_слова in люди_по_слову:
+                        полное = люди_по_слову[ключ_слова]
+                        if полное:
+                            добавить_полное(полное)
+                        elif ключ_слова in неясные:
+                            неясные[ключ_слова]["contexts"].append(окно)
+                        continue
+                    m = team.find(слово, context=предложение)
+                    кандидаты = list(m.candidates or [])
+                    if m.person is None and not кандидаты:
+                        # «Юля» без темы не находится: у «Команды» в ФИО стоит «Юлия». Пробуем встроенные
+                        # уменьшительные и уже их кандидатов сужаем по контексту.
+                        for канон in identity.встроенные_уменьшительные().get(ключ_слова, []):
+                            m2 = team.find(канон, context=предложение)
+                            if m2.person is not None and (m2.person.full_name or "").strip():
+                                m = m2
+                                кандидаты = []
+                                break
+                            кандидаты += list(m2.candidates or [])
+                    if m.person is not None and (m.person.full_name or "").strip():
+                        полное = контекстное_фио(" ".join(m.person.full_name.split()), слово)
+                        люди_по_слову[ключ_слова] = полное
+                        добавить_полное(полное)
+                        continue
+                    if кандидаты:
+                        выбрано = MeetingPipeline._выбрать_по_контексту(кандидаты, [окно])
+                        if выбрано:
+                            выбрано = контекстное_фио(выбрано, слово, по_контексту=True)
+                            люди_по_слову[ключ_слова] = выбрано
+                            добавить_полное(выбрано)
+                        else:
+                            # Несколько кандидатов: ждём остальные предложения, там может быть отдел/роль.
                             люди_по_слову[ключ_слова] = ""
-                            continue
-                        люди_по_слову[ключ_слова] = " ".join(m.person.full_name.split())
-                    полное = люди_по_слову[ключ_слова]
-                    if not полное:
+                            неясные[ключ_слова] = {"слово": слово, "candidates": кандидаты,
+                                                   "contexts": [окно]}
                         continue
-                    ключ = " ".join(полное.replace("ё", "е").lower().split())
-                    if ключ not in видели:
-                        видели.add(ключ)
-                        out.append(полное)
-        return out
+                    люди_по_слову[ключ_слова] = ""
+                    добавить_услышанное(слово)
+        for ключ_слова, данные in неясные.items():
+            if люди_по_слову.get(ключ_слова):
+                continue
+            выбрано = MeetingPipeline._выбрать_по_контексту(данные["candidates"], данные["contexts"])
+            if выбрано:
+                выбрано = контекстное_фио(выбрано, данные["слово"], по_контексту=True)
+                люди_по_слову[ключ_слова] = выбрано
+                добавить_полное(выбрано)
+            else:
+                добавить_услышанное(данные["слово"])
+        return out + услышано
+
+    _КОНТЕКСТ_ОТДЕЛА = (
+        (re.compile(r"склад|хранен|комплект|этикет|бланк|приемк|приёмк|маркир|накле|клеить|печат|расходн", re.I),
+         ("хранен", "склад", "комплект")),
+        (re.compile(r"1с|изи|систем|карточк|производител|номенклатур|очистк|датчик|шаблон", re.I),
+         ("1с", "техническ", "ото")),
+        (re.compile(r"договор|юрид|претенз|согласован", re.I), ("юрид",)),
+        (re.compile(r"закуп|поставщик|счет|счёт|оплат|цена|стоимост", re.I), ("закуп",)),
+        (re.compile(r"бухгал|акт|платеж|платёж", re.I), ("бухгал",)),
+        (re.compile(r"коммерч|продаж|клиент|тендер", re.I), ("коммерч",)),
+    )
+
+    @staticmethod
+    def _выбрать_по_контексту(candidates: list, contexts: list[str]) -> str:
+        """Полное ФИО, если отдел/роль кандидата однозначно следует из контекста; иначе пусто.
+
+        Не угадываем: голос получает только тот, у кого отдел или роль содержит признак из фразы. Одинаковые записи
+        одного человека («Чекунова Марина» и «Чекунова Марина Викторовна») склеиваются, разные тёзки — нет.
+        """
+        def части(p) -> list[str]:
+            return " ".join((getattr(p, "full_name", "") or "").replace("ё", "е").lower().split()).split()
+
+        уникальные: list = []
+        for p in candidates:
+            ч = части(p)
+            if len(ч) < 2:
+                continue
+            тот_же = False
+            for q in уникальные:
+                чq = части(q)
+                короткий, длинный = (ч, чq) if len(ч) <= len(чq) else (чq, ч)
+                if ч == чq or (len(короткий) >= 2 and длинный[:len(короткий)] == короткий):
+                    тот_же = True
+                    break
+            if not тот_же:
+                уникальные.append(p)
+        if not уникальные:
+            return ""
+        if len(уникальные) == 1:
+            return max(уникальные, key=lambda p: len(части(p))).full_name
+        голоса = {id(p): 0 for p in уникальные}
+        for контекст in contexts or []:
+            for шаблон, признаки in MeetingPipeline._КОНТЕКСТ_ОТДЕЛА:
+                if not шаблон.search(контекст or ""):
+                    continue
+                for p in уникальные:
+                    текст = f"{getattr(p, 'department', '')} {getattr(p, 'role', '')}".lower().replace("ё", "е")
+                    if any(признак in текст for признак in признаки):
+                        голоса[id(p)] += 1
+        максимум = max(голоса.values(), default=0)
+        if максимум <= 0:
+            return ""
+        лучшие = [p for p in уникальные if голоса[id(p)] == максимум]
+        return лучшие[0].full_name if len(лучшие) == 1 else ""
 
     @staticmethod
     def _похоже_на_имя(имя: str) -> bool:
@@ -776,6 +953,41 @@ class MeetingPipeline:
         return out
 
     # ---------------------------------------------------------------- приём
+    def _свести_дубли(self, meeting_id: int) -> list[int]:
+        """Снять активные дубли задач этой встречи, отличающиеся «чуть-чуть» (слово владелицы 22.11.2026).
+
+        Дубль — та же формулировка по `same_task_text`, если не названы разные адресаты («к Юле» / «к Антону») и
+        исполнители не разные люди. Если у одной копии исполнитель есть, остаётся она; без исполнителей — первая.
+        Каждое снятие — строкой истории; карточек не заводим: это не потеря задачи, а её повтор.
+        """
+        строки = self.s.q("SELECT id, description, assignee FROM tasks WHERE source_meeting_id=? AND status='active' "
+                          "ORDER BY id", (meeting_id,))
+        оставлены: list[dict] = []
+        снято: list[int] = []
+        for r in строки:
+            дубль = next((k for k in оставлены
+                          if похожи_как_дубли(r["description"] or "", k["description"] or "")), None)
+            if дубль is None:
+                оставлены.append(dict(r))
+                continue
+            # Разные исполнители — разные поручения, даже если слова похожи.
+            if (r["assignee"] or "").strip() and (дубль["assignee"] or "").strip() \
+                    and r["assignee"] != дубль["assignee"]:
+                оставлены.append(dict(r))
+                continue
+            if (r["assignee"] or "").strip() and not (дубль["assignee"] or "").strip():
+                # У новой копии есть человек, у прежней нет — оставляем новую, прежнюю снимаем.
+                self.reg.set_status(дубль["id"], TaskStatus.DROPPED, "operator",
+                                    f"дубль задачи {r['id']}: та же формулировка, исполнитель есть у {r['id']}",
+                                    by="сборка")
+                снято.append(дубль["id"])
+                оставлены[оставлены.index(дубль)] = dict(r)
+            else:
+                self.reg.set_status(r["id"], TaskStatus.DROPPED, "operator",
+                                    f"дубль задачи {дубль['id']}: та же формулировка", by="сборка")
+                снято.append(r["id"])
+        return снято
+
     def _снять_не_людей(self, project_id: int, meeting_id: int, team) -> list[str]:
         """Снять исполнителей, которые не человек «Команды» и не известный отдел.
 
@@ -1930,6 +2142,17 @@ class MeetingPipeline:
             with self.s.tx():
                 added = []
                 new_people: dict[str, int] = {}
+                # Контекст задачи (перенос требования Планёрки 22.11.2026): проект, тема встречи и говорящий.
+                # Раньше в реестре была только формулировка, и было непонятно, откуда она.
+                project_text = ((self.s.get("projects", project_id) or {}).get("name") or "").strip()
+                topic_text = ((self._topic(meeting) or {}).get("name") or meeting.get("topic") or "").strip()
+                from .ispolnitel_strazh import говорящий_цитаты
+
+                def speaker_of(quote: str | None) -> str:
+                    try:
+                        return (говорящий_цитаты(quote, source.text)[0] or "").strip()
+                    except Exception:  # noqa: BLE001 — контекст не должен ронять сборку
+                        return ""
 
                 def new_person(name: str) -> tuple[str, int, bool]:
                     """Новый «не подтверждён» в этом прогоне: одна запись на человека, сверка по основам слов
@@ -1965,7 +2188,9 @@ class MeetingPipeline:
                         if (pend.get("name") or "").strip():
                             не_люди_сокращения.add(pend["name"].strip())
                     tid = self.reg.add(project_id, g.description, who, meeting_id, g.quote, d.due_date, mdate,
-                                       due_kinds.get(id(d)), doubt_reason=d.doubt_reason)
+                                       due_kinds.get(id(d)), doubt_reason=d.doubt_reason,
+                                       project_text=project_text, topic_text=topic_text,
+                                       speaker=speaker_of(g.quote))
                     added.append((tid, d, g))
                     if id(d) in merged_history:
                         ukrupnenie_sborka.записать_историю(self.s, tid, merged_history[id(d)])
@@ -2070,7 +2295,9 @@ class MeetingPipeline:
                             hit_kept(hit)
                             continue
                         tid = self.reg.add(project_id, g.description or d.description, who, meeting_id, quote,
-                                           d.due_date, mdate, due_kinds.get(id(d)), doubt_reason=doubt_text(reasons))
+                                           d.due_date, mdate, due_kinds.get(id(d)), doubt_reason=doubt_text(reasons),
+                                           project_text=project_text, topic_text=topic_text,
+                                           speaker=speaker_of(quote or d.quote))
                         added.append((tid, d, g))
                         doubt += 1
                         payload["task_id"] = tid
@@ -2117,7 +2344,9 @@ class MeetingPipeline:
                             who, pend = None, {}
                         # объект рядом с поручением — и на этом пути (пункт 8 плана)
                         g.description = self._с_объектом(g.description, g.quote, project_id, meeting_id, source.lines)
-                        tid = self.reg.add(project_id, g.description, who, meeting_id, g.quote, None, mdate)
+                        tid = self.reg.add(project_id, g.description, who, meeting_id, g.quote, None, mdate,
+                                           project_text=project_text, topic_text=topic_text,
+                                           speaker=speaker_of(g.quote))
                         added.append((tid, TaskDraft(unit.text, None), g))
                         rep.units_tasks += 1
                         if pend.get("reason") == "new_person" and np_new:
@@ -2147,7 +2376,9 @@ class MeetingPipeline:
                         if not set(g.reasons) & OUT_OF_REGISTRY:     # под вопросом — и на этом пути (15.10.26)
                             tid = self.reg.add(project_id, g.description or unit.text,
                                                g.assignee.label if g.assignee else None, meeting_id, unit.quote,
-                                               None, mdate, doubt_reason=doubt_text(g.reasons))
+                                               None, mdate, doubt_reason=doubt_text(g.reasons),
+                                               project_text=project_text, topic_text=topic_text,
+                                               speaker=speaker_of(unit.quote))
                             added.append((tid, TaskDraft(unit.text, None), g))
                             doubt += 1
                             self.cards.open(project_id, "task_doubt", f"Задача под вопросом: {unit.text[:120]}",
@@ -2185,6 +2416,13 @@ class MeetingPipeline:
                                                kept_ids | {tid for tid, _d, _g in added},
                                                incomplete=stopped is not None or limited, текст_записи=source.text,
                                                new_ids={tid for tid, _d, _g in added})
+                # Дубли «чуть-чуть другие» (пункт 22.11.2026): после всех веток задач, до таблицы протокола.
+                try:
+                    снятые_дубли = self._свести_дубли(meeting_id)
+                    if снятые_дубли:
+                        rep.tasks_dropped_duplicates = len(снятые_дубли)
+                except Exception as exc:  # noqa: BLE001 — дубли не отменяют протокол
+                    self.step_failed(project_id, meeting_id, "Сведение дублей задач", exc)
                 if res.get("near_pairs"):
                     from . import asr_journal as _журнал
                     _журнал.write(self.units_journal_path, meeting_id=meeting_id, near_pairs=res["near_pairs"])
@@ -2336,6 +2574,8 @@ class MeetingPipeline:
                     rep.findings = [{"issue": str(f.get("issue", ""))[:500], "quote": str(f.get("quote", ""))[:500],
                                      "severity": str(f.get("severity", "minor"))[:10]}
                                     for f in _list(out, "findings") if isinstance(f, dict)][:20]
+                    _тень_проверки(sysm, user, f"Протокол встречи {meeting.get('date') or ''}",
+                                   {"clean": not rep.findings, "findings": rep.findings}, meeting_id)
                 except BudgetExceeded as e:
                     limited = True
                     rep.findings = [{"issue": f"Проверка не выполнена: {e}", "severity": "minor"}]

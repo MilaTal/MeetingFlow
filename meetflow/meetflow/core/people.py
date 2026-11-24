@@ -69,8 +69,15 @@ class Team:
                 self._since = ""
         self.people = [p for p in people if p.confirmed]
         self.unconfirmed = [p for p in people if not p.confirmed]
-        # «Настя» -> ["Анастасия"]
-        self._dim = {k.lower(): [v.lower() for v in vs] for k, vs in (diminutives or {}).items()}
+        # «Настя» -> ["Анастасия"]. Встроенные уменьшительные нужны и без темы: в теме `mf_protocol` раздела
+        # `people.diminutives` нет, и «Юля»/«Маша» иначе не находились. Тема может дополнить или переопределить.
+        from . import identity
+        все_уменьшительные = identity.встроенные_уменьшительные()
+        for к, значения in (diminutives or {}).items():
+            if isinstance(значения, str):
+                значения = [значения]
+            все_уменьшительные[str(к).lower()] = [str(з).lower() for з in значения]
+        self._dim = все_уменьшительные
         self._heads = {k.lower(): v for k, v in (department_heads or {}).items()}
 
     def _first_names(self, token: str) -> list[str]:

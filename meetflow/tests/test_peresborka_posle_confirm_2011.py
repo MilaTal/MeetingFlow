@@ -115,6 +115,15 @@ def test_ручной_список_участников_ставит_перес�
     _assert_rebuild(env)
 
 
+def test_комментарий_к_задаче_ставит_пересборку(env):
+    """Пункт 2 файлов 22.11: комментарий к задаче — тоже повод пересобрать протокол встречи-источника."""
+    tid = _task(env)
+    r = env.post(f"/api/tasks/{tid}/comment", json={"text": "Уточнил у Фадеевой: артикула достаточно"},
+                 headers=env.h)
+    assert r.status_code == 200
+    _assert_rebuild(env)
+
+
 def test_та_же_формулировка_не_плодит_пересборку(env):
     tid = _task(env, description="Формулировка без изменений")
     r = env.patch(f"/tasks/{tid}/description", json={"description": "Формулировка без изменений", "version": 1}, headers=env.h)

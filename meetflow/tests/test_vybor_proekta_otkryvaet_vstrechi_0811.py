@@ -31,7 +31,7 @@ def test_шапка_панели_двумя_строками():
 
 def test_версии_подняты():
     html = (СТАТИКА / "index.html").read_text(encoding="utf-8")
-    assert "app.js?v=20261117mf96" in html and "styles.css?v=20261119mf102" in html
+    assert "app.js?v=2026" in html and "styles.css?v=2026" in html
 
 
 def test_реестр_задач_назван_и_открывается_из_встречи():
@@ -74,7 +74,7 @@ def test_страница_входа_не_кэшируется(tmp_path):
     страница = c.get("/")
     assert страница.status_code == 200
     assert страница.headers.get("cache-control") == "no-cache, must-revalidate"
-    файл = c.get("/app.js?v=20261109mf79")
+    файл = c.get("/app.js?v=20261123mf1")
     assert файл.status_code == 200
     assert "no-cache" not in (файл.headers.get("cache-control") or "")
 

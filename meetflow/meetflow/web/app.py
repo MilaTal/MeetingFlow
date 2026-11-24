@@ -1118,6 +1118,8 @@ def create_app(theme_name: str | None = None, db_path: str | None = None, journa
         if not can(u, "task_status") and not responsible:
             raise HTTPException(403, "Комментарий оставляет ответственный или администратор.")
         pipe.reg.comment(tid, body.text, u["name"] or u["role"])
+        # Слово владелицы 20.11.2026 и пункт 2 файлов 22.11: после любого комментария протокол идёт на пересборку.
+        _rebuild_task(t, "комментарий к задаче — пересборка протокола", u["name"] or u["role"], задержка=2)
         return {"ok": True}
 
     def doubt_buttons_now(c: dict) -> list[dict]:

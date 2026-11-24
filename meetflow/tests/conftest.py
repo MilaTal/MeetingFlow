@@ -10,6 +10,7 @@ import pytest
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 os.environ["MEETFLOW_LLM"] = "mock"
+os.environ["SHADOW_VERIFY"] = "0"  # 24.11.2026: теневая проверка qwen3.8 — только в бою и в своём тесте
 # Рабочий data/models.json тестам не виден: маршруты задают сами тесты (09.10.26). Папка временная: «Модели» без
 # файла кладут справочник заготовок (15.10.26) — в репозиторий он не попадает.
 import tempfile  # noqa: E402

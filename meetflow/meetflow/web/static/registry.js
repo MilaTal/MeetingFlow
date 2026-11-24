@@ -186,6 +186,18 @@ function реестрИтог(t) {
   return t.status === "done" ? "выполнена" : "";
 }
 
+// Контекст задачи (перенос требования Планёрки 22.11.2026): проект, тема, кто говорил и цитата — раскрывается
+// под формулировкой, чтобы не растягивать каждую строку реестра.
+function реестрКонтекст(t) {
+  const части = [];
+  if (t.project_text) части.push(`проект: ${esc(t.project_text)}`);
+  if (t.topic_text) части.push(`тема: ${esc(t.topic_text)}`);
+  if (t.speaker) части.push(`говорил: ${esc(t.speaker)}`);
+  if (t.source_quote) части.push(`<span class="task-context-quote">${esc(t.source_quote)}</span>`);
+  if (!части.length) return "";
+  return `<details class="task-context"><summary class="doc-cell-sub">контекст задачи</summary><div class="doc-cell-sub">${части.join(" · ")}</div></details>`;
+}
+
 // Описание и под ним «поставлена дд.мм.гггг» — разметка 8000 (taskDescHtml). Ссылка на встречу и проект — та же подпись: на 8000
 // их нет, на стенде строка ведёт на встречу (задание стенда, п. 4.2) — убрать значило бы потерять переход (вопрос владельцу).
 function реестрОписание(t, closed) {
@@ -203,7 +215,7 @@ function реестрОписание(t, closed) {
   const можно = isAdmin() && !closed;
   const ссылка = оперативнаяСсылка(t, можно);
   const приставка = реестрПриставка(t);
-  return `${приставка ? `<span class="task-project-prefix">${esc(приставка)}</span>` : ""}${esc(t.description)}${точкаВопроса(t)}${оперативнаяМетка(t, можно)}${под || ссылка ? ` <span class="doc-cell-sub">${под ? под + ссылка : ссылка.replace(/^ · /, "")}</span>` : ""}${коммент ? ` ${коммент}` : ""}`;
+  return `${приставка ? `<span class="task-project-prefix">${esc(приставка)}</span>` : ""}${esc(t.description)}${точкаВопроса(t)}${оперативнаяМетка(t, можно)}${под || ссылка ? ` <span class="doc-cell-sub">${под ? под + ссылка : ссылка.replace(/^ · /, "")}</span>` : ""}${коммент ? ` ${коммент}` : ""}${реестрКонтекст(t)}`;
 }
 
 // Строка реестра в работе — 1 в 1 со строкой старого реестра рабочей ERP (renderTaskTable, порт 8000): № | Описание (ниже

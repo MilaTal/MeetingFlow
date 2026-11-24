@@ -153,6 +153,8 @@ def test_путь_пересборки_с_файлом(демо):
         стр.wait_for_timeout(2500)                       # загрузка и возможная автозаглушечная сборка
         if стр.locator("#reader-main-btn[disabled]").count():
             стр.wait_for_selector("#reader-main-btn:not([disabled])", timeout=60000)
+        # Панель «Материалы» — окно второго уровня (23.11.2026): закрываем, иначе она перекрывает кнопку.
+        стр.keyboard.press("Escape")
         клики.по(стр.locator("#reader-main-btn"))
         клики.по(стр.locator("#confirm-ok"))
         стр.wait_for_timeout(2500)

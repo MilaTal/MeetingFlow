@@ -28,7 +28,8 @@ class TaskRegistry:
 
     def add(self, project_id: int, description: str, assignee: str | None, meeting_id: int | None = None,
             quote: str = "", due_date: str | None = None, date_set: str | None = None,
-            due_kind: str | None = None, doubt_reason: str = "") -> int:
+            due_kind: str | None = None, doubt_reason: str = "",
+            project_text: str = "", topic_text: str = "", speaker: str = "") -> int:
         if meeting_id:   # формулировка от модели — через фильтр выхода; набранное человеком не трогаем
             from .guard import filter_text
             description = filter_text(description)[0]
@@ -52,7 +53,8 @@ class TaskRegistry:
         tid = self.s.insert("tasks", project_id=project_id, description=description, assignee=assignee,
                             status=TaskStatus.ACTIVE.value, due_date=due_date, due_kind=due_kind,
                             date_set=date_set or now()[:10],
-                            source_meeting_id=meeting_id, source_quote=quote, doubt_reason=doubt_reason[:300])
+                            source_meeting_id=meeting_id, source_quote=quote, doubt_reason=doubt_reason[:300],
+                            project_text=project_text[:500], topic_text=topic_text[:500], speaker=speaker[:200])
         self._history(tid, None, TaskStatus.ACTIVE.value, "meeting" if meeting_id else "web_form", quote)
         return tid
 

@@ -1777,3 +1777,31 @@ mark.zapis-mark { background: var(--accent-soft); color: inherit; box-shadow: in
 /* Обучающее видео (10.11.2026): файл лежит в static/media и отдаётся статикой. Пропорции 16:9 держим и до
    загрузки метаданных, чтобы блок не схлопывался и кадр не обрезался по высоте. */
 .help-video { height: auto; aspect-ratio: 16 / 9; object-fit: contain; }
+
+/* Окно второго уровня (решение владелицы 22.11.2026): панели встречи — не колонка 280–400 px справа и не
+   выезжающий ящик, а полноценное окно по центру. Таблицы и колонки задач видны целиком. */
+.mt-drawer.mt-level2 { position: fixed; top: 3vh; left: 50%; right: auto; bottom: auto; transform: translateX(-50%);
+  width: min(1240px, 96vw); max-height: 94vh; z-index: 950; overflow: auto; background: var(--surface, #fff);
+  border: 1px solid var(--border); border-radius: 14px; box-shadow: 0 24px 80px rgba(24, 24, 27, .28);
+  padding: 24px 28px; }
+.mt-drawer-backdrop { position: fixed; inset: 0; background: rgba(24, 24, 27, .38); z-index: 940; }
+.mt-drawer-backdrop[hidden] { display: none; }
+.mt-layout:has(.mt-drawer.mt-level2:not([hidden])) { grid-template-columns: minmax(0, 1fr); }
+.mt-drawer.mt-level2[data-k="tasks"], .mt-drawer.mt-level2[data-k="more"] { position: fixed; top: 3vh; right: auto;
+  width: min(1240px, 96vw); max-height: 94vh; box-shadow: 0 24px 80px rgba(24, 24, 27, .28);
+  border: 1px solid var(--border); border-radius: 14px; }
+.mt-drawer.mt-level2 .mt-drawer-head { top: -24px; margin: -24px -28px 0; padding: 24px 28px 8px;
+  border-radius: 14px 14px 0 0; background: var(--surface, #fff); }
+.mt-drawer.mt-level2 .mt-plan { max-height: none; overflow: visible; }
+.mt-drawer.mt-level2 .doc-content table { min-width: 720px; }
+@media (max-width: 900px) {
+  .mt-drawer.mt-level2, .mt-drawer.mt-level2[data-k="tasks"], .mt-drawer.mt-level2[data-k="more"] {
+    top: 0; left: 0; transform: none; width: 100%; max-height: 100%; border-radius: 0; padding: 18px; }
+  .mt-drawer.mt-level2 .mt-drawer-head { top: -18px; margin: -18px -18px 0; padding: 18px 18px 8px; border-radius: 0; }
+}
+
+/* Контекст задачи в реестре (23.11.2026): раскрывается под формулировкой, не растягивая строку. */
+.task-context { margin-top: 2px; }
+.task-context summary { cursor: pointer; }
+.task-context .doc-cell-sub { display: block; margin-top: 2px; }
+.task-context-quote { display: block; margin-top: 2px; color: var(--text-muted); }

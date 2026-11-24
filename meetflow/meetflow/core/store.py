@@ -84,6 +84,9 @@ SCHEMA: dict[str, dict[str, str]] = {
               # время правки, кто оставил последний комментарий и когда, первоначальный срок переходящей задачи, подпроект
               "version": "INTEGER DEFAULT 1", "updated_at": "TEXT", "last_comment_by": "TEXT DEFAULT ''",
               "last_comment_date": "TEXT", "due_original": "TEXT", "subproject": "TEXT DEFAULT ''",
+              # контекст задачи (перенос требований Планёрки 22.11.2026): для какого проекта, по какой теме и кто
+              # говорил — иначе в реестре видна только формулировка и непонятно, откуда она
+              "project_text": "TEXT DEFAULT ''", "topic_text": "TEXT DEFAULT ''", "speaker": "TEXT DEFAULT ''",
               "status_detail": "TEXT DEFAULT ''"},
     # версии протокола (находки стенда 43, 47; решение владельца 15.10.26): прежняя не затирается; model — модель,
     # которая написала текст (ответившая точка маршрута), а не настроенная основная

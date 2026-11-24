@@ -310,12 +310,26 @@ async function renderMeetingReader(id, запрошеннаяВкладка) {
   // «Поправить» у замечания (панель справа) правит документ этой страницы (решение владелицы 24.10.2026).
   if (документ) _полотнаЭкрана.set("mt-doc-text", { base: основаПолотна, перерисовать: () => renderMeetingReader(id, tab) });
   const $d = document.getElementById("mt-drawer");
+  // Окно второго уровня (решение владелицы 22.11.2026): панель не сдвигает документ и не режет колонки таблиц.
+  document.getElementById("mt-drawer-backdrop")?.remove();
+  const подложка = document.createElement("div");
+  подложка.className = "mt-drawer-backdrop";
+  подложка.id = "mt-drawer-backdrop";
+  подложка.hidden = true;
+  document.body.appendChild(подложка);
+  const закрытьМт = (кнопка = null) => {
+    $d.hidden = true; $d.dataset.k = ""; $d.classList.remove("mt-level2"); _открытаяПанельВстречи = "";
+    подложка.hidden = true; кнопка?.setAttribute("aria-expanded", "false");
+  };
+  подложка.addEventListener("click", () => закрытьМт());
   const открыть = async (k, кнопка) => {
     document.querySelectorAll(".mt-btn[data-drawer]").forEach(b => b.setAttribute("aria-expanded", "false"));
-    if ($d.dataset.k === k && !$d.hidden) {
-      $d.hidden = true; $d.dataset.k = ""; _открытаяПанельВстречи = ""; return;
-    }
+    if ($d.dataset.k === k && !$d.hidden) { закрытьМт(кнопка); return; }
     $d.dataset.k = k;
+    $d.classList.add("mt-level2");
+    $d.setAttribute("role", "dialog");
+    $d.setAttribute("aria-modal", "true");
+    подложка.hidden = false;
     кнопка?.setAttribute("aria-expanded", "true");
     let тело = "";
     if (k === "tasks") {
@@ -347,7 +361,7 @@ async function renderMeetingReader(id, запрошеннаяВкладка) {
         ${админ && протокол.generated_at ? `<div class="page-sub">собран ${esc(fmtRuDateTime(протокол.generated_at))}</div>` : ""}
         <a class="btn-link" href="/meetings/${id}/recognition/export" target="_blank">Выгрузить итоги распознавания</a>`;
     }
-    $d.innerHTML = `<div class="mt-drawer-head"><button type="button" class="mt-close" id="mt-close" aria-expanded="true" aria-controls="mt-drawer" title="Свернуть панель (Esc)">Свернуть ▾</button></div>${тело}`;
+    $d.innerHTML = `<div class="mt-drawer-head"><button type="button" class="mt-close" id="mt-close" aria-expanded="true" aria-controls="mt-drawer" title="Закрыть окно (Esc)">Закрыть ✕</button></div>${тело}`;
     const заголовокПанели = $d.querySelector(":scope > h2");
     if (заголовокПанели) $d.querySelector(".mt-drawer-head").prepend(заголовокПанели);
     $d.hidden = false;
@@ -357,10 +371,7 @@ async function renderMeetingReader(id, запрошеннаяВкладка) {
     $d.style.top = k === "tasks" && ряд && слой && getComputedStyle($d).position === "absolute"
       ? `${Math.round(ряд.getBoundingClientRect().bottom - слой.getBoundingClientRect().top + 8)}px` : "";
     if (k === "materials") подключитьМатериалы(id, tab);
-    document.getElementById("mt-close").addEventListener("click", () => {
-      $d.hidden = true; $d.dataset.k = ""; _открытаяПанельВстречи = "";
-      кнопка?.setAttribute("aria-expanded", "false");
-    });
+    document.getElementById("mt-close").addEventListener("click", () => закрытьМт(кнопка));
     document.getElementById("mt-all-tasks")?.addEventListener("click", () => реестрПоВстрече(id, встреча.date));
   };
   document.querySelectorAll(".mt-btn[data-drawer]").forEach(b => b.addEventListener("click", () => открыть(b.dataset.drawer, b)));
@@ -376,7 +387,7 @@ async function renderMeetingReader(id, запрошеннаяВкладка) {
   const наEsc = ev => {
     if (ev.key !== "Escape") return;
     if (!document.getElementById("mt-drawer")) { document.removeEventListener("keydown", наEsc); return; }
-    $d.hidden = true; $d.dataset.k = ""; _открытаяПанельВстречи = "";
+    закрытьМт();
   };
   if (renderMeetingReader._наEsc) document.removeEventListener("keydown", renderMeetingReader._наEsc);
   renderMeetingReader._наEsc = наEsc;
