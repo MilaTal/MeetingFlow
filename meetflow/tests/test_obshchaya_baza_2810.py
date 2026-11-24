@@ -194,3 +194,10 @@ def test_выключатели_через_api(tmp_path):
     assert c.post("/api/settings/company-base/all", json={"enabled": True}, headers=h).json()["all_projects"] is True
     assert c.post(f"/api/projects/{pid}/settings/company-topic", json={"enabled": True},
                   headers={"X-User-Role": "member", "X-User-Name": "u"}).status_code in (401, 403)
+
+
+def test_unc_открывается_как_путь_а_не_authority():
+    """24.11.2026: база Планёрки лежит на общей папке (UNC). `file://server/...` sqlite отвергает как «authority»."""
+    from pathlib import Path
+    assert ob._uri_чтения(Path(r"\\SD2\GROUPS\b.db")) == "file:////SD2/GROUPS/b.db?mode=ro"
+    assert ob._uri_чтения(Path(r"C:\tmp\b.db")) == "file:C:/tmp/b.db?mode=ro"

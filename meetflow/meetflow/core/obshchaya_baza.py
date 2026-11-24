@@ -80,9 +80,18 @@ def _столбцы(con, таблица: str) -> set[str]:
     return {r[1] for r in con.execute(f"PRAGMA table_info({таблица})")}
 
 
+def _uri_чтения(п: Path) -> str:
+    r"""URI только для чтения. UNC `\\server\share\…` → `file:////server/share/…`: с двумя чертами sqlite видит
+    «authority» вместо пути и базу на общей папке не открывает (найдено 24.11.2026 — общая база компании)."""
+    адрес = Path(п).as_posix()
+    if адрес.startswith("//"):
+        адрес = "//" + адрес
+    return f"file:{адрес}?mode=ro"
+
+
 def _из_файла(п: Path) -> dict:
     """Проекты и люди Планёрки; база открывается только на чтение."""
-    con = sqlite3.connect(f"file:{п.as_posix()}?mode=ro", uri=True)
+    con = sqlite3.connect(_uri_чтения(п), uri=True)
     try:
         con.row_factory = sqlite3.Row
         пс = _столбцы(con, "projects")

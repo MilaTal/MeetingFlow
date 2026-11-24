@@ -439,3 +439,24 @@ def test_switch_seen_even_with_same_mtime_and_size(setup):
     lr.use("generate", "spare", path)
     os.utime(path, ns=(st.st_atime_ns, st.st_mtime_ns))       # тот же тик времени
     assert llm.complete("s", "u").text == "ответ spare"
+
+
+def test_общий_файл_с_родом_nemotron_читается(tmp_path, monkeypatch):
+    """24.11.2026: models.json один для Планёрки, ERP и MeetFlow. Род `nemotron`, добавленный в Планёрке, не должен
+    ронять «Модели» MeetFlow — раньше панель отвечала «kind должен быть одним из …» и не показывала ни одной точки."""
+    import json as _json
+    path = tmp_path / "models.json"
+    path.write_text(_json.dumps({
+        "endpoints": {
+            "Транс": {"kind": "asr-service", "url": "http://192.168.100.224:8021/transcribe", "form": "multipart"},
+            "nemotron-transcribe": {"kind": "nemotron", "url": "http://192.168.100.30:8000",
+                                    "model": "nemotron-transcribe", "chunk_seconds": "1200"},
+            "main": {"kind": "openai", "url": "http://main", "model": "m"},
+        },
+        "roles": {"generate": ["main"], "asr": ["Транс", "nemotron-transcribe"]},
+    }, ensure_ascii=False), encoding="utf-8")
+    monkeypatch.setenv("MODEL_ROUTES_PATH", str(path))
+    monkeypatch.setattr(lr.mr._state, "down_until", {})
+    d = lr.panel()
+    assert d["switchable"] and "nemotron" in d["kinds"]
+    assert [r["name"] for r in d["roles"]["asr"]] == ["Транс", "nemotron-transcribe"]

@@ -190,8 +190,8 @@ except ImportError:
 
 OPENROUTER_URL = "https://openrouter.ai/api/v1/chat/completions"
 KINDS = ("openrouter", "openai", "ollama")
-ASR_KINDS = ("faster-whisper", "python", "asr-service")   # распознавание — на этой машине или во внутренней сети
-CODE_ASR_KINDS = ("python", "asr-service")                 # распознаёт чужой движок: функция или сервис
+ASR_KINDS = ("faster-whisper", "python", "asr-service", "nemotron")   # распознавание — на этой машине или во внутренней сети
+CODE_ASR_KINDS = ("python", "asr-service", "nemotron")                 # распознаёт чужой движок: функция или сервис
 ROLES = ("generate", "verify", "asr", "agreements", "guard")
 ROLE_TITLES = {"asr": "Распознавание речи", "generate": "Генерация черновика", "verify": "Проверка черновика",
                "agreements": "Договорённости (отдельный вызов)", "guard": "Досмотр реплик к системе"}
@@ -329,6 +329,20 @@ KIND_FIELDS = {
                                {"key": "prompt_in", "label": "Подсказка распознаванию при форме raw", "choices": ["form", "query"],
                                 "default": "form",
                                 "hint": "form — подсказка и запись полями формы (в строку запроса подсказка не идёт); query — подсказка в строке запроса, как до 26.10.2026"}]},
+    # Nemotron-3.5-Transcribe (24.11.2026) — четвёртый род распознавания: сервер NVIDIA во внутренней сети, у него
+    # только /v1/chat/completions (audio/transcriptions нет), аудио — base64 в audio_url. Заведён как инструмент для
+    # опытов: диаризация грубая, таймкодов нет (см. `asr_nemotron`); в цепочку роли `asr` по умолчанию не назначен.
+    "nemotron": {"title": "Nemotron-3.5-Transcribe (NVIDIA, экспериментально)", "for": "asr",
+                 "fields": [{"key": "url", "label": "Адрес сервера, без /v1 (только внутренняя сеть)",
+                             "hint": "http://192.168.100.30:8000", "required": True},
+                            {"key": "model", "label": "Модель", "hint": "nemotron-transcribe",
+                             "default": "nemotron-transcribe", "required": True},
+                            {"key": "chunk_seconds", "label": "Длина куска, секунд",
+                             "hint": "1200 — проверено; сервер принимает не больше 3600 с на запрос", "default": "1200"},
+                            {"key": "timeout_sec", "label": "Таймаут одного запроса, секунд", "hint": "1800",
+                             "default": "1800"},
+                            {"key": "key_env", "label": "Переменная окружения с ключом, если сервер его попросит",
+                             "hint": "пусто — заголовок Bearer EMPTY (сервер ключ не проверяет)"}]},
 }
 
 
@@ -993,6 +1007,13 @@ def _check_point(name: str, ep: dict) -> None:
     if kind == "asr-service" and url and not _internal_url(url):
         raise RoutesError(f"точка «{name}»: сервис распознавания — только во внутренней сети, голос не покидает "
                           f"периметр")
+    if kind == "nemotron" and url and not _internal_url(url):
+        raise RoutesError(f"точка «{name}»: Nemotron — только во внутренней сети, голос не покидает периметр")
+    if kind == "nemotron":
+        кусок = str(ep.get("chunk_seconds") or "").strip()
+        if кусок and (not кусок.isdigit() or not 0 < int(кусок) <= 3600):
+            raise RoutesError(f"точка «{name}»: длина куска — целое число секунд от 1 до 3600 "
+                              f"(жёсткий лимит сервера на один запрос)")
     if kind == "faster-whisper" and ep.get("device", "auto") not in ("auto", "cuda", "cpu"):
         raise RoutesError(f"точка «{name}»: device — auto, cuda или cpu")
     if "max_tokens" in ep:
@@ -1906,6 +1927,8 @@ def asr_callable(route: Route):
     """Чем распознавать на точке рода python или asr-service: функция (текст, сводка) = f(путь к wav, **параметры)."""
     if route.kind == "asr-service":
         return _asr_service(route)
+    if route.kind == "nemotron":
+        return _nemotron(route)
     import importlib
     folder = str(route.opt("path") or "").strip()
     if folder:
@@ -1915,6 +1938,24 @@ def asr_callable(route: Route):
             sys.path.insert(0, folder)
     module, _, func = str(route.opt("callable") or route.model).partition(":")
     return getattr(importlib.import_module(module), func)
+
+
+def _nemotron(route: Route):
+    """Точка рода `nemotron`: распознавание моделью Nemotron-3.5-Transcribe (24.11.2026).
+
+    Служба лежит рядом (`asr_nemotron.py`); в Планёрке это `app.services`, в ERP и `scripts/` — та же папка,
+    что и у `model_routes` (импорт как у `llm_cost`: пакетом или рядом). Адрес — только внутренний: голос не
+    покидает периметр, как у `asr-service`."""
+    if not _internal_url(route.url):
+        raise RoutesError("распознавание Nemotron — только во внутренней сети, голос не покидает периметр")
+    try:
+        from . import asr_nemotron
+    except ImportError:                        # ERP и scripts/: модуль лежит рядом, папка в sys.path
+        import asr_nemotron
+    return asr_nemotron.сделать(url=route.url, model=route.model or asr_nemotron.МОДЕЛЬ,
+                                key_env=str(route.key_env or ""),
+                                chunk_seconds=route.opt("chunk_seconds", 1200),
+                                timeout_sec=route.opt("timeout_sec", 1800))
 
 
 def _asr_service(route: Route):
@@ -2153,6 +2194,15 @@ def _ping(route: Route, timeout: float, api_key: str | None) -> tuple[bool, str]
             return True, f"код найден: {route.opt('callable') or route.model}"
         except Exception as exc:  # noqa: BLE001
             return False, f"код не найден: {type(exc).__name__}: {exc}"
+    if route.kind == "nemotron":
+        if not _internal_url(route.url):
+            return False, "адрес не во внутренней сети — голос туда не уйдёт"
+        try:
+            from . import asr_nemotron
+        except ImportError:                    # ERP и scripts/: модуль лежит рядом, папка в sys.path
+            import asr_nemotron
+        return asr_nemotron.проверить(url=route.url, model=route.model or asr_nemotron.МОДЕЛЬ,
+                                      key_env=str(route.key_env or ""), timeout=min(timeout, 60))
     if route.kind == "asr-service":
         if not _internal_url(route.url):
             return False, "адрес не во внутренней сети — голос туда не уйдёт"
