@@ -95,7 +95,7 @@ def call(route, wav_path, *, language: str = "ru", initial_prompt: str = "",
         req = urllib.request.Request(route.url, data=body, method="POST",
                                      headers={"Content-Type": f"multipart/form-data; boundary={boundary}",
                                               "Content-Length": str(len(body))})
-        with urllib.request.urlopen(req, timeout=float(route.opt("timeout_sec", 4 * 3600))) as resp:
+        with urllib.request.urlopen(req, timeout=float(route.opt("timeout_sec", 3600))) as resp:
             return json.loads(resp.read().decode("utf-8"))
 
     form = str(route.opt("form") or "").strip().lower()
@@ -112,7 +112,7 @@ def call(route, wav_path, *, language: str = "ru", initial_prompt: str = "",
             sending["prompt_sent"] = "строка запроса"
         url = route.url + (("&" if "?" in route.url else "?") + urllib.parse.urlencode(query) if query else "")
         req = urllib.request.Request(url, data=data, headers={"Content-Type": audio_type}, method="POST")
-        with urllib.request.urlopen(req, timeout=float(route.opt("timeout_sec", 4 * 3600))) as resp:
+        with urllib.request.urlopen(req, timeout=float(route.opt("timeout_sec", 3600))) as resp:
             raw = json.loads(resp.read().decode("utf-8"))
         return collect(raw)
 
