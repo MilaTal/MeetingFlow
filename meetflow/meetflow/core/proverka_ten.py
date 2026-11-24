@@ -65,7 +65,7 @@ def _models_path() -> Path:
     Один и тот же файл модуля лежит и в `planerka/webapp/app/services/`, и в `system/scripts/` (ERP),
     поэтому путь ищется без опоры на пакет: сначала явный `SHADOW_VERIFY_MODELS`, потом маршруты
     приложения, потом `webapp/data/models.json` вверх по дереву."""
-    свой = (os.environ.get("SHADOW_VERIFY_MODELS") or "").strip()
+    свой = (os.environ.get("SHADOW_VERIFY_MODELS") or os.environ.get("MODEL_ROUTES_PATH") or "").strip()
     if свой:
         return Path(свой)
     try:
