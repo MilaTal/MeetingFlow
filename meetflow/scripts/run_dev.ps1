@@ -20,6 +20,10 @@ $env:PYTHONIOENCODING = "utf-8"
 $env:MEETFLOW_LLM = $Llm
 $env:HF_HUB_OFFLINE = "1"
 $env:PYANNOTE_METRICS_ENABLED = "false"
+# 24.11.2026: общий список моделей один для Планёрки, ERP и MeetFlow — ручной запуск без обёртки идёт по нему.
+if (-not $env:MODEL_ROUTES_PATH) {
+    $env:MODEL_ROUTES_PATH = "\\SD2\GROUPS\Technical\AI Projects\Planerka\planerka\webapp\data\models.json"
+}
 # свой .env.local MeetFlow главнее: зависимость от файла Планёрки — только запасной путь (письмо meeting-registry 22)
 $own = Join-Path (Split-Path $PSScriptRoot -Parent) ".env.local"
 if (-not $PSBoundParameters.ContainsKey("KeyFrom") -and (Test-Path $own)) { $KeyFrom = $own }
