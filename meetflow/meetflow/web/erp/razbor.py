@@ -213,6 +213,11 @@ def mount(r: APIRouter, ctx: Ctx) -> None:
     def decide_card(c: dict, payload: ConflictIn, u: dict) -> dict:
         kind, p, act = c["kind"], loads(c.get("payload"), {}), payload.action
         who = ctx.name(u)
+        if act == "close":
+            # 24.11.2026, решение владелицы: «просто закрыть без корректировок протокола». Карточка уходит из очереди
+            # (`rejected`), но протокол, задачи и правила памяти не меняются — в отличие от `reject` у замечания, который
+            # удаляет карточку. Пересборка встречи тоже не ставится.
+            return resolve(c["id"], u, CardStatus.REJECTED, resolution="Закрыто системно — без правки протокола")
         if kind == "member_note":
             tid = p.get("task_id")
             if act == "accept" and tid and store.get("tasks", tid):
@@ -335,6 +340,13 @@ def mount(r: APIRouter, ctx: Ctx) -> None:
     def razbor(request: Request):
         ctx.need_admin(request)
         vp.истечь(store)
+        # 24.11.2026, решение владелицы: в блоках «Срок» и «Задачи и замечания» — 30 самых новых открытых, остальные
+        # закрываются нейтрально. Идемпотентно.
+        from ...core import cards_cap
+        try:
+            cards_cap.разбор(store)
+        except Exception:  # noqa: BLE001 — порог не должен ломать экран
+            pass
         extra, args = ctx.scope_sql(request)
         items = []
         meetings = {m["id"]: m["date"] for m in store.q("SELECT id, date FROM meetings")}
@@ -380,8 +392,8 @@ def mount(r: APIRouter, ctx: Ctx) -> None:
     @r.post("/razbor/batch")
     def batch(payload: BatchIn, request: Request):
         u = ctx.need_admin(request)
-        if payload.action not in ("to_task", "drop", "delete"):
-            raise HTTPException(400, "Решения: «В задачу», «Убрать» или «Удалить выбранное»")
+        if payload.action not in ("to_task", "drop", "delete", "close"):
+            raise HTTPException(400, "Решения: «В задачу», «Убрать», «Закрыть» или «Удалить выбранное»")
         done, errors = 0, []
         keys = set()
         for i in payload.ids:
@@ -431,7 +443,8 @@ def mount(r: APIRouter, ctx: Ctx) -> None:
                         store.delete("cards", i)                       # карточка уходит из «Разбора» насовсем
                         done += 1
                         continue
-                    decide_card(c, ConflictIn(action="accept" if payload.action == "to_task" else "reject"), u)
+                    действие = "accept" if payload.action == "to_task" else ("close" if payload.action == "close" else "reject")
+                    decide_card(c, ConflictIn(action=действие), u)
                 else:
                     raise HTTPException(400, "Неизвестный вид строки")
                 done += 1

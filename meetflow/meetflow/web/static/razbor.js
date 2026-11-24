@@ -225,14 +225,17 @@ function пакетКарточекРазбора($list, строки) {
     куда.insertAdjacentHTML("afterbegin", `<label class="rz-card-pick"><input type="checkbox" class="rz-card-check" aria-label="Выбрать карточку для пакетного решения"> в пакет</label>`);
   });
   $list.insertAdjacentHTML("beforebegin", `<div class="card rz-batch" id="rz-card-batch" hidden><span id="rz-card-n"></span>
+    <button class="link" id="rz-card-pick-all" type="button">Выделить все</button>
     <button class="btn-primary btn-sm" id="rz-card-yes" type="button">Принять — выбранные</button>
     <button class="btn-sm" id="rz-card-no" type="button">Оставить как есть — выбранные</button>
+    <button class="btn-sm" id="rz-card-close" type="button">Закрыть выбранные</button>
     <button class="btn-sm rz-del" id="rz-card-del" type="button">Удалить выбранное…</button>
     <span class="page-sub" id="rz-card-hint"></span></div>`);
   const выбранные = () => карточки.filter(к => к.querySelector(".rz-card-check")?.checked);
   const обновить = () => {
     const в = выбранные();
-    document.getElementById("rz-card-batch").hidden = в.length < 1;
+    // 24.11.2026: полоса видна всегда, когда есть карточки, — иначе «Выделить все» не нажать до первого выбора.
+    document.getElementById("rz-card-batch").hidden = карточки.length < 1;
     const один = new Set(в.map(к => к.dataset.rzKey)).size === 1;
     document.getElementById("rz-card-n").textContent = `Выбрано карточек: ${в.length}`;
     document.getElementById("rz-card-yes").disabled = !один;
@@ -240,6 +243,7 @@ function пакетКарточекРазбора($list, строки) {
     document.getElementById("rz-card-hint").textContent = один ? "" : "Пакетное решение — для карточек одного вида одной встречи";
   };
   карточки.forEach(к => к.querySelector(".rz-card-check")?.addEventListener("change", обновить));
+  обновить();
   const пакет = (действие, слово) => async () => {
     const в = выбранные();
     if (!(await confirmDialog(`${слово} — ${в.length} карточек одной встречи?`, слово))) return;
@@ -249,6 +253,16 @@ function пакетКарточекРазбора($list, строки) {
   };
   document.getElementById("rz-card-yes").addEventListener("click", пакет("to_task", "Принять"));
   document.getElementById("rz-card-no").addEventListener("click", пакет("drop", "Оставить как есть"));
+  // 24.11.2026, решение владелицы: «Закрыть выбранные» — нейтральное закрытие (протокол не меняется); «Выделить все» —
+  // отметить весь список карточек разом.
+  document.getElementById("rz-card-close").addEventListener("click", пакет("close", "Закрыть"));
+  document.getElementById("rz-card-pick-all").addEventListener("click", () => {
+    const все = карточки.length > 0 && карточки.every(к => к.querySelector(".rz-card-check")?.checked);
+    карточки.forEach(к => {
+      const ч = к.querySelector(".rz-card-check");
+      if (ч) { ч.checked = !все; ч.dispatchEvent(new Event("change")); }
+    });
+  });
   document.getElementById("rz-card-del").addEventListener("click", пакет("delete", "Удалить выбранное"));
 }
 

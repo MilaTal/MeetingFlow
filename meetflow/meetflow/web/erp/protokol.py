@@ -387,6 +387,26 @@ def mount(r: APIRouter, ctx: Ctx) -> None:
         store.update("meetings", mid, review_notes=json.dumps(notes, ensure_ascii=False))
         return {"ok": True, "message": msg}
 
+    @r.post("/review-notes/{run_id}/close-all")
+    def note_close_all(run_id: str, request: Request):
+        """«Закрыть все» замечания проверки встречи (24.11.2026, решение владелицы): каждому открытому ставится
+        решение «оставлено как есть» (`keep`) — протокол не меняется, замечания остаются в списке с решением."""
+        u = ctx.need_admin(request)
+        try:
+            mid = int(str(run_id).lstrip("m"))
+        except ValueError:
+            raise HTTPException(404, "Замечание не найдено") from None
+        m = ctx.meeting_or_404(mid)
+        notes = loads(m.get("review_notes"), [])
+        закрыто = 0
+        for n in notes:
+            if isinstance(n, dict) and not n.get("dismissed"):
+                n.update(dismissed=True, outcome="keep", outcome_label=OUTCOME_LABEL.get("keep", ""),
+                         by=ctx.name(u), at=now())
+                закрыто += 1
+        store.update("meetings", mid, review_notes=json.dumps(notes, ensure_ascii=False))
+        return {"ok": True, "closed": закрыто, "message": f"Закрыто замечаний: {закрыто}"}
+
     @r.get("/review-notes/decisions")
     def note_decisions(request: Request):
         ctx.need_admin(request)

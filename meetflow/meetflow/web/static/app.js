@@ -2361,7 +2361,7 @@ document.getElementById("change-password-btn")?.addEventListener("click", () => 
 // 2–3 минуты нарезок со своими экранами ERP и подписями, без голоса, на вымышленных людях и проектах. Пункт — в самом низу
 // блока «Вы работаете как», виден всем ролям. Файл лежит рядом с фронтом и отдаётся статикой; версия в адресе — та же
 // ступень, что у app.js, чтобы новый ролик не застрял в кэше.
-const ВИДЕО_КАК_ПОЛЬЗОВАТЬСЯ = "media/kak_polzovatsya.mp4?v=20261117mf96";
+const ВИДЕО_КАК_ПОЛЬЗОВАТЬСЯ = "media/kak_polzovatsya.mp4?v=20261124mf1";
 async function renderHelp() {
   $main.innerHTML = `
     <div class="doc-head"><h1>Как пользоваться</h1></div>
@@ -4737,6 +4737,7 @@ function reviewNotesLayout(doc, docId = "") {
         <span>Замечания · ${open.length}</span><span class="rn-chevron" aria-hidden="true">›</span>
       </button>
       <div class="rn-body">
+        ${open.length > 1 ? `<div class="rn-close-all-row"><button type="button" class="btn-sm" data-note-close-all="${esc(open[0].run_id || "")}">Закрыть все (${open.length})</button></div>` : ""}
         ${open.length ? `<ul class="rn-list" data-list="review-notes">${open.map(item).join("")}</ul>` : `<div class="rn-hint rn-all-done">Всё решено.</div>`}
         ${done.length ? `<details class="rn-done"><summary>Решённые · ${done.length}</summary>
           <ul class="rn-list">${done.map(item).join("")}</ul></details>` : ""}
@@ -4813,6 +4814,20 @@ document.addEventListener("click", async (e) => {
     } else if (docEl) {
       highlightQuote(docEl, "");
     }
+    return;
+  }
+  // 24.11.2026, решение владелицы: «Закрыть все» замечания проверки встречи — одним запросом, протокол не меняется.
+  const closeAllNotes = e.target.closest("[data-note-close-all]");
+  if (closeAllNotes) {
+    const run = closeAllNotes.dataset.noteCloseAll;
+    if (!run) return;
+    if (!(await confirmDialog("Закрыть все замечания проверки этой встречи? Протокол не меняется, замечания останутся в «Решённых».", "Закрыть все"))) return;
+    closeAllNotes.disabled = true;
+    try {
+      const r = await api(`/review-notes/${run}/close-all`, { method: "POST", json: {} });
+      toast(r.message || "Замечания закрыты");
+      render();
+    } catch (err) { toast(err.message, true); closeAllNotes.disabled = false; }
     return;
   }
   const act = e.target.closest("[data-note-act]");

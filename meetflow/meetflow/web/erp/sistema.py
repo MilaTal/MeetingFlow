@@ -174,6 +174,13 @@ def mount(r: APIRouter, ctx: Ctx) -> None:
             st("mf_tech_cleanup")()
         except Exception:  # noqa: BLE001
             pass
+        # 24.11.2026, решение владелицы: в работе — 30 самых новых открытых технических сообщений, остальные
+        # закрываются системно. Идемпотентно; записи не удаляются.
+        try:
+            from ...core import cards_cap
+            cards_cap.технические(store)
+        except Exception:  # noqa: BLE001 — порог не должен ломать экран
+            pass
         edge = (datetime.now() - timedelta(days=7)).strftime("%Y-%m-%dT%H:%M:%S")
         where, args = "kind IN (?, 'event') AND status='open'", [TECH]
         if not all_period:
