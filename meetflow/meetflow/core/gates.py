@@ -308,6 +308,22 @@ class TaskGate:
                 reasons.append(m.via if m.via in ("same_or_new", "department_without_head") else
                                "assignee_ambiguous" if m.ambiguous else "assignee_not_in_team")
 
+        # 3б. страж «упомянутый/адресат — не исполнитель» (24.11.2026). Прежде он в сборке MeetFlow не вызывался, и
+        # «Германович» из «водителя транспортной компании Германович» стал ответственным пяти задач встречи 16.11.
+        # Здесь берётся только новое основание — «название компании или роль»: остальные отказы стража (цитата, тёзки)
+        # уже решены выше (`team.said`, адресат, окно), и перебивать их нельзя — иначе ломается «кто из них» и
+        # «имя из соседней реплики».
+        if person is not None:
+            from .ispolnitel_strazh import проверить as _страж
+            _решённый = person.label
+            _решение = _страж(_решённый, цитата=quote or draft.quote or "",
+                              запись="\n".join(source.lines or []),
+                              справочник=[p.full_name for p in self.team.people], формулировка=desc)
+            if not _решение.ставить and "компани" in (_решение.причина or ""):
+                person = None
+                pending = {"reason": "not_a_person", "name": (_решённый or named or "").strip(),
+                           "candidates": [], "marks": []}
+
         # 4. дубль активной задачи того же человека
         for old_desc, old_assignee in existing or []:
             same_person = person is not None and old_assignee == person.label

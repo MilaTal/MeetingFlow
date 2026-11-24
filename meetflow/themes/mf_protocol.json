@@ -77,5 +77,9 @@
       "Срок",
       "Дата постановки"
     ]
+  },
+  "budget": {
+    "max_calls": 45,
+    "max_calls_per_step": 24
   }
 }

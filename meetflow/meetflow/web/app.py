@@ -12,6 +12,7 @@ from __future__ import annotations
 import json
 import os
 import socket
+import sqlite3
 import sys
 import threading
 import time
@@ -532,7 +533,15 @@ def create_app(theme_name: str | None = None, db_path: str | None = None, journa
     def health():
         """Живо ли и можно ли останавливать. `busy` — идёт шаг записи или сборка (06.11.2026): перезапускать
         сервер во время распознавания нельзя — шаг начинается с нуля, и на длинной записи это часы работы.
-        Порядок перезапуска: сначала `/health`, при `busy` — ждать конца шага."""
+        Порядок перезапуска: сначала `/health`, при `busy` — ждать конца шага.
+
+        24.11.2026: во время сборки база занята записью, и прежний `/health` ждал её до 30 с — сторож живости считал
+        службу упавшей и перезапускал её, а новая обёртка снимала «старый замок» и обрывала сборку. Теперь при
+        занятой базе отвечаем сразу: живы, заняты."""
+        if not _база_свободна():
+            return {"ok": True, "theme": theme.id, "busy": True,
+                    "busy_что": {"что": "база занята сборкой или записью"},
+                    "started_at": _ЗАПУСК.isoformat(timespec="seconds")}
         что = _busy(intake)
         # Второй этап — голоса длинных записей (12.11.2026): пока идёт разделение по голосам, сервер тоже не
         # перезапускать; в очереди видно, сколько записей ждёт.
@@ -544,6 +553,19 @@ def create_app(theme_name: str | None = None, db_path: str | None = None, journa
                 "голоса_ожидают": golosa.ожидают(), "голоса_состояние": golosa.состояние,
                 "started_at": _ЗАПУСК.isoformat(timespec="seconds")}
 
+
+    def _база_свободна(секунд: float = 0.7) -> bool:
+        """Отвечает ли база прямо сейчас. Во время сборки она занята записью — ждать нельзя (24.11.2026): проверка
+        идёт своим соединением с коротким ожиданием, чтобы `/health` отвечал за доли секунды, а не за 30."""
+        try:
+            c = sqlite3.connect(store.path, timeout=секунд)
+            try:
+                c.execute("select 1 from settings limit 1").fetchone()
+                return True
+            finally:
+                c.close()
+        except Exception:  # noqa: BLE001 — занята или недоступна: это ответ «заняты», а не падение
+            return False
 
     def _busy(intake_service) -> dict:
         """Что сейчас идёт: проход папки-приёмника с подшагом и временем либо сборка в очереди."""
