@@ -276,7 +276,10 @@ class PointLLM(LLMConnector):
         if self.route.kind == "ollama":
             b = {"model": self.model, "messages": msgs, "stream": False,
                  "options": {"temperature": temperature, "num_predict": self.max_answer_tokens,
-                             "num_ctx": int(self.ep.get("num_ctx") or 32768)}}
+                             "num_ctx": int(self.ep.get("num_ctx") or 32768)},
+                 # Решение владелицы 25.11.2026: у локальных моделей рассуждение съедало весь потолок ответа
+                 # (14 190 знаков thinking, content пуст, 192 с). Для рода ollama рассуждение выключено.
+                 "think": False}
             if json_mode:
                 b["format"] = "json"
             return b

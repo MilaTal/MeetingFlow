@@ -114,6 +114,8 @@ class RunReport:
     units_closed: int = 0
     units_tasks: int = 0
     findings: list[dict] = field(default_factory=list)
+    findings_norm: list = field(default_factory=list)  # нормализованные находки (25.11.2026): тип/поле/severity/quotes
+    verifier: str = ""                                # модель-проверяющий — в timings версии (было пусто)
     run_id: str = ""            # признак сборки: по нему считаются вызовы (25.10.2026)
     step_calls: dict = field(default_factory=dict)
     retryable: bool = False     # проходящий сбой: повтор ставит очередь (25.10.2026, п. 2)
@@ -2604,13 +2606,25 @@ class MeetingPipeline:
                 try:
                     if stopped is not None:
                         raise BudgetExceeded(str(stopped))
-                    sysm, user = self.pb.verify(protocol_md, safe_source.text)
-                    out = self._call(self.ver, budget, "verify", sysm, user, meeting_id)
-                    rep.findings = [{"issue": str(f.get("issue", ""))[:500], "quote": str(f.get("quote", ""))[:500],
-                                     "severity": str(f.get("severity", "minor"))[:10]}
-                                    for f in _list(out, "findings") if isinstance(f, dict)][:20]
-                    _тень_проверки(sysm, user, f"Протокол встречи {meeting.get('date') or ''}",
-                                   {"clean": not rep.findings, "findings": rep.findings}, meeting_id)
+                    # 25.11.2026 (решение владелицы): проверка по кускам, как в Планёрке и ERP. Куски — общий
+                    # файл-близнец `narezka_proverki`; в каждый кусок идёт только нужный источник.
+                    from . import narezka_proverki as нарезка
+                    куски = нарезка.куски_проверки(protocol_md)
+                    собранные: list[dict] = []
+                    for номер_куска, (раздел, текст_куска) in enumerate(куски, 1):
+                        источник_куска, _нарезан = нарезка.источник_для_куска(текст_куска, safe_source.text)
+                        sysm, user = self.pb.verify(текст_куска, источник_куска)
+                        out = self._call(self.ver, budget, "verify", sysm, user, meeting_id)
+                        порция = [{"issue": str(f.get("issue", ""))[:500], "quote": str(f.get("quote", ""))[:500],
+                                   "severity": str(f.get("severity", "minor"))[:10]}
+                                  for f in _list(out, "findings") if isinstance(f, dict)]
+                        собранные += порция[:нарезка.VERIFY_CHUNK_FINDINGS]
+                        _тень_проверки(sysm, user, f"Протокол встречи {meeting.get('date') or ''} (кусок {номер_куска})",
+                                       {"clean": not порция, "findings": порция}, meeting_id)
+                        if len(собранные) >= нарезка.VERIFY_TOTAL_FINDINGS:
+                            break
+                    rep.findings = собранные[:нарезка.VERIFY_TOTAL_FINDINGS]
+                    rep.verifier = getattr(self.ver, "model", "") or getattr(self.ver, "point", "") or ""
                 except BudgetExceeded as e:
                     limited = True
                     rep.findings = [{"issue": f"Проверка не выполнена: {e}", "severity": "minor"}]
@@ -2748,6 +2762,11 @@ class MeetingPipeline:
         rep.findings = [{"issue": f["note"], "quote": f["quote"], "source_line": f["source_line"],
                          "severity": "major", "by": "код", "kind": f["kind"]}
                         for f in run_code_checks(protocol_md, full_source)] + rep.findings
+        # Нормализация находок (25.11.2026, как в Планёрке): тип, поле, severity по влиянию, сведение дублей.
+        # Карточки получает только то, что меняет факт; остальное — справкой в timings версии.
+        from . import normalizaciya_nahodok as нормализация
+        _норм = нормализация.нормализовать([f for f in rep.findings if not f.get("исправлено")])
+        rep.findings_norm = _норм
         self.s.update("meetings", meeting_id, review_notes=rep.findings)
         # каждая неприменённая существенная находка проверяющей модели — карточкой оператору; исправленные
         # правкой уже помечены и карточек не получают (17.11.2026). Протокол сохранён после правки
@@ -2756,13 +2775,21 @@ class MeetingPipeline:
         for f in rep.findings:
             if f.get("исправлено"):          # правка по замечанию применена — карточка не нужна (17.11.2026)
                 continue
+            if f.get("by") != "код":
+                continue                     # находки модели — ниже, по правилу «меняет факт»
             if str(f.get("severity", "")).lower() != "major":
                 continue
-            by = "проверка кодом" if f.get("by") == "код" else "проверяющая модель"
-            title = f"{'Проверка кодом' if f.get('by') == 'код' else 'Проверка'}: {f['issue'][:150]}"
-            self.cards.open(project_id, "review_finding", title,
-                            {"issue": f["issue"], "quote": f.get("quote", ""), "severity": "major", "by": by,
-                             "source_line": f.get("source_line", "")}, meeting_id)
+            self.cards.open(project_id, "review_finding", f"Проверка кодом: {f['issue'][:150]}",
+                            {"issue": f["issue"], "quote": f.get("quote", ""), "severity": "major",
+                             "by": "проверка кодом", "source_line": f.get("source_line", "")}, meeting_id)
+        # находки проверяющей модели — только по правилу «меняет факт» (задача B инструкции 25.11.2026)
+        for н in _норм:
+            if not нормализация.в_карточку(н):
+                continue
+            self.cards.open(project_id, "review_finding", f"Проверка: {н['issue'][:150]}",
+                            {"issue": н["issue"], "quote": (н.get("quotes") or [""])[0],
+                             "severity": н["severity"], "type": н["type"], "field": н["field"],
+                             "by": "проверяющая модель"}, meeting_id)
         if rep.status == "ok" and limited:
             rep.status = "ok_limited"         # сохранено, но часть остановлена пределом — не «успешный» (01/8)
         self._журнал_итога(meeting_id, rep, budget, closing_mentioned)
