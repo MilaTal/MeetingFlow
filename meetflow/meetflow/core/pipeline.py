@@ -134,6 +134,7 @@ class RunReport:
     obedinenie_log: list = field(default_factory=list)   # решения по пунктам: что, пункт, причина
     svedenie_ten: str = ""      # «тень: групп 2, объединено бы 5, сомнений 1, снято 0» — вариант C (06.11.2026)
     participants: str = ""      # «участники кодом: N по голосам» — итог сборки (27.10.2026)
+    fact_loss: list = field(default_factory=list)   # потерянные значимые факты (показы) — в timings версии (E5, 25.11.2026)
 
 
 HIDDEN = "[строка скрыта: похожа на инструкцию для модели]"
@@ -2732,6 +2733,26 @@ class MeetingPipeline:
                         "SELECT COUNT(*) AS n FROM protocol_versions WHERE meeting_id=?", (meeting_id,))[0]["n"] + 1
                     self.cards.open(project_id, "technical", protokol_poteri.заголовок(len(потеряно)),
                                     protokol_poteri.данные(потеряно, ещё_не_сохранена, вернулось), meeting_id)
+                # Значимые факты (E5, 25.11.2026; близнец Планёрки `fakty_protokola`): суммы, проценты оплаты и
+                # количества из источника против протокола. Потерянные — карточкой «Разбора» (fact_loss) и строкой в
+                # примечании сборки; текст протокола не меняется. Сбой сверки сохранение не роняет (как паспорт протокола).
+                try:
+                    from . import fakty_protokola
+                    источник_фактов = source.text + ("\n" + notes_text if notes_text else "")
+                    потерянные_факты = fakty_protokola.потерянные(источник_фактов, protocol_md)
+                    if потерянные_факты:
+                        показы = [ф["показ"] for ф in потерянные_факты]
+                        rep.fact_loss = показы[:20]
+                        self.cards.open(project_id, "fact_loss",
+                                        f"Протокол встречи {meeting.get('date') or ''}: не вошли факты — {len(потерянные_факты)}",
+                                        {"потеряно": len(потерянные_факты),
+                                         "факты": [{"показ": ф["показ"], "вид": ф["вид"], "строка": ф["строка"][:300]}
+                                                   for ф in потерянные_факты][:20]}, meeting_id)
+                        строка_фактов = "неполный протокол: не вошли факты: " + ", ".join(показы)[:180]
+                        _примечание = "; ".join(x for x in (_примечание, строка_фактов) if x)
+                        self.s.update("meetings", meeting_id, build_note=_примечание)
+                except Exception as exc:  # noqa: BLE001 — сверка фактов не должна ронять сохранённый протокол
+                    self.step_failed(project_id, meeting_id, "Сверка фактов", exc)
                 # версия: прежняя остаётся в истории; модель — та, что написала текст (43, 47)
                 wrote = budget.answered.get("protocol") or budget.answered.get("extract_tasks") or []
                 if budget.answered.get("_external"):
