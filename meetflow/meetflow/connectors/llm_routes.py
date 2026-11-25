@@ -274,9 +274,13 @@ class PointLLM(LLMConnector):
     def body(self, system: str, user: str, json_mode: bool, temperature: float) -> dict:
         msgs = [{"role": "system", "content": system}, {"role": "user", "content": user}]
         if self.route.kind == "ollama":
+            # Решение владелицы 25.11.2026: окно локальной проверки — 131 072, иначе проверка длинного протокола
+            # обрывает ответ. Поле точки `num_ctx` главнее; для qwen3.8 умолчание 131 072, для прочих локальных
+            # моделей — прежние 32 768 (у них окно меньше, поднимать нельзя).
+            _окно = int(self.ep.get("num_ctx") or (131072 if "qwen3.8" in (self.model or "").lower() else 32768))
             b = {"model": self.model, "messages": msgs, "stream": False,
                  "options": {"temperature": temperature, "num_predict": self.max_answer_tokens,
-                             "num_ctx": int(self.ep.get("num_ctx") or 32768)},
+                             "num_ctx": _окно},
                  # Решение владелицы 25.11.2026: у локальных моделей рассуждение съедало весь потолок ответа
                  # (14 190 знаков thinking, content пуст, 192 с). Для рода ollama рассуждение выключено.
                  "think": False}
