@@ -86,7 +86,9 @@ class LLMConnector(Connector):
     model: str = ""
     profile: str = "generic"
     context_chars: int = 32_000
-    max_answer_tokens: int = 4096      # потолок ответа на вызов — решение владельца 03.10.26
+    max_answer_tokens: int = 4096      # потолок ответа на вызов — решение владельца 03.10.26; шаг протокола/генерации
+    # поднимается до 48 000 общим `model_routes.step_ceiling` (llm_routes.PointLLM.ceiling_for, E5 25.11.2026) —
+    # транспортное умолчание объём протокола не режет; у точки свой `max_tokens` главнее.
 
     def worst_call_usd(self, prompt_chars: int) -> float | None:
         """Худший случай цены вызова (запрос + полный потолок ответа); None — цена неизвестна."""

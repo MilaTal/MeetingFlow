@@ -267,6 +267,30 @@ class PointLLM(LLMConnector):
         mult = float((t.get("peak") or {}).get("multiplier") or 1)
         return (prompt_chars / CHARS_PER_TOKEN * t["input"] + self.max_answer_tokens * t["output"]) * mult / 1_000_000
 
+    def ceiling_for(self, purpose: str | None) -> int:
+        """Потолок ответа шага (E5, 25.11.2026): протоколу/черновику — общий `model_routes.step_ceiling`
+        («generate», 48 000 токенов), транспортное умолчание 4096 объём протокола не режет. Точка главнее: её
+        `max_tokens` может и опустить потолок (порядок «точка > переменная шага > таблица», как в Планёрке,
+        `llm_client.max_tokens_for`). Прочие шаги — прежний потолок точки/вызова."""
+        шаг = (purpose or "").strip().lower()
+        if шаг in ("protocol", "generate"):
+            база = mr.max_tokens_of(self.route) or mr.GENERATE_MAX_TOKENS_CEILING
+            return mr.step_ceiling("generate", база)
+        return self.max_answer_tokens
+
+    def _тело_шага(self, system: str, user: str, json_mode: bool, temperature: float,
+                   purpose: str | None) -> dict:
+        """Тело вызова с потолком шага. `body()` точки не меняется (участок ветки B — think/num_ctx для ollama):
+        потолок шага применяется к готовому телу — `num_predict` у ollama, `max_tokens` у прочих (E5, 25.11.2026)."""
+        b = self.body(system, user, json_mode, temperature)
+        потолок = self.ceiling_for(purpose)
+        if потолок != self.max_answer_tokens:
+            if self.route.kind == "ollama":
+                b["options"]["num_predict"] = потолок
+            else:
+                b["max_tokens"] = потолок
+        return b
+
     def health(self) -> dict:
         return {"name": self.point, "ok": None, "detail": "проверка по кнопке «Проверить связь»",
                 "external": self.route.external}
@@ -334,7 +358,8 @@ class PointLLM(LLMConnector):
         if self.route.kind == "ollama" and self.route.external and not self.ep.get("allow_remote"):
             raise ConnectorError(f"{self.label}: Ollama — только в контуре; внешний адрес разрешается явно (allow_remote)")
         self._limit_check()
-        body = self.body(system, user, json_mode, temperature)
+        потолок = self.ceiling_for(purpose)   # потолок шага: протокол/генерация — до 48 000 (E5, 25.11.2026)
+        body = self._тело_шага(system, user, json_mode, temperature, purpose)
         bad = 0                          # негодных ответов (пустой, зацикливание) на этот вызов (26.10.2026)
         net = 0                          # попыток связи: сеть, 429/5xx — повтор лечит
         last, t0 = "", time.monotonic()
@@ -394,13 +419,13 @@ class PointLLM(LLMConnector):
                 # пустой ответ при остановке по потолку — сбой, а не повод повторить: тот же запрос с тем же потолком
                 # дал бы тот же обрыв (Claude 5.x: скрытое рассуждение съело потолок; как ERP и Планёрка, 26.10.2026)
                 done = int(usage.get("completion_tokens") or 0)
-                why = (f"обрыв по потолку — ответ пуст, max_tokens {self.max_answer_tokens}, completion_tokens {done}: "
+                why = (f"обрыв по потолку — ответ пуст, max_tokens {потолок}, completion_tokens {done}: "
                        "рассуждение заняло весь потолок ответа")
                 self._stop(purpose, attempt, text, reasoning, finish, "обрыв по потолку: ответ пуст", "",
                            completion_tokens=done, empty_at_ceiling=True, model=data.get("model") or self.model)
                 raise BadAnswer(f"{self.label}: {why}")
             if finish == "length":
-                raise AnswerTruncated(f"Ответ модели оборван потолком {self.max_answer_tokens} токенов — повтор дал бы "
+                raise AnswerTruncated(f"Ответ модели оборван потолком {потолок} токенов — повтор дал бы "
                                       "тот же обрыв.")
             loop = "" if not text.strip() else mr.degenerate_loop(text)
             if not text.strip() or loop:
@@ -415,7 +440,7 @@ class PointLLM(LLMConnector):
                     raise BadAnswer(f"{self.label}: негодный ответ модели {bad} раза подряд ({why}) — "
                                     f"больше {mr.BAD_ANSWERS_PER_CALL} обращений на вызов не делается")
                 if loop:
-                    body = self.body(system, user + mr.LOOP_REMINDER, json_mode, temperature)
+                    body = self._тело_шага(system, user + mr.LOOP_REMINDER, json_mode, temperature, purpose)
                 continue
             cost = llm_cost.стоимость_вызова(usage, tariff_of(self.ep, data.get("model") or self.model),
                                              datetime.now(timezone.utc))
