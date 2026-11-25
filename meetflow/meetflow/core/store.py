@@ -187,6 +187,28 @@ class Store:
                             t = t.replace("NOT NULL", "")  # старая база не должна падать
                         self._conn.execute(f"ALTER TABLE {table} ADD COLUMN {c} {t}")
             self._conn.commit()
+            self._ensure_indexes()
+
+    # Индексы скорости (25.11, аналог Планёрки/ERP 24.11): база на сетевом диске, без индексов
+    # реестр/протокол/карточки читались целиком. Создаются при старте, IF NOT EXISTS — идемпотентно.
+    _ИНДЕКСЫ = [
+        ("ix_mf_protocol_versions_meeting", "protocol_versions", ["meeting_id", "id"]),
+        ("ix_mf_sources_meeting", "sources", ["meeting_id"]),
+        ("ix_mf_tasks_source_meeting", "tasks", ["source_meeting_id"]),
+        ("ix_mf_tasks_status", "tasks", ["status"]),
+        ("ix_mf_tasks_desc", "tasks", ["description", "date_set", "status"]),
+        ("ix_mf_cards_meeting_kind_status", "cards", ["meeting_id", "kind", "status"]),
+        ("ix_mf_task_history_task", "task_history", ["task_id"]),
+        ("ix_mf_meetings_project_date", "meetings", ["project_id", "date"]),
+    ]
+
+    def _ensure_indexes(self) -> None:
+        for имя, таблица, колонки in self._ИНДЕКСЫ:
+            have = {r[1] for r in self._conn.execute(f"PRAGMA table_info({таблица})")}
+            if not have or any(c not in have for c in колонки):
+                continue
+            self._conn.execute(f"CREATE INDEX IF NOT EXISTS {имя} ON {таблица}({', '.join(колонки)})")
+        self._conn.commit()
 
     @contextmanager
     def tx(self) -> Iterator[sqlite3.Connection]:
