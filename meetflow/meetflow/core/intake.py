@@ -409,6 +409,12 @@ class IntakeService:
             цель = папка / path.name
             if not цель.exists() or цель.stat().st_size != path.stat().st_size:
                 shutil.copy2(path, цель)
+            # 25.11.2026: запись с мусором перед заголовком (два байта 0D 0A) сутки не принималась — обе точки
+            # распознавания отвечали «Invalid data». Лечим рабочую копию, исходник остаётся в «обработано» как есть.
+            from .zvuk_zagolovok import исправить_заголовок
+            исправление = исправить_заголовок(цель)
+            if исправление:
+                self.pipe.cards.open(None, "event", f"Запись «{path.name}»: {исправление}", {"file": str(цель)})
             return цель
         except OSError as exc:
             self.pipe.cards.open(None, "technical", f"Не удалось сделать рабочую копию «{path.name}»",

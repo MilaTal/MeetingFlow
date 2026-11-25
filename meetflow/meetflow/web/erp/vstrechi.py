@@ -731,6 +731,12 @@ def mount(r: APIRouter, ctx: Ctx) -> None:
                                          "она не нужна")
             path = upload_dir(mid) / re.sub(r'[\\/:*?"<>|]', "_", name)
             path.write_bytes(data)
+            # 25.11.2026: файл с мусором перед заголовком (как «Новая запись 92.m4a» из папки-приёмника) не должен
+            # доходить до распознавания — лечим нашу копию в uploads, сам загруженный файл не трогаем.
+            from ...core.zvuk_zagolovok import исправить_заголовок
+            исправление = исправить_заголовок(path)
+            if исправление:
+                pipe.cards.open(m["project_id"], "event", f"Запись «{name}»: {исправление}", {"file": str(path)}, mid)
             from ...connectors.registry import default_registry  # noqa: F401 — тот же реестр, что у конвейера
             c = pipe.plugins.resolve_source(name)
             ready = c is not None and getattr(c, "kind", "") == "asr"
