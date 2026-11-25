@@ -36,8 +36,10 @@ from ..core.types import LLMResult
 
 KINDS = mr.KINDS
 ASR_KINDS = mr.ASR_KINDS
-ROLES = mr.ROLES + ("guard",)
-ROLE_TITLES = {**mr.ROLE_TITLES, "guard": "Досмотр реплик к системе"}
+# control — независимый контроль шагов (25.11): роль есть в общем models.json; MF принимает её,
+# иначе старт падал «неизвестная роль control» (замер 25.11). Сам контроль в MF не вызывается — только совместимость.
+ROLES = mr.ROLES + ("guard", "control")
+ROLE_TITLES = {**mr.ROLE_TITLES, "guard": "Досмотр реплик к системе", "control": "Контроль шагов (независимый)"}
 KIND_FIELDS = mr.KIND_FIELDS
 HISTORY_KEEP = mr.HISTORY_KEEP
 SIDE_TO_ROLE = {"generator": "generate", "verifier": "verify"}
