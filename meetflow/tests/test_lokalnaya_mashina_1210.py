@@ -232,10 +232,10 @@ def test_мониторинг_называет_точку_и_запасные(tm
     """Локальная машина 71b2b27: модель в мониторинге — по маршрутам, с точкой и запасными."""
     app, c, H = _routes_app(tmp_path, monkeypatch)
     rows = {r["name"]: r for r in c.get("/api/monitoring/live", headers=H).json()["services"]}
-    assert "точка «main», запасные: spare" in rows["Модель"]["detail"]
+    assert "точка «main», запасные: spare" in rows["Генерация черновика"]["detail"]
     c.post("/api/monitoring/models/use", json={"role": "generate", "point": "spare"}, headers=H)
     rows = {r["name"]: r for r in c.get("/api/monitoring/live", headers=H).json()["services"]}
-    assert "точка «spare», запасные: main" in rows["Модель"]["detail"]
+    assert "точка «spare», запасные: main" in rows["Генерация черновика"]["detail"]
 
 
 def test_avtozapusk_obshchiy_pri_vseh_proektah_2810(tmp_path):

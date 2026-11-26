@@ -57,6 +57,30 @@ class GolosaOchered:
         return self.s.q("SELECT COUNT(*) AS n FROM sources WHERE removed_at IS NULL AND voice_state=?",
                         (СОСТОЯНИЕ_ЖДЁТ,))[0]["n"]
 
+    def подобрать_осиротевшие(self) -> int:
+        """После перезапуска сервера строки «ожидают голоса» — осиротевшие (26.11.2026).
+
+        Это состояние ставится перед шагом голосов внутри прохода приёмника. Если процесс убили во время
+        разбора (или шаг упал вместе с проходом), строка остаётся «ожидают голоса» навсегда: очередь ищет
+        только «ждут голоса (потом)», и голоса не подписываются, хотя расшифровка цела. На старте сервера
+        таких «живых» шагов быть не может — переводим их в очередь. Записи нет на диске — честный сбой.
+        """
+        n = 0
+        for row in self.s.q("SELECT id, meta FROM sources WHERE removed_at IS NULL AND voice_state='ожидают голоса'"):
+            try:
+                meta = json.loads(row.get("meta") or "{}")
+            except Exception:  # noqa: BLE001 — сводка не читается: запись всё равно не разобрать
+                meta = {}
+            if not meta.get("media_path"):
+                self.s.update("sources", row["id"], voice_state="сбой: голоса не разобраны — запись не сохранена")
+                continue
+            self.s.update("sources", row["id"], voice_state=СОСТОЯНИЕ_ЖДЁТ,
+                          meta=json.dumps(meta, ensure_ascii=False))
+            n += 1
+        if n:
+            self._лог(f"после перезапуска в очередь голосов возвращено записей: {n}")
+        return n
+
     def _цикл(self) -> None:
         while not self._stop.is_set():
             try:

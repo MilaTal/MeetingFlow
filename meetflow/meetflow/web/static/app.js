@@ -7066,10 +7066,32 @@ function renderMonitoringLive() {
   if (!$box || !m) return;
   const wf = m.watch_folder || {};
   const services = monTable((m.services_live || []).map(s => [s.name, s.checking ? '<span class="badge badge-neutral">проверка</span>' : monState(s.ok), esc(s.detail)]));
-  // «Проверить связь» (18.10.2026): точки модели панель опрашивает фоном раз в 60 с и не ждёт сети на каждом открытии —
-  // в строке «проверено N с назад»; кнопка опрашивает сейчас.
-  const проверитьСвязь = `<div class="hstack" style="margin-top:8px"><button class="btn-sm" id="probe-now-btn">Проверить связь</button>
-    <span class="page-sub" style="margin:0">точки модели опрашиваются фоном раз в 60 секунд; кнопка — опросить сейчас</span></div>`;
+  // «Проверить связь» (18.10.2026; доработка 26.11.2026): точки опрашиваются фоном раз в 60 с, результаты видны
+  // строками под кнопкой — раньше кнопка считала их и выбрасывала, на мониторинге ничего не появлялось.
+  // Блок отделён от поля папки: кнопка больше не сливается со строкой ввода пути (замечание владелицы).
+  const проба = m.probe || {};
+  const строкиПробы = Array.isArray(проба.rows) ? проба.rows : [];
+  const пробаКогда = Number(проба.at) > 0 ? new Date(Number(проба.at) * 1000) : null;
+  const пробаСек = пробаКогда ? Math.max(0, Math.round((Date.now() - пробаКогда.getTime()) / 1000)) : null;
+  const пробаВремя = пробаСек === null ? "ещё не проверяли"
+    : пробаСек < 5 ? "проверено только что"
+      : `проверено ${пробаСек < 60 ? пробаСек + " с" : Math.round(пробаСек / 60) + " мин"} назад`;
+  const строкаПробы = (r) => {
+    const хорошо = r.ok === true, плохо = r.ok === false;
+    return `<div class="mon-probe-row${хорошо ? " ok" : плохо ? " bad" : ""}">
+      <span class="mon-probe-dot"></span>
+      <span class="mon-probe-name">${esc(r.name || "точка")}</span>
+      <span class="mon-probe-detail">${esc(r.detail || (хорошо ? "ответила" : плохо ? "нет ответа" : "не проверена"))}</span>
+    </div>`;
+  };
+  const проверитьСвязь = `<div class="mon-probe">
+    <div class="mon-probe-head"><b>Связь с моделями</b>
+      <button class="btn-sm" id="probe-now-btn">Проверить связь</button>
+      <span class="page-sub" style="margin:0">${esc(пробаВремя)} · фон опрашивает точки раз в 60 секунд, кнопка — сейчас</span></div>
+    ${проба.error ? `<div class="page-sub" style="margin:0 0 6px">Проверка не удалась: ${esc(проба.error)}</div>` : ""}
+    ${строкиПробы.length ? `<div class="mon-probe-rows">${строкиПробы.map(строкаПробы).join("")}</div>`
+      : `<div class="page-sub" style="margin:0">Результатов пока нет — нажмите «Проверить связь».</div>`}
+  </div>`;
   const folderSource = wf.folder_source ? ` Сейчас путь взят: ${esc(wf.folder_source)}.` : "";
   // Идущий проход (06.11.2026): какой подшаг, сколько идёт и сколько ему ещё примерно. Раньше на записи длиннее
   // ~25 минут писалось «завис», хотя разделение по голосам просто шло своим ходом: по этому слову дважды
@@ -7104,13 +7126,16 @@ function renderMonitoringLive() {
         esc(источник)}${wf.poll_every_note ? ` — ${esc(wf.poll_every_note)}` : ""}. Очистите поле и сохраните, чтобы вернуться к значению из настроек сервера.</span>
     </div>` : "";
   const folderForm = `
+    <div class="mon-subblock">
+    <div class="mon-subhead">Папка-приёмник</div>
     <div class="mon-folder-form">
       <input type="text" id="watch-folder-input" value="${esc(wf.folder || "")}" placeholder="Папка-приёмник записей не задана — укажите полный путь" autocomplete="off">
       <button class="btn-sm" id="watch-folder-btn">Сменить папку</button>
     </div>${интервал}${проходПоПапке}
     <div class="page-sub" style="margin:6px 0 0">Меняется в два шага: сначала показываем, что в папке лежит и что заберёт первый проход,
       потом просим повторить путь. Так сделано не из вредности — поллер обходит папку целиком и уносит забранное в подпапку
-      «обработано», поэтому опечатка в пути дорого стоит. Пустое поле — выключить папку.${folderSource}</div>`;
+      «обработано», поэтому опечатка в пути дорого стоит. Пустое поле — выключить папку.${folderSource}</div>
+    </div>`;
 
   const r = m.recognition || { stages: [] };
   // Последние распознанные записи (05.10.26, замечание владельца: «нет информации о том, что прошла
@@ -7171,7 +7196,7 @@ function renderMonitoringLive() {
     ? `<div class="card" id="uq-monitor-line">Задачи под вопросом: <b>${m.under_question}</b> — <a href="#razbor/tasks">открыть «Разбор»</a></div>`
     : `<div class="mon-lead" id="uq-monitor-line">Задачи под вопросом: нет</div>`;
   $box.innerHTML = подВопросомСтрока + скоростьРаспознаванияHtml(r.speed) +
-    monLead("Что меняется каждый час: службы (проверка соединением), распознавание записи, очередь одной строкой, автозапуск. Реже меняющееся — на «Диск и доступы», предметное — на «Состояние базы».") +
+    monLead("Что меняется каждый час: службы (проверка соединением), распознавание записи, очередь одной строкой, автозапуск. Реже меняющееся — на «Диск и доступы», предметное — на «Состояние базы». Порядок точек в строке модели — порядок подхвата: основная работает, запасные берутся по очереди, если она недоступна.") +
     monSection("Службы", services + проверитьСвязь + folderForm, `Москва ${m.now_msk || ""}`) +
     recognition + queues + autorun +
     // Стоимость модели (15.10.26): сегодня / 7 / 30 дней; разбивка по встречам и точкам — на вкладке «Расход».
@@ -7200,11 +7225,23 @@ function renderMonitoringLive() {
   document.getElementById("probe-now-btn")?.addEventListener("click", async (e) => {
     const btn = e.currentTarget;
     btn.disabled = true;
+    btn.textContent = "Проверяю…";
     try {
-      await api("/project-status/monitoring/probe-now", { method: "POST" });
+      const ответ = await api("/project-status/monitoring/probe-now", { method: "POST" });
+      const строки = Array.isArray(ответ.results) ? ответ.results : [];
+      const живы = строки.filter(r => r.ok === true).length;
+      const молчат = строки.filter(r => r.ok === false).length;
+      toast(ответ.ok === false
+        ? `Проверка не удалась: ${ответ.error || "смотрите строки ниже"}`
+        : `Проверено точек: ${строки.length} · живы ${живы}${молчат ? ` · без ответа ${молчат}` : ""}`,
+        ответ.ok === false || молчат > 0);
       _monitoringCache = await api("/project-status/monitoring", {});
       renderMonitoringLive();
-    } catch (err) { toast(err.message, true); btn.disabled = false; }
+    } catch (err) {
+      toast(err.message, true);
+      btn.disabled = false;
+      btn.textContent = "Проверить связь";
+    }
   });
   document.getElementById("watch-folder-btn")?.addEventListener("click", () => changeWatchFolder());
   // Интервал обхода — прямое действие, без пароля и подтверждения: в отличие от пути, ошибка здесь

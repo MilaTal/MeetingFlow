@@ -91,7 +91,7 @@ def test_accounts_screen_is_closed(client):
 def test_live_services_and_project_intake(client, tmp_path):
     d = client.get(f"/api/monitoring/live?pid={client.pid}", headers=SUPER).json()
     names = {r["name"]: r["state"] for r in d["services"]}
-    assert names["Модель"] == "выкл." and names["База данных"] == "живо" and names["Сервер"] == "живо"
+    assert names["Генерация черновика"] == "выкл." and names["База данных"] == "живо" and names["Сервер"] == "живо"
     assert names["Папка-приёмник · Пилот"] == "выкл." and d["intake"]["interval_source"] == "по умолчанию"
     assert "awaiting_total" in d and "queue" in d
 

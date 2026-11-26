@@ -235,6 +235,22 @@ h3 { font-size: 16px; font-weight: 600; }
 .mon-folder-form input { flex: 1 1 320px; min-width: 0; }
 .mon-folder-form > button { align-self: center; }   /* у .btn-sm своё flex-start — кнопка стояла на 4 px выше поля */
 
+/* «Связь с моделями» и «Папка-приёмник» — два разных блока (замечание владелицы 26.11.2026: кнопка проверки
+   сливалась со строкой ввода пути). Между ними — линия и отступ; результаты проверки читаются строками. */
+.mon-subblock { margin-top: 18px; padding-top: 14px; border-top: 1px solid var(--reg-line, #e6e9ee); }
+.mon-subhead { font-weight: 600; margin: 0 0 4px; }
+.mon-probe { margin-top: 18px; padding-top: 14px; border-top: 1px solid var(--reg-line, #e6e9ee); }
+.mon-probe-head { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; margin-bottom: 8px; }
+.mon-probe-rows { display: flex; flex-direction: column; gap: 2px; }
+.mon-probe-row { display: flex; flex-wrap: wrap; align-items: baseline; gap: 8px; padding: 3px 0; }
+.mon-probe-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--text-muted, #8a8f98);
+  flex: 0 0 8px; align-self: center; }
+.mon-probe-row.ok .mon-probe-dot { background: var(--success, #16a34a); }
+.mon-probe-row.bad .mon-probe-dot { background: var(--danger, #b91c1c); }
+.mon-probe-name { font-weight: 600; }
+.mon-probe-detail { color: var(--text-muted, #71717a); }
+#watch-folder-input.folder-flash { outline: 2px solid var(--accent, #6863bf); outline-offset: 2px; }
+
 /* Готовая выдача/сгенерированный контент (результаты поиска, тексты
    документов) — белый фон + заметная тень вместо цветной рамки/ленты,
    чтобы не путать с зонами ввода (те остаются на мягкой индиго-заливке)
