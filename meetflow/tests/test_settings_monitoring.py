@@ -251,8 +251,19 @@ def test_autorun_builds_protocol(client, svc):
     client.post(f"/api/projects/{client.pid}/settings/autorun", json={"enabled": True}, headers=SUPER)
     (svc.d / "Расшифровка 01.10.2026.txt").write_text(TRANSCRIPT, encoding="utf-8")
     r = _scan_twice(svc, client.pid)
-    assert r["autorun"][0]["status"] == "ok"
-    m = client.app.state.store.q("SELECT protocol_md FROM meetings WHERE project_id=?", (client.pid,))[0]
+    # 26.11.2026: неблокирующий проход (4e8b6f4) — автосборка ставится в очередь (queued), проход её не ждёт;
+    # протокол собирает исполнитель очереди (фоновый поток). Прежде тест ждал синхронного «ok» из прохода.
+    assert r["autorun"][0]["status"] == "queued"
+    mid = r["autorun"][0]["meeting_id"]
+    store = client.app.state.store
+    m = None
+    for _ in range(100):
+        m = store.get("meetings", mid)
+        if m and m.get("protocol_md"):
+            break
+        client.app.state.queue.run_one()
+        time.sleep(0.05)
+    assert m and m.get("protocol_md"), "очередь должна собрать протокол"
     assert m["protocol_md"].startswith("# Протокол встречи 01.10.2026")
 
 
