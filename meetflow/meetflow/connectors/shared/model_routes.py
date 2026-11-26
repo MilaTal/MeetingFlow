@@ -328,7 +328,13 @@ KIND_FIELDS = {
                                 "hint": "wav — как раньше; m4a или ogg — сжать ffmpeg перед отправкой (в 5–10 раз меньше)"},
                                {"key": "prompt_in", "label": "Подсказка распознаванию при форме raw", "choices": ["form", "query"],
                                 "default": "form",
-                                "hint": "form — подсказка и запись полями формы (в строку запроса подсказка не идёт); query — подсказка в строке запроса, как до 26.10.2026"}]},
+                                "hint": "form — подсказка и запись полями формы (в строку запроса подсказка не идёт); query — подсказка в строке запроса, как до 26.10.2026"},
+                               # 26.11.2026: прод-контроль Whisper — сервер принимает ограниченный звук за запрос
+                               {"key": "chunk_seconds", "label": "Длина куска, секунд (пусто — не резать)",
+                                "hint": "600 — предел whisper-large-v3 на запрос; пусто — запись целиком, как у «Транса»"},
+                               {"key": "max_mb", "label": "Предел размера куска, МБ (пусто — без предела)",
+                                "hint": "25 — предел whisper-large-v3 на запрос"},
+                               {"key": "timeout_sec", "label": "Таймаут одного запроса, секунд", "hint": "900"}]},
     # Nemotron-3.5-Transcribe (24.11.2026) — четвёртый род распознавания: сервер NVIDIA во внутренней сети, у него
     # только /v1/chat/completions (audio/transcriptions нет), аудио — base64 в audio_url. Заведён как инструмент для
     # опытов: диаризация грубая, таймкодов нет (см. `asr_nemotron`); в цепочку роли `asr` по умолчанию не назначен.
@@ -1009,11 +1015,19 @@ def _check_point(name: str, ep: dict) -> None:
                           f"периметр")
     if kind == "nemotron" and url and not _internal_url(url):
         raise RoutesError(f"точка «{name}»: Nemotron — только во внутренней сети, голос не покидает периметр")
-    if kind == "nemotron":
+    if kind in ("nemotron", "asr-service"):
         кусок = str(ep.get("chunk_seconds") or "").strip()
         if кусок and (not кусок.isdigit() or not 0 < int(кусок) <= 3600):
             raise RoutesError(f"точка «{name}»: длина куска — целое число секунд от 1 до 3600 "
                               f"(жёсткий лимит сервера на один запрос)")
+    if kind == "asr-service" and ep.get("max_mb") not in (None, ""):
+        try:
+            мб = float(ep["max_mb"])
+        except (TypeError, ValueError):
+            мб = -1
+        if not 0 < мб <= 100:
+            raise RoutesError(f"точка «{name}»: max_mb — число мегабайт больше нуля и не больше 100 "
+                              f"(предел размера звука на один запрос)")
     if kind == "faster-whisper" and ep.get("device", "auto") not in ("auto", "cuda", "cpu"):
         raise RoutesError(f"точка «{name}»: device — auto, cuda или cpu")
     if "max_tokens" in ep:
@@ -1990,21 +2004,35 @@ def _asr_service(route: Route):
 
     Разбор по голосам и разметку слов по умолчанию НЕ просим (`diarization=false`,
     `identify_speakers=false`, `word_timestamps=false`): их делает наш разбор, а лишняя работа на сервисе
-    только удлиняет распознавание."""
+    только удлиняет распознавание.
+
+    С 26.11.2026 (прод-контроль Whisper, слово владелицы): у точки может быть `chunk_seconds` — сервер
+    распознавания принимает не всякий звук целиком (у whisper-large-v3 предел ~25 МБ и ≤600 с на запрос).
+    Тогда wav режется на куски не длиннее `chunk_seconds` и не тяжелее `max_mb` (оба поля необязательные),
+    каждый кусок уходит тем же протоколом, времена сегментов сдвигаются на начало куска и ответы склеиваются
+    в одну расшифровку. Без `chunk_seconds` — прежний путь, байт в байт (так работает «Транс»). Нарезка —
+    только для wav: другой звук уходит целиком, как раньше."""
     if not _internal_url(route.url):
         raise RoutesError("сервис распознавания — только во внутренней сети")
     форма = str(route.opt("form") or "").strip().lower()
 
     формат_звука = str(route.opt("audio") or "wav").strip().lower()
     подсказка_в_строке = str(route.opt("prompt_in") or "form").strip().lower() == "query"
+    try:
+        кусок_секунд = int(str(route.opt("chunk_seconds") or "").strip() or 0)
+    except ValueError:
+        кусок_секунд = 0
+    try:
+        предел_байт = int(float(route.opt("max_mb") or 0) * 1024 * 1024) or None
+    except (TypeError, ValueError):
+        предел_байт = None
 
     def run(wav_path, **params):
-        данные, имя_файла, тип_звука, отправлено = _звук_для_сервиса(wav_path, формат_звука)
         язык = str(params.get("language") or "")
         подсказка = " ".join(ч for ч in (str(params.get("initial_prompt") or ""), str(params.get("hotwords") or "")) if ч)
         начало = time.monotonic()
 
-        def собрать(raw: dict) -> tuple[str, dict]:
+        def собрать(raw: dict, сдвиг: float = 0.0, отправка: dict | None = None) -> tuple[str, dict]:
             """Текст и сводка в виде, который ждут продукты.
 
             Строки — «ЧЧ:ММ:СС<TAB>текст» из `segments`: продукты сопоставляют их с кусками речи по
@@ -2022,8 +2050,8 @@ def _asr_service(route: Route):
                 реплика = str(сегмент.get("text") or "").strip()
                 if not реплика:
                     continue
-                старт = float(сегмент.get("start") or 0)
-                конец = float(сегмент.get("end") or 0)
+                старт = float(сегмент.get("start") or 0) + сдвиг
+                конец = float(сегмент.get("end") or 0) + сдвиг
                 секунды = int(старт)
                 строки.append(f"{секунды // 3600:02d}:{секунды % 3600 // 60:02d}:{секунды % 60:02d}\t{реплика}")
                 # Время каждой строки — для разделения по голосам: ERP подписывает строки и режет отрывки
@@ -2047,47 +2075,129 @@ def _asr_service(route: Route):
                 "segment_lines": строки,
                 "segment_times": времена,
             })
-            мета.update(отправка)
+            мета.update(отправка or {})
             return текст, {k: v for k, v in мета.items() if v not in (None, [], "")}
 
+        def отправить_запрос(данные: bytes, имя_файла: str, тип_звука: str, отправка: dict) -> dict:
+            """Один запрос к сервису (кусок или запись целиком) — разобранный JSON ответа. Протокол точки:
+            multipart полями формы или raw телом wav (26.10–27.10.2026, см. описание выше)."""
+
+            def отправить_форму(поля: list[tuple[str, str]]) -> dict:
+                """multipart/form-data — та же форма, что `curl -F file=@запись -F prompt=…` (27.10.2026): `собрать_форму`."""
+                тело, тип_тела = собрать_форму(поля, str(route.opt("file_field") or "file"), имя_файла, тип_звука, данные)
+                req = mark_request(urllib.request.Request(route.url, data=тело, method="POST",
+                                                          headers={"Content-Type": тип_тела,
+                                                                   "Content-Length": str(len(тело)),
+                                                                   "Accept": "application/json"}), route)
+                with urllib.request.urlopen(req, timeout=float(route.opt("timeout_sec", 4 * 3600))) as resp:
+                    return json.loads(resp.read().decode("utf-8"))
+
+            if форма != "multipart":
+                query = {k: v for k, v in params.items() if isinstance(v, (str, int, float)) and not isinstance(v, bool) and v != ""}
+                есть_подсказка = any(query.get(k) for k in ПОДСКАЗКА_ПОЛЯ)
+                if есть_подсказка and not подсказка_в_строке:
+                    # Подсказка в строке запроса — несколько килобайт после urlencode (кириллица — 6 знаков на букву): сервер
+                    # вправе оборвать такую строку. Подсказка и параметры — полями формы под прежними именами (26.10.2026).
+                    отправка["prompt_sent"] = "поле формы"
+                    return отправить_форму([(str(k), str(v)) for k, v in query.items()])
+                if есть_подсказка:
+                    отправка["prompt_sent"] = "строка запроса"
+                url = route.url + (("&" if "?" in route.url else "?") + urllib.parse.urlencode(query) if query else "")
+                req = mark_request(urllib.request.Request(url, data=данные, headers={"Content-Type": тип_звука},
+                                                          method="POST"), route)
+                with urllib.request.urlopen(req, timeout=float(route.opt("timeout_sec", 4 * 3600))) as resp:
+                    return json.loads(resp.read().decode("utf-8"))
+
+            поля = [("language", язык), ("prompt", подсказка), ("wait", "true"),
+                    ("diarization", "false"), ("identify_speakers", "false"), ("word_timestamps", "false")]
+            поля += [(str(k), str(v)) for k, v in (route.opt("extra_fields") or {}).items()]
+            if подсказка:
+                отправка["prompt_sent"] = "поле формы"
+            return отправить_форму(поля)
+
+        # Нарезка на куски (26.11.2026): сервер принимает ограниченный звук за запрос. Куски — только из wav;
+        # не-wav или сбой нарезки — запись уходит целиком прежним путём. Сбой любого куска — ошибка точки:
+        # контрольное задание пропускается очередью без сброса, основная цепочка идёт на следующую точку.
+        if кусок_секунд > 0:
+            try:
+                куски = list(_куски_wav(wav_path, кусок_секунд, предел_байт))
+            except Exception:  # noqa: BLE001 — не wav или не читается: отправим целиком, как раньше
+                куски = []
+            if куски:
+                строки: list[str] = []
+                времена: list[list[float]] = []
+                без_меток: list[str] = []
+                всего_секунд = 0.0
+                байт_всего = 0
+                язык_ответа = None
+                отправка_куска: dict = {}
+                for старт, длительность, данные in куски:
+                    всего_секунд += длительность
+                    байт_всего += len(данные)
+                    имя = f"{Path(wav_path).stem or 'audio'}-{int(старт):06d}.wav"
+                    raw = отправить_запрос(данные, имя, "audio/wav", отправка_куска)
+                    текст, мета = собрать(raw, сдвиг=старт)
+                    строки.extend(мета.get("segment_lines") or [])
+                    времена.extend(мета.get("segment_times") or [])
+                    if not (мета.get("segment_lines") or []) and текст.strip():
+                        без_меток.append(текст.strip())
+                    язык_ответа = язык_ответа or мета.get("language")
+                if not строки and not без_меток:
+                    raise RuntimeError(f"сервис не вернул текста ни по одному из {len(куски)} кусков")
+                текст = "\n".join(строки) if строки else "\n".join(без_меток)
+                мета = {
+                    "model": route.name, "device": "сервис в сети", "engine": route.url,
+                    "language": язык_ответа, "media_seconds": round(всего_секунд),
+                    "lines": len(строки) or len([с for с in текст.splitlines() if с.strip()]),
+                    "elapsed_seconds": round(time.monotonic() - начало),
+                    "chunks": len(куски), "chunk_seconds": кусок_секунд,
+                    "audio_sent": f"wav (кусками по {кусок_секунд} с)", "audio_bytes": байт_всего,
+                    "segment_lines": строки, "segment_times": времена,
+                }
+                if отправка_куска.get("prompt_sent"):
+                    мета["prompt_sent"] = отправка_куска["prompt_sent"]
+                return текст, {k: v for k, v in мета.items() if v not in (None, [], "")}
+
+        данные, имя_файла, тип_звука, отправлено = _звук_для_сервиса(wav_path, формат_звука)
         # Что ушло сервису — в сводку распознавания (26.10.2026): формат и размер звука, где была подсказка.
         отправка = {"audio_sent": отправлено, "audio_bytes": len(данные)}
-
-        def отправить_форму(поля: list[tuple[str, str]]) -> dict:
-            """multipart/form-data — та же форма, что `curl -F file=@запись -F prompt=…` (27.10.2026): `собрать_форму`."""
-            тело, тип_тела = собрать_форму(поля, str(route.opt("file_field") or "file"), имя_файла, тип_звука, данные)
-            req = mark_request(urllib.request.Request(route.url, data=тело, method="POST",
-                                                      headers={"Content-Type": тип_тела,
-                                                               "Content-Length": str(len(тело)),
-                                                               "Accept": "application/json"}), route)
-            with urllib.request.urlopen(req, timeout=float(route.opt("timeout_sec", 4 * 3600))) as resp:
-                return json.loads(resp.read().decode("utf-8"))
-
-        if форма != "multipart":
-            query = {k: v for k, v in params.items() if isinstance(v, (str, int, float)) and not isinstance(v, bool) and v != ""}
-            есть_подсказка = any(query.get(k) for k in ПОДСКАЗКА_ПОЛЯ)
-            if есть_подсказка and not подсказка_в_строке:
-                # Подсказка в строке запроса — несколько килобайт после urlencode (кириллица — 6 знаков на букву): сервер
-                # вправе оборвать такую строку. Подсказка и параметры — полями формы под прежними именами (26.10.2026).
-                отправка["prompt_sent"] = "поле формы"
-                return собрать(отправить_форму([(str(k), str(v)) for k, v in query.items()]))
-            if есть_подсказка:
-                отправка["prompt_sent"] = "строка запроса"
-            url = route.url + (("&" if "?" in route.url else "?") + urllib.parse.urlencode(query) if query else "")
-            req = mark_request(urllib.request.Request(url, data=данные, headers={"Content-Type": тип_звука},
-                                                      method="POST"), route)
-            with urllib.request.urlopen(req, timeout=float(route.opt("timeout_sec", 4 * 3600))) as resp:
-                raw = json.loads(resp.read().decode("utf-8"))
-            return собрать(raw)
-
-        поля = [("language", язык), ("prompt", подсказка), ("wait", "true"),
-                ("diarization", "false"), ("identify_speakers", "false"), ("word_timestamps", "false")]
-        поля += [(str(k), str(v)) for k, v in (route.opt("extra_fields") or {}).items()]
-        if подсказка:
-            отправка["prompt_sent"] = "поле формы"
-        return собрать(отправить_форму(поля))
+        return собрать(отправить_запрос(данные, имя_файла, тип_звука, отправка), отправка=отправка)
 
     return run
+
+
+def _куски_wav(wav_path, chunk_seconds: int, max_bytes: int | None = None):
+    """Куски wav для сервиса с пределом на запрос (26.11.2026): (начало_сек, длительность_сек, wav-байты).
+
+    Кусок не длиннее `chunk_seconds` и не тяжелее `max_bytes` (если задан): у whisper-large-v3 ~25 МБ и ≤600 с.
+    Режем по кадрам wave, без перекрытия (как `asr_nemotron._куски`); каждый кусок — самостоятельный wav.
+    Не-wav — исключение wave.Error: вызывающий отправит запись целиком прежним путём."""
+    import io
+    import wave
+
+    with wave.open(str(wav_path), "rb") as w:
+        sr = w.getframerate()
+        параметры = w.getparams()
+        всего = w.getnframes()
+        за_кусок = max(1, int(chunk_seconds) * sr)
+        if max_bytes:
+            байт_кадра = max(1, параметры.sampwidth * параметры.nchannels)
+            за_кусок = min(за_кусок, max(1, max_bytes // байт_кадра))
+        начало = 0
+        while начало < всего:
+            w.setpos(начало)
+            данные = w.readframes(min(за_кусок, всего - начало))
+            if not данные:
+                break
+            буфер = io.BytesIO()
+            with wave.open(буфер, "wb") as out:
+                out.setnchannels(параметры.nchannels)
+                out.setsampwidth(параметры.sampwidth)
+                out.setframerate(sr)
+                out.writeframes(данные)
+            секунд = len(данные) / (sr * параметры.sampwidth * параметры.nchannels)
+            yield начало / sr, секунд, буфер.getvalue()
+            начало += за_кусок
 
 
 def _параметр_части(значение: str) -> str:

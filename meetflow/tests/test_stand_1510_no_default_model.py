@@ -27,7 +27,7 @@ def routes(tmp_path, monkeypatch):
 
 def test_shared_modules_are_byte_copies():
     """Общие модули ERP и Планёрки — копии байт в байт; правятся там, переносятся целиком."""
-    assert hashlib.md5((SHARED / "model_routes.py").read_bytes()).hexdigest().startswith("0edabeeae14c")  # 26.11.2026: extra_fields точки (Whisper-сервис) доходят до вызова; было 56f9d2358a31
+    assert hashlib.md5((SHARED / "model_routes.py").read_bytes()).hexdigest().startswith("61bb187ace42")  # 26.11.2026: нарезка кусков asr-service (прод-контроль Whisper); было 0edabeeae14c
     assert hashlib.md5((SHARED / "asr_nemotron.py").read_bytes()).hexdigest().startswith("34a7449d610c")  # 24.11.2026: модуль Nemotron, три копии до байта
     assert hashlib.md5((SHARED / "llm_cost.py").read_bytes()).hexdigest().startswith("fc22479aa0b5")  # ERP main 2ea59c1
 

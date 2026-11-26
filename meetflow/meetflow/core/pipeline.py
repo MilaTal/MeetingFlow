@@ -1231,38 +1231,51 @@ class MeetingPipeline:
 
     def _контрольная_расшифровка(self, project_id: int, meeting_id: int, path: Path | None, filename: str,
                                  основной) -> int:
-        """Вторая расшифровка той же записи — локальный Whisper (решение владелицы 17.11.2026, как Планёрка и ERP).
+        """Вторая расшифровка той же записи — контрольная Whisper (решение владелицы 17.11.2026; прод-контроль 26.11).
 
-        Основная идёт своей цепочкой распознавания; контрольная — только `whisper_local`. Её текст протокол не заменяет:
-        из него берутся расхождения по числам/датам/названиям, «чего нет в основной» и провалы по времени. Нет Whisper
-        (не установлен, он же был основным) — шаг пропускается, сборка идёт по основной: это штатный путь, не сбой.
-        Возвращает id источника контрольной расшифровки (0 — шаг пропущен)."""
-        from ..connectors.asr_whisper import WhisperLocalASR
+        С 26.11.2026 (слово владелицы) контроль идёт на сервисной точке whisper-large-v3 из цепочки роли `asr`
+        (как в Планёрке и ERP), а не на местном faster-whisper: местный на процессоре шёл часами и был выключен
+        25.11. Контроль — на 100 % записей, ЕСЛИ точка доступна; протокол его не ждёт (шаг после сохранения
+        основной расшифровки), недоступна/в охлаждении/таймаут — пропуск без сброса, сборка идёт по основной.
+        Её текст протокол не заменяет: из него берутся расхождения по числам/датам/названиям (карточка/вопрос
+        человеку, не перезапись), «чего нет в основной» и провалы по времени. Если основная уже распознана
+        whisper-точкой — контроль не нужен (та же расшифровка). Возвращает id источника (0 — шаг пропущен)."""
+        from ..connectors import llm_routes
+        from ..connectors.shared import model_routes as _mr
 
         if os.environ.get("WEBAPP_CONTROL_TRANSCRIPT", "1").strip().lower() in ("0", "false", "нет"):
             return 0
-        if path is None or isinstance(основной, WhisperLocalASR):
+        if path is None:
             return 0
-        w = next((c for c in self.plugins.all("asr") if isinstance(c, WhisperLocalASR)), None)
-        причина = ""
-        if w is None:
-            причина = "локального Whisper нет в конфигурации"
-        elif not w.available():
-            причина = "faster-whisper не установлен на этой машине"
-        elif not w.model_ready():
-            # 19.11.2026 (слово владелицы): Whisper не обязателен. Пакет есть, а папки модели нет — шаг молча
-            # пропускаем, без карточки и без вопроса: сборка идёт по основной расшифровке, как если бы Whisper не было.
-            причина = "модели Whisper нет на диске — шаг пропущен"
-        if причина:
-            # Шаг штатно пропущен: строку в журнал вызовов не пишем (18.11.2026) — журнал считает вызовы моделей
-            # «строка на вызов + итог», и служебная отметка ломала этот счёт. Причина видна в итоге сборки.
+        routes = llm_routes.asr_chain()
+        if not routes:
+            return 0
+        points, _cooldown = routes
+        control_route = (os.environ.get("WEBAPP_CONTROL_ROUTE", "whisper").strip() or "whisper").lower()
+        # Контрольная точка — сервис whisper-large-v3 в цепочке asr. Местный faster-whisper контролем не служит
+        # (решение 26.11: контроль на сервисной точке; местный слишком долгий). Нет сервисной точки — пропуск.
+        whisper_pts = [(n, e) for n, e in points
+                       if control_route in n.lower() and e.get("kind") == "asr-service"]
+        if not whisper_pts:
+            return 0
+        # Основная уже распознана whisper-точкой — контроль был бы той же расшифровкой, пропускаем.
+        main_route = (getattr(основной, "last_route", "") or "").lower()
+        if main_route and control_route in main_route:
+            return 0
+        # Точка в охлаждении после сбоя — пропускаем без ожидания (предохранитель model_routes).
+        сейчас = time.time()
+        with _mr._lock:
+            доступные = [(n, e) for n, e in whisper_pts if _mr._state.down_until.get(n, 0) <= сейчас]
+        if not доступные:
             return 0
         if self.s.q("SELECT id FROM sources WHERE meeting_id=? AND name LIKE '%контрольная Whisper%' "
                     "AND removed_at IS NULL", (meeting_id,)):
             return 0
+        имя_точки, ep = доступные[0]
         try:
             hod.ход.подшаг("контрольная расшифровка Whisper")
-            doc = w.transcribe(Path(path))
+            route = _mr._route(имя_точки, ep)
+            текст, meta = _mr.asr_callable(route)(Path(path), language="ru")
         except Exception as exc:  # noqa: BLE001 — контроль не должен ронять основную сборку
             self.journal.write(purpose="control_transcript", meeting_id=meeting_id, ok=False,
                                reason=f"{type(exc).__name__}: {str(exc)[:500]}")
@@ -1272,12 +1285,27 @@ class MeetingPipeline:
             return 0
         finally:
             hod.ход.сбросить()
+        # Формат для сверки: сервис отдаёт «ЧЧ:ММ:СС<TAB>текст» без говорящего — `kontrol_raschifrovki.разобрать`
+        # такой не читает. Подставляем обезличенного «Говорящий 1» (из имён он отсеивается) в скобочный формат
+        # «[ЧЧ:ММ:СС] Говорящий 1: текст», как у основной после разбора голосов. Текст речи не меняется.
+        строки = []
+        for ln in str(текст or "").splitlines():
+            ts, tab, rest = ln.partition("\t")
+            if tab and ts.count(":") == 2 and rest.strip():
+                строки.append(f"[{ts}] Говорящий 1: {rest.strip()}")
+            elif ln.strip():
+                строки.append(ln)
+        текст = "\n".join(строки)
+        if not текст.strip():
+            return 0
         имя = f"{Path(filename).stem} — контрольная Whisper.txt"
+        meta = dict(meta or {}, route=имя_точки, control=True)
+        doc = SourceDoc(имя, SourceKind.TRANSCRIPT, текст, meta)
         sid = self.s.insert("sources", meeting_id=meeting_id, name=имя, kind=SourceKind.TRANSCRIPT.value,
                             text=doc.text, digest=doc.content_digest, created_at=now(), local_asr=0,
                             voice_state="", meta=json.dumps(doc.meta, ensure_ascii=False))
         self.journal.write(purpose="control_transcript", meeting_id=meeting_id, ok=True, name=имя,
-                           знаков=len(doc.text))
+                           знаков=len(текст))
         return sid
 
     def ingest(self, project_id: int, meeting_id: int, filename: str, data: bytes | None = None,
