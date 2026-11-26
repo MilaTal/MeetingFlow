@@ -139,6 +139,14 @@ def _diarization_config() -> dict:
     return config
 
 
+def предел_голосов(media_seconds) -> float:
+    """Разбор по голосам: 4,5 длины записи + 20 мин, но не меньше 30 мин.
+    Паритет с Планёркой (transcribe_queue.предел_голосов) и ERP (recording_queue.предел_голосов);
+    решение владелицы 26.11 — единое правило вместо фиксированных 4500 с."""
+    база = float(media_seconds or 0)
+    return max(30 * 60.0, 4.5 * база + 20 * 60.0)
+
+
 def diarize(wav_path: Path) -> tuple[list[dict], dict]:
     """Куски речи [{"start", "end", "speaker": "Говорящий N"}] и сводка {"speakers", "elapsed_seconds", "device"}.
     Номера голосов — по порядку первого появления в записи."""
@@ -148,10 +156,18 @@ def diarize(wav_path: Path) -> tuple[list[dict], dict]:
     # получает `BrokenProcessPool` вместо причины. Проверяем память заранее (21.11.2026) и сохраняем запись.
     проверить_память()
 
+    # Предел по правилу Планёрки (26.11, паритет): 4,5 длины + 20 мин, не меньше 30 мин.
+    # Длительность из wav (soundfile); если звук недоступен — минимум 30 мин (предел_голосов(0)).
+    try:
+        import soundfile as sf
+        длина = float(sf.info(str(wav_path)).duration)
+    except Exception:  # noqa: BLE001 — нет звука под рукой: предел по минимуму
+        длина = 0
+    предел_диар = int(os.environ.get("VOICE_DIARIZE_TIMEOUT") or 0) or int(предел_голосов(длина))
     # Предел (11.11.2026): без него зависший дочерний процесс держал разбор часами — в Планёрке так вышло
     # 87 минут без движения CPU. По пределу — понятная ошибка, встреча идёт дальше без подписей.
     return otdelnyy_process.выполнить(_diarize_here, Path(wav_path),
-                                      предел=int(os.environ.get("VOICE_DIARIZE_TIMEOUT", "4500") or 4500))
+                                      предел=предел_диар)
 
 
 def _diarize_here(wav_path: Path) -> tuple[list[dict], dict]:
