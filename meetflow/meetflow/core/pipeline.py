@@ -140,6 +140,8 @@ class RunReport:
     svedenie_ten: str = ""      # «тень: групп 2, объединено бы 5, сомнений 1, снято 0» — вариант C (06.11.2026)
     participants: str = ""      # «участники кодом: N по голосам» — итог сборки (27.10.2026)
     fact_loss: list = field(default_factory=list)   # потерянные значимые факты (показы) — в timings версии (E5, 25.11.2026)
+    topic_loss: list = field(default_factory=list)  # непокрытые ключевые темы (названия) — в timings версии (26.11.2026)
+    requires_review: bool = False                   # мягкие ворота: потеря факта/темы — версия «требует проверки» (26.11.2026)
 
 
 HIDDEN = "[строка скрыта: похожа на инструкцию для модели]"
@@ -2758,6 +2760,40 @@ class MeetingPipeline:
                         self.s.update("meetings", meeting_id, build_note=_примечание)
                 except Exception as exc:  # noqa: BLE001 — сверка фактов не должна ронять сохранённый протокол
                     self.step_failed(project_id, meeting_id, "Сверка фактов", exc)
+                # Покрытие тем (26.11.2026; близнец Планёрки E4): реестр тем источника (`reestr_tem`) против абзацев
+                # протокола. Непокрытые ключевые темы (вес ≥ порога) — карточкой «Разбора» (verification_topic) и
+                # строкой в примечании сборки; текст протокола не меняется. Сбой сверки сохранение не роняет.
+                try:
+                    from . import reestr_tem
+                    проекты = self.s.q("SELECT name, aliases FROM projects WHERE deleted=0 AND archived=0")
+                    aliases = {p["name"]: ", ".join(json.loads(p["aliases"] or "[]"))
+                               for p in проекты if p["name"]}
+                    источник_тем = source.text + ("\n" + notes_text if notes_text else "")
+                    реестр = reestr_tem.темы(источник_тем, aliases)
+                    pokr = reestr_tem.покрытие(реестр, protocol_md)
+                    ключевые = [t for t in pokr["непокрытые"] if t.get("weight", 0) >= reestr_tem.ПОРОГ_ВЕСА]
+                    if ключевые:
+                        rep.topic_loss = [t.get("title") or "" for t in ключевые][:20]
+                        self.cards.open(project_id, "verification_topic",
+                                        f"Протокол встречи {meeting.get('date') or ''}: не покрыты темы — {len(ключевые)}",
+                                        {"покрыто": pokr["покрыто"], "всего": pokr["всего"],
+                                         "темы": [{"title": t.get("title"), "weight": t.get("weight", 0),
+                                                   "цитата": (t.get("цитата") or "")[:300]} for t in ключевые][:20]},
+                                        meeting_id)
+                        строка_покрытия = (f"неполный протокол: не покрыты темы ({pokr['покрыто']} из {pokr['всего']}): "
+                                           + ", ".join(t.get("title") or "" for t in ключевые))[:280]
+                        _примечание = "; ".join(x for x in (_примечание, строка_покрытия) if x)
+                        self.s.update("meetings", meeting_id, build_note=_примечание)
+                except Exception as exc:  # noqa: BLE001 — контроль покрытия не должен ронять сохранённый протокол
+                    self.step_failed(project_id, meeting_id, "Покрытие тем", exc)
+                # Мягкие ворота по фактам/темам (26.11.2026): потеря факта или непокрытая ключевая тема — версия
+                # «требует проверки». Сохранение НЕ блокируется (главное — без сброса): пометка в build_note и
+                # timings версии (rep.requires_review), карточки заведены выше.
+                if rep.fact_loss or rep.topic_loss:
+                    rep.requires_review = True
+                    if not (_примечание or "").startswith("требует проверки:"):
+                        _примечание = ("требует проверки: " + (_примечание or ""))[:2000]
+                        self.s.update("meetings", meeting_id, build_note=_примечание)
                 # версия: прежняя остаётся в истории; модель — та, что написала текст (43, 47)
                 wrote = budget.answered.get("protocol") or budget.answered.get("extract_tasks") or []
                 if budget.answered.get("_external"):

@@ -158,3 +158,64 @@ def test_сбой_сверки_не_роняет_сохранение(make_pipe,
     assert store.q("SELECT COUNT(*) AS n FROM cards WHERE meeting_id=? AND kind='fact_loss'", (mid,))[0]["n"] == 0
     тех = store.q("SELECT title FROM cards WHERE meeting_id=? AND kind='technical'", (mid,))
     assert any("Сверка фактов" in r["title"] for r in тех)
+
+
+# --- 4. покрытие тем и мягкие ворота (26.11.2026) ---------------------------------------------------------------------
+
+ЗАПИСЬ_С_ТЕМОЙ = (
+    "[00:00:10] Игнатов Иван: Добрый день, начинаем.\n"
+    "[00:01:00] Петрова Анастасия: По проекту Пилот обсуждаем монтаж металлоконструкций, бригада вышла на объект вчера. "
+    "Бетонные работы идут по графику, замечаний по качеству нет. Поставка арматуры ожидается в пятницу, поставщик "
+    "подтвердил отгрузку. Качество сварных швов проверено лабораторией, протокол получен. Сдача объекта заказчику "
+    "планируется до конца года, комиссия назначена.\n"
+    "[00:02:00] Игнатов Иван: Петрова Анастасия, подготовьте протокол испытаний до 10.10\n"
+)
+
+
+def test_близнец_reestr_tem_байт_в_байт():
+    from pathlib import Path
+    here = Path(__file__).resolve()
+    близнец = here.parents[1] / "meetflow" / "core" / "reestr_tem.py"
+    источник = here.parents[3] / "Planerka-protokol-temy" / "planerka" / "webapp" / "app" / "services" / "reestr_tem.py"
+    if not источник.is_file():
+        import pytest
+        pytest.skip("нет первоисточника Планёрки на этом диске")
+    assert близнец.read_bytes() == источник.read_bytes()
+
+
+def test_непокрытая_ключевая_тема_карточка_и_строка(make_pipe, store, project):
+    from meetflow.core import reestr_tem as рт
+    mid = store.insert("meetings", project_id=project, date="2026-10-01", label="встреча")
+    p = make_pipe()
+    p.ingest(project, mid, "t 01.10.2026.txt", ЗАПИСЬ_С_ТЕМОЙ.encode())
+    rep = p.run(project, mid)
+    assert rep.protocol_saved is True
+    assert rep.topic_loss and "Пилот" in rep.topic_loss                 # ключевая тема не покрыта — в timings
+    карточки = store.q("SELECT kind, title, payload FROM cards WHERE meeting_id=? AND kind='verification_topic'", (mid,))
+    assert len(карточки) == 1 and "не покрыты темы" in карточки[0]["title"]
+    примечание = store.get("meetings", mid)["build_note"] or ""
+    assert "не покрыты темы" in примечание
+    assert rep.requires_review is True and примечание.startswith("требует проверки:")
+
+
+def test_мягкие_ворота_по_факту_помечают_версию(make_pipe, store, project):
+    p, mid, rep = _сборка_с_фактами(make_pipe, store, project)
+    assert rep.protocol_saved is True and rep.fact_loss
+    assert rep.requires_review is True
+    примечание = store.get("meetings", mid)["build_note"] or ""
+    assert примечание.startswith("требует проверки:") and "не вошли факты" in примечание
+
+
+def test_сбой_покрытия_не_роняет_сохранение(make_pipe, store, project, monkeypatch):
+    from meetflow.core import reestr_tem as рт
+    def _сбой(*a, **k):
+        raise RuntimeError("реестр сломался")
+    monkeypatch.setattr(рт, "темы", _сбой)
+    mid = store.insert("meetings", project_id=project, date="2026-10-01", label="встреча")
+    p = make_pipe()
+    p.ingest(project, mid, "t 01.10.2026.txt", ЗАПИСЬ_С_ТЕМОЙ.encode())
+    rep = p.run(project, mid)
+    assert rep.protocol_saved is True                                  # протокол сохранён несмотря на сбой сверки
+    assert store.q("SELECT COUNT(*) AS n FROM cards WHERE meeting_id=? AND kind='verification_topic'", (mid,))[0]["n"] == 0
+    тех = store.q("SELECT title FROM cards WHERE meeting_id=? AND kind='technical'", (mid,))
+    assert any("Покрытие тем" in r["title"] for r in тех)
