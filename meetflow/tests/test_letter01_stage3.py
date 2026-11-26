@@ -78,10 +78,16 @@ def test_limit_stop_keeps_what_was_done(store, project, make_pipe):
 # 01/11 — остановленный файл не уезжает в «обработано»
 def test_intake_stopped_file_goes_to_stopped_folder(client, svc):  # noqa: F811
     client.post(f"/api/projects/{client.pid}/settings/autorun", json={"enabled": True}, headers=SUPER)
-    client.app.state.pipe.theme.data["budget"] = {"max_calls": 1, "verify_reserve": 0}
     (svc.d / "Расшифровка 01.10.2026.txt").write_text(TRANSCRIPT, encoding="utf-8")
     r = _scan_twice(svc, client.pid)
-    assert r["autorun"][0]["status"] == "stopped_by_limit"
+    # 26.11.2026: проход неблокирующий (AUTORUN_WAIT_SEC=0) — сборка ставится в очередь, проход её не ждёт;
+    # итог «остановлена по пределу» подбирает следующий проход (_check_pending), файл уходит в «остановлено».
+    assert r["autorun"][0]["status"] == "queued"
+    assert len(svc._pending) == 1
+    rid = next(iter(svc._pending))
+    client.app.state.store.update("build_queue", rid, status="done",
+                                  result=json.dumps({"status": "stopped_by_limit"}))
+    svc.scan_project(client.pid)
     assert (svc.d / "остановлено" / "Расшифровка 01.10.2026.txt").exists()
     assert not (svc.d / "обработано" / "Расшифровка 01.10.2026.txt").exists()
 

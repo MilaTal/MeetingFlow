@@ -389,3 +389,58 @@ def test_same_text_with_crlf_is_duplicate(tmp_path):
     a = SourceDoc("a", SourceKind.TRANSCRIPT, "строка 1\nстрока 2\n")
     b = SourceDoc("b", SourceKind.TRANSCRIPT, "строка 1  \r\nстрока 2\r\n")
     assert a.content_digest == b.content_digest
+
+
+# 26.11.2026 — передача приёмника: проход не блокируется ожиданием сборки; дата по времени файла у общего приёмника.
+def test_intake_nonblocking_default_2611(client, svc):
+    """Default AUTORUN_WAIT_SEC=0: при занятой очереди проход принимает файлы и ставит сборку в очередь сразу,
+    не ждёт по 60 с на файл (раньше это блокировало поток обхода и замораживало watch_last_scan)."""
+    from meetflow.core import intake as intake_mod
+    assert intake_mod.AUTORUN_WAIT_SEC == 0  # неблокирующий по умолчанию
+    client.post(f"/api/projects/{client.pid}/settings/autorun", json={"enabled": True}, headers=SUPER)
+    store = client.app.state.store
+    other = store.insert("meetings", project_id=client.pid, date="2026-09-01", label="чужая")
+    store.insert("build_queue", project_id=client.pid, meeting_id=other, meeting_date="2026-09-01",
+                 status="running", pid=os.getpid(), started_at="2026-11-26T09:00:00", reason="кнопка")
+    (svc.d / "Расшифровка 01.10.2026.txt").write_text(TRANSCRIPT, encoding="utf-8")
+    (svc.d / "Расшифровка 02.10.2026.txt").write_text(TRANSCRIPT.replace("01.10", "02.10") + "\n[00:09:00] Б: ещё",
+                                                      encoding="utf-8")
+    t0 = time.monotonic()
+    svc._intakes.pop(client.pid, None)
+    svc.scan_project(client.pid)            # первый скан — файлы «оседают»
+    r = svc.scan_project(client.pid)        # второй — ready, проход не ждёт сборку
+    assert time.monotonic() - t0 < 10, "проход не блокируется ожиданием сборки"
+    assert sorted(r["ingested"]) == ["Расшифровка 01.10.2026.txt", "Расшифровка 02.10.2026.txt"]
+    assert [a["status"] for a in r["autorun"]] == ["queued", "queued"]
+    assert len(svc._pending) == 2
+
+
+def test_first_scan_waiting_second_ready_2611(client, svc):
+    """Первый скан — файл ещё «пишется» (waiting), второй — размер не менялся, файл принят."""
+    (svc.d / "Встреча 01.10.2026.txt").write_text(TRANSCRIPT, encoding="utf-8")
+    svc._intakes.pop(client.pid, None)
+    r1 = svc.scan_project(client.pid)
+    assert "Встреча 01.10.2026.txt" in r1["waiting"]
+    assert r1["ingested"] == []
+    r2 = svc.scan_project(client.pid)
+    assert r2["ingested"] == ["Встреча 01.10.2026.txt"]
+
+
+def test_general_intake_date_by_file_2611(client, svc):
+    """Общий приёмник: именованный файл без даты в имени принимается по времени файла (отдельный выключатель
+    watch_date_by_file, default вкл), не висит как no_date. Выключение — файл снова no_date."""
+    store = client.app.state.store
+    (svc.d / "Планёрка по замечаниям и срокам.txt").write_text(TRANSCRIPT, encoding="utf-8")
+    svc._intakes.pop(client.pid, None)
+    svc.scan_project(client.pid)
+    r = svc.scan_project(client.pid)
+    assert r["ingested"] == ["Планёрка по замечаниям и срокам.txt"]
+    assert r["no_date"] == []
+    assert r.get("дата_по_времени") == ["Планёрка по замечаниям и срокам.txt"]
+    # выключатель выкл — файл без даты снова no_date (режимы переговорки не включаются)
+    store.set_setting("watch_date_by_file", False, client.pid, by="тест")
+    (svc.d / "Ещё одна без даты.txt").write_text(TRANSCRIPT + "\n[00:09:00] Б: ещё", encoding="utf-8")
+    svc._intakes.pop(client.pid, None)
+    svc.scan_project(client.pid)
+    r2 = svc.scan_project(client.pid)
+    assert "Ещё одна без даты.txt" in r2["no_date"]

@@ -49,7 +49,11 @@ STALL_STEP_SEC = int(os.environ.get("MEETFLOW_WATCH_STALL_STEP_SEC", "1800"))
 # Автосборка из папки не держит обход (27.10.2026): проход ждёт сборку не дольше этого, дальше она идёт в очереди
 # сама, а итог (остановлена по пределу → файл в «остановлено») подбирает следующий проход. Раньше проход ждал до 4 ч:
 # сборка, вставшая в очереди (повтор через 10 мин / 1 ч или зависшая), останавливала забор новых файлов.
-AUTORUN_WAIT_SEC = float(os.environ.get("MEETFLOW_WATCH_AUTORUN_WAIT_SEC", "60"))
+# 26.11.2026 (передача приёмника): default 0 — проход НЕ ждёт сборку синхронно. Пока очередь занята разбором голосов,
+# ожидание по 60 с на каждый файл блокировало поток обхода (watch_last_scan замирал, сторож видел живой поток и не
+# поднимал). Файл принимается и сборка ставится в очередь сразу; итог подбирает _check_pending следующим проходом.
+# Хотите прежний grace — задайте MEETFLOW_WATCH_AUTORUN_WAIT_SEC (сек).
+AUTORUN_WAIT_SEC = float(os.environ.get("MEETFLOW_WATCH_AUTORUN_WAIT_SEC", "0"))
 # Выгрузка ВКС рядом с записью прикрепляется к её встрече по дате И времени (записка 05.11.2026, п. 6): время в имени
 # файла против времени записи источника. Расхождение больше этого порога — своя встреча, чтобы две встречи одного дня
 # не слились в одну. Нет времени в именах — прикрепляется как прежде.
@@ -238,7 +242,13 @@ class IntakeService:
         self._check_pending(project_id)
         with self._lock:
             fi = self._intakes.get(project_id)
-            по_времени = peregovorka.включена(self.s, project_id)
+            # Дата по времени файла: у переговорки — через peregovorka.включена; у ОБЩЕГО приёмника — отдельный
+            # выключатель watch_date_by_file (26.11.2026, передача приёмника), не включающий прочие режимы переговорки.
+            # Default вкл: именованные записи без даты в имени («Планёрка по замечаниям…») не висят как no_date.
+            # Выключатель общий (project_id=None) или проектный; выключить — watch_date_by_file=False.
+            по_времени = peregovorka.включена(self.s, project_id) or bool(
+                self.s.get_setting("watch_date_by_file", project_id,
+                                   self.s.get_setting("watch_date_by_file", None, True)))
             if fi is None or str(fi.folder) != path or fi.дата_по_времени != по_времени:
                 # FolderIntake сравнивает байты файлов; повтор ручной загрузки
                 # ловит конвейер по отпечатку текста (ingest -> duplicate)
@@ -806,14 +816,33 @@ class IntakeService:
         self._guard_stop.clear()
 
         def цикл() -> None:
+            warned: dict[int, float] = {}
             while not self._guard_stop.wait(шаг_сек):
                 try:
                     self.ensure_running()
+                    self._зависшие_проходы(warned)
                 except Exception as exc:  # noqa: BLE001 — сторож не должен умирать от своего сбоя
                     self._запомнить_ошибку(exc)
 
         self._guard = threading.Thread(target=цикл, name="meetflow-watch-guard", daemon=True)
         self._guard.start()
+
+    def _зависшие_проходы(self, warned: dict[int, float]) -> None:
+        """Видимость зависшего прохода (26.11.2026): поток жив, но проход не пульсирует дольше STALL_STEP_SEC —
+        карточка, чтобы блок не был молчаливым (раньше watch_last_scan замирал без новости). С неблокирующим
+        проходом (AUTORUN_WAIT_SEC=0) ожидание сборки больше не держит обход; это диагностика на прочие случаи."""
+        for pid, cur in list(self._scanning.items()):
+            pulse = cur.get("pulse") or 0
+            age = time.monotonic() - pulse
+            if age > STALL_STEP_SEC and warned.get(pid) != pulse:
+                warned[pid] = pulse
+                try:
+                    self.pipe.cards.open(pid, "technical", "Проход папки-приёмника завис",
+                                         {"шаг": cur.get("step"), "файл": cur.get("file"),
+                                          "без_движения_сек": int(age),
+                                          "что_делать": "проверить очередь сборок/разбор голосов; поток обхода жив, проход не пульсирует"})
+                except Exception:  # noqa: BLE001 — карточка не должна ронять сторож
+                    pass
 
     def stop(self) -> None:
         self._should_run = False
