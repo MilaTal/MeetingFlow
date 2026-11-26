@@ -30,6 +30,7 @@ from typing import Any
 from ..connectors.base import ConnectorError
 from . import hod
 from . import peregovorka
+from .golosa_ochered import СОСТОЯНИЕ_ЖДЁТ
 from .nazvanie_vstrechi import тема_из_приёмника
 from ..connectors.watch_folder import (DONE_DIR, MARKER, SKIP_WORDS, STOPPED_DIR, FolderIntake, IntakeItem,
                                        check_folder_path, is_marker, single_date, дата_по_времени)
@@ -143,6 +144,22 @@ def автозапуск_включён(store, project_id: int | None) -> bool:
     if bool(store.get_setting("autorun", None, False)):
         return True
     return bool(project_id) and bool(store.get_setting("autorun", project_id, False))
+
+
+def голоса_фоном(store, project_id: int | None) -> bool:
+    """Голоса фоном для ВСЕХ записей (решение владелицы 26.11.2026 №7).
+
+    Приёмник принимает запись → расшифровка → протокол СРАЗУ без говорящих → разделение по голосам уходит в очередь
+    «ждут голоса (потом)» и идёт фоном, затем протокол пересобирается с именами. Прежде голоса считались внутри прохода
+    приёмника (~40–70 мин на запись) и блокировали забор остальных файлов; вторым этапом шли только длинные записи
+    переговорки (≥ 20 мин). Теперь фон — для всех, порог переговорки снижен до 0.
+
+    Выключатель (прежний порядок — голоса внутри приёма): настройка `voices_background=False` (проектная или общая)
+    либо переменная `MEETFLOW_VOICES_BACKGROUND=off`. По умолчанию фон включён."""
+    if os.environ.get("MEETFLOW_VOICES_BACKGROUND", "on").strip().lower() in ("off", "0", "false", "нет"):
+        return False
+    return bool(store.get_setting("voices_background", project_id,
+                                  store.get_setting("voices_background", None, True)))
 
 
 class IntakeService:
@@ -347,7 +364,11 @@ class IntakeService:
             проект_приёма = цель or общие
             self._beat(project_id, "распознавание записи" if is_media else "приём файла", item.path.name)
             data = None if is_media else item.path.read_bytes()
-            res = self.pipe.ingest(проект_приёма, mid, item.path.name, data, path=item.path if is_media else None)
+            # Голоса фоном для всех записей (26.11.2026 №7): расшифровка и протокол — сразу, разделение по голосам
+            # уходит в очередь «потом». Проход приёмника больше не ждёт диаризацию (~40–70 мин) и забирает остальные файлы.
+            голоса_потом = is_media and голоса_фоном(self.s, проект_приёма)
+            res = self.pipe.ingest(проект_приёма, mid, item.path.name, data, path=item.path if is_media else None,
+                                   голоса_потом=голоса_потом)
             st = res.get("status")
             if st == "ok" and res.get("kind") == "transcript":
                 проект_приёма, как = self._по_содержанию(mid, цель, чей, item.path.name)
@@ -376,10 +397,24 @@ class IntakeService:
                                           "что_делать": "пересобрать протокол — кнопкой на этой встрече"},
                                          int(res["existing_meeting"]))
                 moved = перенесены.get(item.digest)
+                # Голоса фоном (26.11.2026 №7): запись нужна второму этапу — рабочую копию НЕ убираем, её удалит
+                # очередь голосов после удачного разбора. Признак — источник «ждут голоса (потом)» (ставит ingest).
+                голоса_ждут = False
+                if st == "ok" and res.get("source_id"):
+                    строка = self.s.get("sources", int(res["source_id"]))
+                    голоса_ждут = bool(строка and строка.get("voice_state") == СОСТОЯНИЕ_ЖДЁТ)
                 if item.digest in перенесены:
-                    self._убрать_копию(item.path)          # исходник уже в «обработано» при приёме
+                    if not голоса_ждут:
+                        self._убрать_копию(item.path)      # исходник уже в «обработано» при приёме
                 elif item.path.exists():  # запись мог уже удалить конвейер после распознавания
                     moved = fi.done(item.path)
+                    if голоса_ждут and moved:
+                        # рабочей копии не было (сбой копирования): звук уехал в «обработано» — правим путь в
+                        # источнике, иначе очередь голосов скажет «записи нет на диске»
+                        строка = self.s.get("sources", int(res["source_id"]))
+                        meta = json.loads((строка or {}).get("meta") or "{}")
+                        meta["media_path"] = str(moved)
+                        self.s.update("sources", int(res["source_id"]), meta=json.dumps(meta, ensure_ascii=False))
                 result["ingested" if st == "ok" else "duplicates"].append(item.path.name)
                 # запись, проект которой не определён, собирается сразу в проекте папки (решение владелицы 28.10.2026);
                 # карточка выбора проекта остаётся, выбор переносит встречу и пересобирает (`собрать_после_выбора`)
@@ -546,10 +581,11 @@ class IntakeService:
         # Папка по отпечатку записи: повторный проход берёт готовые части.
         отпечаток = hashlib.sha1(f"{item.path.name}|{item.path.stat().st_size}".encode()).hexdigest()[:10]
         куда = Path(self.s.path).parent / "переговорка" / отпечаток
-        # Голоса вторым этапом — для длинных записей (12.11.2026). Запись нужна шагу голосов, а исходник уедет в
-        # «обработано»: держим свою копию по отпечатку. Копируем байт в байт, а не перекодируем — отпечаток тот же,
-        # и уже сделанная расшифровка не распознаётся заново.
-        голоса_потом = разбор["длительность_с"] >= peregovorka.ПОРОГ_ГОЛОСА_ПОТОМ_МИН * 60
+        # Голоса вторым этапом — фоном для ВСЕХ записей (26.11.2026 №7; порог снижен до 0, выключатель voices_background).
+        # Запись нужна шагу голосов, а исходник уедет в «обработано»: держим свою копию по отпечатку. Копируем байт в
+        # байт, а не перекодируем — отпечаток тот же, и уже сделанная расшифровка не распознаётся заново.
+        голоса_потом = голоса_фоном(self.s, project_id) and \
+            разбор["длительность_с"] >= peregovorka.ПОРОГ_ГОЛОСА_ПОТОМ_МИН * 60
         нарезано = None
         копия = None
         if разбор["нужна_нарезка"]:
@@ -560,7 +596,8 @@ class IntakeService:
                 self.pipe.cards.open(project_id, "technical", f"Не удалось нарезать запись «{item.path.name}»",
                                      {"file": str(item.path), "detail": f"{type(exc).__name__}: {str(exc)[:300]}"})
                 нарезано = None
-        elif голоса_потом:
+        if голоса_потом and нарезано is None:
+            # Копия нужна и когда нарезка не удалась (части не получились — звук остаётся целым для шага голосов).
             try:
                 import shutil
                 куда.mkdir(parents=True, exist_ok=True)
@@ -571,6 +608,9 @@ class IntakeService:
                 self.pipe.cards.open(project_id, "technical", f"Не удалось сохранить копию записи «{item.path.name}»",
                                      {"file": str(item.path), "detail": f"{type(exc).__name__}: {str(exc)[:300]}"})
                 копия = None
+            if копия is None:
+                # копии нет — прежний порядок: голоса внутри приёма, запись не теряем из-за сбоя копирования
+                голоса_потом = False
         статус = "ok"
         сборки = []
         for i, (mid, метка, часть) in enumerate(встречи):
