@@ -351,8 +351,9 @@ def create_app(theme_name: str | None = None, db_path: str | None = None, journa
         if home != here:
             store.set_setting("db_home", here, None, "система")
     intake = IntakeService(pipe)
-    # Второй этап голосов (12.11.2026): сначала протокол без голосов, потом разделение по голосам фоном и
-    # пересборка. Пока идёт проход приёмника, голоса не берём — оба шага тяжёлые, процессор один.
+    # Второй этап голосов (12.11.2026; 26.11.2026 №7 — фон для ВСЕХ записей): сначала протокол без голосов, потом
+    # разделение по голосам фоном и пересборка с именами. Пока идёт проход приёмника, голоса не берём — оба шага
+    # тяжёлые, процессор один.
     from ..core.golosa_ochered import GolosaOchered
     golosa = GolosaOchered(pipe, intake)
     from ..core.build_queue import BuildQueue, later
@@ -408,7 +409,7 @@ def create_app(theme_name: str | None = None, db_path: str | None = None, journa
         if watch_on and _primary():
             intake.start()        # фоновый забор из папок-приёмников
             intake.start_guard()  # сторож фона (26.11.2026): упавший поток обхода поднимается сам, без перезапуска сервера
-            golosa.start()        # второй этап: голоса длинных записей после протокола (12.11.2026)
+            golosa.start()        # второй этап: голоса ВСЕХ записей после протокола, фоном (26.11.2026 №7)
             golosa.подобрать_осиротевшие()   # 26.11.2026: шаг голосов, убитый перезапуском, возвращается в очередь
             backups.start()       # автокопия базы по расписанию
             карточки_сторож_старт(pipe)   # карточки исполнителя старше 7 дней — раз в час, как в ERP
@@ -439,6 +440,7 @@ def create_app(theme_name: str | None = None, db_path: str | None = None, journa
     app = FastAPI(title="Встречи Невалаб", lifespan=lifespan)
     app.state.theme, app.state.store, app.state.pipe, app.state.intake = theme, store, pipe, intake
     app.state.queue = queue
+    app.state.golosa = golosa        # очередь голосов «потом» — для мониторинга и проверок (26.11.2026 №7)
     if os.environ.get("MEETFLOW_RESUME_ON_START", "on") != "off":
         queue.recover()       # начатое продолжается по записи о начале, независимо от автозапуска (стенд 19)
 
