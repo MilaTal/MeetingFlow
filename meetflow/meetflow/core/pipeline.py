@@ -19,6 +19,7 @@ from __future__ import annotations
 import hashlib
 import inspect
 import json
+import logging
 import os
 from datetime import timedelta
 import re
@@ -28,6 +29,10 @@ from dataclasses import dataclass, field, replace
 from datetime import datetime
 from pathlib import Path
 from typing import Any
+
+# Журнал повторов разбора по голосам (26.11.2026): в обработчике повтора стоял logger.warning без объявления —
+# первая же неудача шага голосов превращалась в NameError, повторы не выполнялись и причина терялась.
+logger = logging.getLogger(__name__)
 
 from ..connectors.base import (AnswerTruncated, ASRConnector, ConnectorError, LLMConnector, SourceConnector,
                                VisionConnector)
