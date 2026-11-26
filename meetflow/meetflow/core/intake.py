@@ -330,14 +330,19 @@ class IntakeService:
                 все = self.s.q("SELECT id, label FROM meetings WHERE project_id IN (?, ?) AND date=? AND deleted_at "
                                "IS NULL ORDER BY id", (общие, project_id, дата))
                 # выгрузка ВКС рядом с записью — та же встреча, когда время в именах совпало (записка 05.11.2026, п. 6)
-                подходят = [r for r in все if self._по_времени(r["id"], item.path.name)]
-                таже = next((r for r in подходят if (r["label"] or None) == метка),
-                            подходят[0] if подходят else None)
+                # 26.11.2026: аудиозапись (is_media) — своя встреча на каждую запись; прикрепляем ТОЛЬКО при совпадении
+                # времени, без склейки по дате/теме (иначе разные записи дня мешаются в одну встречу и в «Итоги распознавания»).
+                подходят = [r for r in все if self._по_времени(r["id"], item.path.name, строгое=is_media)]
+                if is_media:
+                    таже = подходят[0] if подходят else None
+                else:
+                    таже = next((r for r in подходят if (r["label"] or None) == метка),
+                                подходят[0] if подходят else None)
                 mid = таже["id"] if таже else self.s.insert(
                     "meetings", project_id=общие, date=дата, label=метка,
                     file_name=item.path.name, project_how="проект определится по содержанию записи")
             else:
-                mid = self._meeting_for(цель, item.meeting_date.isoformat(), item.path.name)
+                mid = self._meeting_for(цель, item.meeting_date.isoformat(), item.path.name, строгое=is_media)
                 self.s.update("meetings", mid, project_how=чей["how"])
             проект_приёма = цель or общие
             self._beat(project_id, "распознавание записи" if is_media else "приём файла", item.path.name)
@@ -704,24 +709,29 @@ class IntakeService:
                                       "candidate_id": по["project_id"], "candidate": имя}, mid)
         return цель, чей.get("how") or ""
 
-    def _meeting_for(self, project_id: int, iso_date: str, имя: str = "") -> int:
+    def _meeting_for(self, project_id: int, iso_date: str, имя: str = "", строгое: bool = False) -> int:
         """Встреча дня. Несколько встреч одного дня различаются временем в именах файлов (записка 05.11.2026, п. 6):
         выгрузка ВКС рядом с записью прикрепляется к встрече своей записи, а не к первой за день. Название — тема из
-        имени файла (пункт 2 плана, 08.11.2026), само имя файла — отдельным полем."""
+        имени файла (пункт 2 плана, 08.11.2026), само имя файла — отдельным полем.
+        строгое=True (аудио): своя встреча на каждую запись, без склейки по дате (26.11)."""
         rows = self.s.q("SELECT id FROM meetings WHERE project_id=? AND date=? AND deleted_at IS NULL ORDER BY id",
                         (project_id, iso_date))
         for r in rows:
-            if self._по_времени(r["id"], имя):
+            if self._по_времени(r["id"], имя, строгое=строгое):
                 return r["id"]
         return self.s.insert("meetings", project_id=project_id, date=iso_date,
                              label=тема_из_приёмника(имя) or None, file_name=имя)
 
-    def _по_времени(self, mid: int, имя: str) -> bool:
+    def _по_времени(self, mid: int, имя: str, строгое: bool = False) -> bool:
         """Та же встреча по времени: время в имени нового файла против времён источников встречи. Нет времени хотя
-        бы с одной стороны или расхождение в пределах порога — та же встреча (прежнее поведение по дате)."""
+        бы с одной стороны или расхождение в пределах порога — та же встреча (прежнее поведение по дате).
+        строгое=True (аудиозапись): нет времени в имени — не прикрепляем, своя встреча на каждую запись (26.11)."""
         mine = время_из_имени(имя)
         if mine is None:
-            return True
+            # 26.11.2026: для аудио (строгое) нет времени в имени — НЕ прикрепляем к первой встрече дня,
+            # заводим свою (иначе разные записи дня склеиваются в одну, и «Итоги распознавания» мешают все встречи).
+            # Для транскриптов/выгрузок ВКС (не строгое) прежняя логика — прикрепление к встрече записи.
+            return not строгое
         времена = [t for t in (время_из_имени(s["name"]) for s in
                                self.s.q("SELECT name FROM sources WHERE meeting_id=? AND removed_at IS NULL", (mid,)))
                    if t is not None]

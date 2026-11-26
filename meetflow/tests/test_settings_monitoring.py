@@ -426,6 +426,25 @@ def test_first_scan_waiting_second_ready_2611(client, svc):
     assert r2["ingested"] == ["Встреча 01.10.2026.txt"]
 
 
+def test_разные_аудиозаписи_дня_разные_встречи_2611(client, svc, monkeypatch):
+    """26.11: разные аудиозаписи одного дня — РАЗНЫЕ встречи (не склеиваются в одну), иначе «Итоги распознавания»
+    мешают все встречи подряд. ASR подменён успешным приёмом; проверяем число встреч по именам файлов."""
+    monkeypatch.setattr(svc.pipe, "ingest", lambda *a, **k: {"status": "ok", "kind": "asr"})
+    (svc.d / "5bND0T1W.mp3").write_bytes(b"audio-one")
+    (svc.d / "hJ3EQiBK.mp3").write_bytes(b"audio-two")
+    svc._intakes.pop(client.pid, None)
+    svc.scan_project(client.pid)
+    r = svc.scan_project(client.pid)
+    assert sorted(r["ingested"]) == ["5bND0T1W.mp3", "hJ3EQiBK.mp3"]
+    store = client.app.state.store
+    m1 = store.q("SELECT id FROM meetings WHERE file_name=? AND deleted_at IS NULL", ("5bND0T1W.mp3",))
+    m2 = store.q("SELECT id FROM meetings WHERE file_name=? AND deleted_at IS NULL", ("hJ3EQiBK.mp3",))
+    assert m1 and m2 and m1[0]["id"] != m2[0]["id"], "каждая запись — своя встреча"
+    # строгое _по_времени: аудио без времени в имени не прикрепляется к чужой встрече
+    assert svc._по_времени(m1[0]["id"], "5bND0T1W.mp3", строгое=True) is False
+    assert svc._по_времени(m1[0]["id"], "5bND0T1W.mp3", строгое=False) is True
+
+
 def test_general_intake_date_by_file_2611(client, svc):
     """Общий приёмник: именованный файл без даты в имени принимается по времени файла (отдельный выключатель
     watch_date_by_file, default вкл), не висит как no_date. Выключение — файл снова no_date."""
