@@ -1280,8 +1280,13 @@ def chain(role: str, env: dict | None = None) -> list[Route]:
 
 
 def _route(name: str, ep: dict) -> Route:
+    # `extra_fields` — словарь полей формы сервиса распознавания (26.11.2026): фильтр «только простые значения»
+    # ниже терял его, и точка Whisper уходила без `model`/`response_format` — ответ без сегментов и длительности.
+    опции = [(k, v) for k, v in ep.items() if k not in _BASE_KEYS and isinstance(v, (str, int, float, bool))]
+    if isinstance(ep.get("extra_fields"), dict):
+        опции.append(("extra_fields", dict(ep["extra_fields"])))
     return Route(name, ep["kind"], ep.get("model") or ep.get("callable"), ep.get("url", ""), ep.get("key_env", ""),
-                 options=tuple(sorted((k, v) for k, v in ep.items() if k not in _BASE_KEYS and isinstance(v, (str, int, float, bool)))))
+                 options=tuple(sorted(опции)))
 
 
 def provider_of(route: Route | None) -> str | None:

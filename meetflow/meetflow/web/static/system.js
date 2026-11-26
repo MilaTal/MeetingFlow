@@ -48,7 +48,12 @@ renderMonitoringLive = function () {  // eslint-disable-line no-global-assign
     const имя = tr.querySelector(".mon-label")?.textContent || "";
     const куда = (СЛУЖБА_КАК_ИСПРАВИТЬ.find(([re]) => re.test(имя)) || [null, "#system/messages"])[1];
     const заметка = tr.querySelector(".mon-note");
-    if (заметка && !заметка.querySelector(".svc-fix")) заметка.insertAdjacentHTML("beforeend", ` <a class="svc-fix" href="${куда}">как исправить</a>`);
+    // У папки-приёмника «как исправить» ведёт не по адресу, а к полю пути на этой же панели (26.11.2026):
+    // прежний адрес «#live?folder=1» менял весь хеш, терял выбранный проект и никуда не приводил.
+    const ссылка = /^Папка-приёмник/.test(имя)
+      ? `<a class="svc-fix" href="#" data-fix="folder">как исправить</a>`
+      : `<a class="svc-fix" href="${куда}">как исправить</a>`;
+    if (заметка && !заметка.querySelector(".svc-fix")) заметка.insertAdjacentHTML("beforeend", ` ${ссылка}`);
   });
 };
 
@@ -223,7 +228,23 @@ new MutationObserver(() => {
   _пояснениеКадр = requestAnimationFrame(() => { пояснитьЗаЗначком(); пояснитьРазделы(); лентаПодключений(); });
 }).observe(document.getElementById("main"), { childList: true, subtree: true });
 
-// «как исправить» у папки-приёмника — к полю пути на этой же вкладке
+// «как исправить» у папки-приёмника — к полю пути на этой же вкладке: подсветить и поставить курсор.
+// Старый переход по адресу «#live?folder=1» оставлен как запасной путь для внешних ссылок.
+function показатьПолеПапки() {
+  const поле = document.getElementById("watch-folder-input");
+  if (!поле) return false;
+  поле.scrollIntoView({ block: "center", behavior: "smooth" });
+  поле.classList.add("folder-flash");
+  setTimeout(() => поле.classList.remove("folder-flash"), 2200);
+  поле.focus({ preventScroll: true });
+  return true;
+}
+document.addEventListener("click", (e) => {
+  const ссылка = e.target.closest("[data-fix='folder']");
+  if (!ссылка) return;
+  e.preventDefault();
+  показатьПолеПапки();
+});
 window.addEventListener("hashchange", () => {
-  if (location.hash === "#live?folder=1") setTimeout(() => document.getElementById("watch-folder-input")?.focus(), 1500);
+  if (location.hash === "#live?folder=1") setTimeout(показатьПолеПапки, 1500);
 });

@@ -407,7 +407,9 @@ def create_app(theme_name: str | None = None, db_path: str | None = None, journa
     async def lifespan(_app):
         if watch_on and _primary():
             intake.start()        # фоновый забор из папок-приёмников
+            intake.start_guard()  # сторож фона (26.11.2026): упавший поток обхода поднимается сам, без перезапуска сервера
             golosa.start()        # второй этап: голоса длинных записей после протокола (12.11.2026)
+            golosa.подобрать_осиротевшие()   # 26.11.2026: шаг голосов, убитый перезапуском, возвращается в очередь
             backups.start()       # автокопия базы по расписанию
             карточки_сторож_старт(pipe)   # карточки исполнителя старше 7 дней — раз в час, как в ERP
             голоса_при_старте(pipe)       # нет папки моделей — строка в журнал и одна карточка, а не тишина
@@ -1816,9 +1818,9 @@ def create_app(theme_name: str | None = None, db_path: str | None = None, journa
         gen, ver = getattr(pipe.gen, "model", "") or "", getattr(pipe.ver, "model", "") or ""
         rows = []
         if tool == "mock":
-            rows.append(_row("Модель", "выкл.", "стенд без модели: протоколы собирает заглушка"))
+            rows.append(_row("Генерация черновика", "выкл.", "стенд без модели: протоколы собирает заглушка"))
         elif tool == "openrouter" and not key:
-            rows.append(_row("Модель", "нет", "OpenRouter: ключ OPENROUTER_API_KEY не задан"))
+            rows.append(_row("Генерация черновика", "нет", "OpenRouter: ключ OPENROUTER_API_KEY не задан"))
         else:
             def route(llm) -> str:   # точка и запасные — как в ERP и Планёрке (локальная машина 71b2b27, 12.10.26)
                 try:
@@ -1826,8 +1828,11 @@ def create_app(theme_name: str | None = None, db_path: str | None = None, journa
                 except Exception:   # noqa: BLE001 — сбой файла маршрутов не должен ронять мониторинг
                     return ""
                 return (f" · точка «{names[0]}»" + (f", запасные: {', '.join(names[1:])}" if names[1:] else "")) if names else ""
-            rows.append(_row("Модель", "живо", f"{tool}: генерирует {gen or 'по маршрутам'}{route(pipe.gen)}"))
-            rows.append(_row("Модель проверки", "живо", (ver or "по маршрутам") + route(pipe.ver) +
+            # Имена строк — как вкладки «Моделей» (слово владелицы 26.11.2026): «Модель» читалась как «вторая
+            # модель работы», хотя это цепочка запасных генерации. Порядок в строке — порядок подхвата:
+            # первая точка работает, следующая берётся, только когда предыдущая недоступна.
+            rows.append(_row("Генерация черновика", "живо", f"{tool}: {gen or 'по маршрутам'}{route(pipe.gen)}"))
+            rows.append(_row("Проверка черновика", "живо", (ver or "по маршрутам") + route(pipe.ver) +
                              (" — та же, что генерация" if ver and ver == gen else "")))
         try:
             store.q("SELECT 1 AS x")
@@ -1850,7 +1855,10 @@ def create_app(theme_name: str | None = None, db_path: str | None = None, journa
             elif not st.get("exists"):
                 rows.append(_row(f"Папка-приёмник · {p['name']}", "нет", f"{st['folder']} — не найдена"))
             elif not st["worker"]:
-                rows.append(_row(f"Папка-приёмник · {p['name']}", "нет", f"{st['folder']} — фоновый забор не запущен"))
+                rows.append(_row(f"Папка-приёмник · {p['name']}", "нет",
+                                 f"{st['folder']} — фоновый забор не запущен"
+                                 # причина из состояния (26.11.2026): «нет» без причины не подсказывало, что случилось
+                                 + (f": {st['last_error']} ({st['last_error_at']})" if st.get("last_error") else "")))
             elif st.get("stalled") and st.get("scan_in_progress"):
                 rows.append(_row(f"Папка-приёмник · {p['name']}", "нет",
                                  f"{st['folder']} — проход стоит: {st['scan_step']}"
@@ -1873,9 +1881,21 @@ def create_app(theme_name: str | None = None, db_path: str | None = None, journa
             asr_ok = [c for c in asr if c.health().get("ok")]
         except Exception:  # noqa: BLE001
             asr_ok = []
-        rows.append(_row("Распознавание записей", "живо" if asr_ok else "нет" if asr else "выкл.",
-                         ", ".join(c.name for c in asr_ok) if asr_ok else "инструменты распознавания не найдены"
-                         if asr else "коннектор не подключён"))
+        # Точки рабочей цепочки распознавания (26.11.2026): строка показывала только местный whisper_local, хотя
+        # запись идёт по цепочке роли «Распознавание речи» — «Транс», затем Whisper на 192.168.100.30. Состояние
+        # каждой точки проверяется кнопкой «Проверить связь» и видно в блоке «Связь с моделями».
+        try:
+            from ..connectors import llm_routes as _lr   # app.py лежит в meetflow/web — на уровень выше, не на три
+            asr_points = _lr.role_chain("asr")
+        except Exception:  # noqa: BLE001 — сбой файла маршрутов не должен ронять мониторинг
+            asr_points = []
+        if asr_points:
+            rows.append(_row("Распознавание записей", "живо",
+                             "точки по порядку: " + ", ".join(asr_points) + " · состояние — в «Связи с моделями»"))
+        else:
+            rows.append(_row("Распознавание записей", "живо" if asr_ok else "нет" if asr else "выкл.",
+                             ", ".join(c.name for c in asr_ok) if asr_ok else "инструменты распознавания не найдены"
+                             if asr else "коннектор не подключён"))
         vb = voice_base_state(store.get_setting("voice_base_path"))
         rows.append(_row("База голосов", "живо" if vb.get("ok") else "выкл." if not vb.get("path") else "нет",
                          (f"{vb.get('path')} · отпечатков {vb.get('samples')}" if vb.get("ok") else

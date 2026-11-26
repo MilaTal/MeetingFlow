@@ -14,6 +14,7 @@ from __future__ import annotations
 import json
 import sqlite3
 import threading
+import time
 from contextlib import contextmanager
 from datetime import datetime
 from pathlib import Path
@@ -238,6 +239,25 @@ class Store:
                 return []
             return [dict(r) for r in self._conn.execute(sql, args).fetchall()]
 
+    # Замок базы на сетевом диске бывает дольше sqlite-таймаута (он 30 с). 25.11.2026 поток обхода папки-приёмника
+    # умер на записи итога прохода с «database is locked», и забор записей стоял до перезапуска сервера. Повторяем
+    # запись, только когда база занята; прочие ошибки — сразу наружу, их глотать нельзя.
+    ЗАНЯТА_ПОПЫТОК = 6
+    ЗАНЯТА_ПАУЗА_СЕК = 1.0
+
+    def _занята(self, exc: BaseException) -> bool:
+        текст = str(exc).lower()
+        return isinstance(exc, sqlite3.OperationalError) and ("locked" in текст or "busy" in текст)
+
+    def _с_повтором(self, действие):
+        for попытка in range(1, self.ЗАНЯТА_ПОПЫТОК + 1):
+            try:
+                return действие()
+            except sqlite3.OperationalError as exc:
+                if not self._занята(exc) or попытка == self.ЗАНЯТА_ПОПЫТОК:
+                    raise
+                time.sleep(self.ЗАНЯТА_ПАУЗА_СЕК * попытка)
+
     def insert(self, table: str, **vals: Any) -> int:
         if table not in SCHEMA:
             raise ValueError(f"unknown table {table}")
@@ -245,8 +265,11 @@ class Store:
         args = tuple(json.dumps(vals[c], ensure_ascii=False) if isinstance(vals[c], (dict, list)) else vals[c]
                      for c in cols)
         sql = f"INSERT INTO {table} ({', '.join(cols)}) VALUES ({', '.join('?' * len(cols))})"
-        with self.tx() as c:
-            return int(c.execute(sql, args).lastrowid)
+
+        def сделать() -> int:
+            with self.tx() as c:
+                return int(c.execute(sql, args).lastrowid)
+        return self._с_повтором(сделать)
 
     def update(self, table: str, row_id: int, **vals: Any) -> None:
         cols = [c for c in vals if c in SCHEMA[table] and c != "id"]
@@ -254,14 +277,20 @@ class Store:
             return
         args = tuple(json.dumps(vals[c], ensure_ascii=False) if isinstance(vals[c], (dict, list)) else vals[c]
                      for c in cols)
-        with self.tx() as c:
-            c.execute(f"UPDATE {table} SET {', '.join(f'{x}=?' for x in cols)} WHERE id=?", args + (row_id,))
+
+        def сделать() -> None:
+            with self.tx() as c:
+                c.execute(f"UPDATE {table} SET {', '.join(f'{x}=?' for x in cols)} WHERE id=?", args + (row_id,))
+        self._с_повтором(сделать)
 
     def delete(self, table: str, row_id: int) -> None:
         if table not in SCHEMA:
             raise ValueError(f"unknown table {table}")
-        with self.tx() as c:
-            c.execute(f"DELETE FROM {table} WHERE id=?", (row_id,))
+
+        def сделать() -> None:
+            with self.tx() as c:
+                c.execute(f"DELETE FROM {table} WHERE id=?", (row_id,))
+        self._с_повтором(сделать)
 
     def get(self, table: str, row_id: int) -> dict[str, Any] | None:
         rows = self.q(f"SELECT * FROM {table} WHERE id=?", (row_id,))

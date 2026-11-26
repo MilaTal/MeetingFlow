@@ -14,6 +14,7 @@ from __future__ import annotations
 import json
 import os
 import socket
+import threading
 import time
 from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
@@ -318,6 +319,26 @@ def mount(r: APIRouter, ctx: Ctx) -> None:
     def monitoring(request: Request):
         ctx.need_super(request)
         pid = ctx.project(request)
+        # Фон обхода поднимаем на открытии панели, если он упал (26.11.2026): сторож делает то же раз в две минуты,
+        # но панель — первое место, где человек видит «нет» и хочет, чтобы оно уже было исправлено.
+        try:
+            intake.ensure_running()
+        except Exception:  # noqa: BLE001 — подъём фона не должен ронять панель
+            pass
+        # Точки моделей опрашиваются фоном раз в 60 с (как обещает подпись у кнопки): результат кладётся в ответ
+        # панели и переживает перерисовку. Раньше кнопка считала результаты и выбрасывала их — на мониторинге
+        # ничего не появлялось (находка владелицы 26.11.2026).
+        def _обновить_проверку() -> None:
+            probe["busy"] = True
+            try:
+                from ...connectors.llm_routes import check_all
+                probe.update(at=time.time(), rows=check_all(), error="")
+            except Exception as exc:  # noqa: BLE001 — панель покажет прежние результаты и причину
+                probe.update(at=time.time(), error=f"{type(exc).__name__}: {str(exc)[:200]}")
+            finally:
+                probe["busy"] = False
+        if time.time() - float(probe.get("at") or 0) > 60 and not probe.get("busy"):
+            threading.Thread(target=_обновить_проверку, name="mf-probe", daemon=True).start()
         today = date.today().isoformat()
         day_ago = (datetime.now() - timedelta(days=1)).strftime("%Y-%m-%dT%H:%M:%S")
         ws = intake.state(pid) if pid else {}
@@ -380,6 +401,8 @@ def mount(r: APIRouter, ctx: Ctx) -> None:
         return {
             "now_msk": datetime.now().strftime("%d.%m.%Y %H:%M"),
             "services_live": services(request), "watch_folder": wf,
+            # «Проверить связь»: когда опрашивали и что ответили точки (кнопка и фон пишут сюда же)
+            "probe": {"at": probe.get("at") or 0, "rows": probe.get("rows") or [], "error": probe.get("error") or ""},
             "recognition": {"stages": [], "running": False, "waiting": 0, "last": last, "записи": [], "history": [],
                             "speed": [], "reference_share": {"видеокарта": 0.5}},
             "queues": {"conflicts_norm": {"open": n_open, "norm": 15, "over": n_open > 15,
@@ -452,13 +475,16 @@ def mount(r: APIRouter, ctx: Ctx) -> None:
 
     @r.post("/project-status/monitoring/probe-now")
     def probe_now(request: Request):
+        """Опрос точек сейчас: строки ответа — те же, что панель показывает в «Связи с моделями»."""
         ctx.need_super(request)
+        ошибка = ""
         try:
             from ...connectors.llm_routes import check_all
-            probe.update(at=time.time(), rows=check_all())
-        except Exception:  # noqa: BLE001
-            pass
-        return {"ok": True, "results": probe["rows"]}
+            probe.update(at=time.time(), rows=check_all(), error="")
+        except Exception as exc:  # noqa: BLE001 — ответ человеку важнее исключения
+            ошибка = f"{type(exc).__name__}: {str(exc)[:200]}"
+            probe.update(at=time.time(), error=ошибка)
+        return {"ok": not ошибка, "results": probe["rows"], "at": probe["at"], "error": ошибка}
 
     @r.post("/project-status/monitoring/backup-now")
     def backup_now(request: Request):

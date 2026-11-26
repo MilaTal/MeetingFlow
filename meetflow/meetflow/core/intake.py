@@ -156,6 +156,14 @@ class IntakeService:
         self._scanning: dict[int, dict[str, Any]] = {}
         # сборки, поставленные проходом и не дождавшиеся: id строки очереди → (проект, встреча, файл, где файл сейчас)
         self._pending: dict[int, tuple[int, int, str, Path | None]] = {}
+        # Живучесть фона (26.11.2026): 25.11 поток обхода умер на «database is locked» при записи итога прохода,
+        # и забор записей стоял до перезапуска сервера — папка на мониторе значилась «нет», файлы не забирались.
+        self._should_run = False       # фон разрешён этому экземпляру (первый на базе, папки включены)
+        self._last_error: str | None = None
+        self._last_error_at: str | None = None
+        self._restarts = 0
+        self._guard: threading.Thread | None = None
+        self._guard_stop = threading.Event()
 
     def _beat(self, project_id: int, step: str, file: str | None = None) -> None:
         cur = self._scanning.get(project_id)
@@ -716,7 +724,9 @@ class IntakeService:
         iv, iv_src = self.interval_info(project_id)
         info = {"folder": path, "interval": iv, "interval_source": iv_src, "worker": self.running,
                 "last_scan": last, "last_useful_scan": self.s.get_setting("watch_last_useful_scan", project_id),
-                "autorun": автозапуск_включён(self.s, project_id)}
+                "autorun": автозапуск_включён(self.s, project_id),
+                # почему фон не работает и сколько раз поднимали — чтобы «нет» на мониторе было с причиной
+                "last_error": self._last_error, "last_error_at": self._last_error_at, "restarts": self._restarts}
         # «завис» — по работе, а не по времени (06.11.2026): пока идёт шаг, смотрим подшаг из `hod` — дочерний
         # процесс разделения по голосам жив и его процессорное время растёт. Раньше признак считался по времени с
         # единственной отметки в начале шага, и на записи длиннее ~25 минут проход выглядел зависшим, хотя работал
@@ -757,15 +767,58 @@ class IntakeService:
     def running(self) -> bool:
         return bool(self._thread and self._thread.is_alive())
 
-    def start(self, tick: float = 5.0) -> None:
-        if self.running:
-            return
+    def _запустить_поток(self, tick: float = 5.0) -> None:
         self._stop.clear()
         self._thread = threading.Thread(target=self._loop, args=(tick,), name="meetflow-watch", daemon=True)
         self._thread.start()
 
+    def start(self, tick: float = 5.0) -> None:
+        self._should_run = True
+        if self.running:
+            return
+        self._запустить_поток(tick)
+
+    def ensure_running(self) -> bool:
+        """Фон обхода жив? Нет — поднять заново (сторож и мониторинг зовут это). True — поток поднят сейчас.
+
+        Правило то же, что у папки-приёмника ERP (сторож обхода): упавший поток не должен ждать перезапуска
+        сервера — иначе записи лежат в папке, а монитор говорит «нет». Поднимаем только там, где фон разрешён
+        (`start` был вызван): второй экземпляр на той же базе забор не запускает.
+        """
+        if not self._should_run or self._stop.is_set() or self.running:
+            return False
+        self._restarts += 1
+        try:
+            self.pipe.cards.open(None, "technical", "Фоновый забор папки-приёмника перезапущен",
+                                 {"причина": self._last_error or "поток обхода завершился",
+                                  "когда": self._last_error_at or now(), "перезапусков": self._restarts})
+        except Exception:  # noqa: BLE001 — сообщение не должно мешать подъёму потока
+            pass
+        self._запустить_поток()
+        return True
+
+    def start_guard(self, шаг_сек: float = 120.0) -> None:
+        """Сторож фона — один на процесс: раз в две минуты проверяет поток и поднимает, если тот ушёл."""
+        if not self._should_run:
+            return
+        if self._guard is not None and self._guard.is_alive():
+            return
+        self._guard_stop.clear()
+
+        def цикл() -> None:
+            while not self._guard_stop.wait(шаг_сек):
+                try:
+                    self.ensure_running()
+                except Exception as exc:  # noqa: BLE001 — сторож не должен умирать от своего сбоя
+                    self._запомнить_ошибку(exc)
+
+        self._guard = threading.Thread(target=цикл, name="meetflow-watch-guard", daemon=True)
+        self._guard.start()
+
     def stop(self) -> None:
+        self._should_run = False
         self._stop.set()
+        self._guard_stop.set()
         if self._thread:
             self._thread.join(timeout=10)
 
@@ -773,17 +826,39 @@ class IntakeService:
         """Идёт ли проход прямо сейчас (для очереди голосов: два тяжёлых шага на одном процессоре не гоняем)."""
         return bool(self._scanning)
 
+    def _запомнить_ошибку(self, e: BaseException) -> None:
+        self._last_error = f"{type(e).__name__}: {str(e)[:300]}"
+        self._last_error_at = now()
+
+    def _записать_сбой(self, project_id: int | None, e: BaseException) -> None:
+        """Сбой прохода — в состояние и карточкой; карточка best-effort: база бывает занята, и тогда именно она
+        и роняла поток (25.11.2026)."""
+        self._запомнить_ошибку(e)
+        if project_id is None:
+            return
+        try:
+            self.pipe.cards.open(project_id, "technical", "Сбой прохода папки-приёмника",
+                                 {"error": type(e).__name__, "detail": str(e)[:400],   # стенд 33
+                                  "where": traceback.format_exc(limit=3)[-800:]})
+        except Exception:  # noqa: BLE001 — запись карточки не должна ронять фон
+            pass
+
     def _loop(self, tick: float) -> None:
         last: dict[int, float] = {}
-        while not self._stop.is_set():
-            for r in self.s.q("SELECT project_id FROM settings WHERE key='watch_folder' AND value != 'null'"):
-                pid = r["project_id"]
-                if time.monotonic() - last.get(pid, -1e9) >= self.interval(pid):
-                    last[pid] = time.monotonic()
-                    try:
-                        self.scan_project(pid)
-                    except Exception as e:  # фон не должен падать целиком
-                        self.pipe.cards.open(pid, "technical", "Сбой прохода папки-приёмника",
-                                             {"error": type(e).__name__, "detail": str(e)[:400],   # стенд 33
-                                              "where": traceback.format_exc(limit=3)[-800:]})
-            self._stop.wait(tick)
+        try:
+            while not self._stop.is_set():
+                try:
+                    for r in self.s.q("SELECT project_id FROM settings WHERE key='watch_folder' AND value != 'null'"):
+                        pid = r["project_id"]
+                        if time.monotonic() - last.get(pid, -1e9) >= self.interval(pid):
+                            last[pid] = time.monotonic()
+                            try:
+                                self.scan_project(pid)
+                            except Exception as e:  # noqa: BLE001 — один проект не роняет обход
+                                self._записать_сбой(pid, e)
+                except Exception as e:  # noqa: BLE001 — база занята или настройки не прочитаны: ждём и повторяем
+                    self._запомнить_ошибку(e)
+                self._stop.wait(tick)
+        finally:
+            if not self._stop.is_set():
+                self._запомнить_ошибку(RuntimeError("поток обхода завершился без остановки"))
