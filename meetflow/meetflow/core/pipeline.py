@@ -293,21 +293,6 @@ def _list(out: Any, key: str) -> list:
     return v
 
 
-def _тень_проверки(system: str, пользователь: str, label: str, итог: dict,
-                   meeting_id: int | None = None) -> None:
-    """qwen3.8 на spark-1 в тень (решение владелицы 24.11.2026): тот же черновик, тот же шаблон —
-    только строка журнала. Вердикт, правка по замечаниям и карточки не меняются.
-    Тень выключена — вызова нет; сбой тени сборку не роняет."""
-    try:
-        from . import proverka_ten
-        if not proverka_ten.включена():
-            return
-        proverka_ten.прогнать(system=system, пользователь=пользователь, label=label, основной=итог,
-                              источник="meetflow", meeting_id=meeting_id)
-    except Exception:  # noqa: BLE001 — тень не должна ронять сборку
-        pass
-
-
 def _dict(out: Any, key: str) -> dict:
     if not isinstance(out, dict):
         raise ShapeError(f"ответ модели не объект, а {type(out).__name__}")
@@ -2655,8 +2640,6 @@ class MeetingPipeline:
                                    "severity": str(f.get("severity", "minor"))[:10]}
                                   for f in _list(out, "findings") if isinstance(f, dict)]
                         собранные += порция[:нарезка.VERIFY_CHUNK_FINDINGS]
-                        _тень_проверки(sysm, user, f"Протокол встречи {meeting.get('date') or ''} (кусок {номер_куска})",
-                                       {"clean": not порция, "findings": порция}, meeting_id)
                         if len(собранные) >= нарезка.VERIFY_TOTAL_FINDINGS:
                             break
                     rep.findings = собранные[:нарезка.VERIFY_TOTAL_FINDINGS]
