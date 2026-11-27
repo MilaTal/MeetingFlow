@@ -6576,8 +6576,11 @@ function monSection(title, bodyHtml, chip) {
 
 
 // rows: [label, valueHtml, noteHtml] — значение и пояснение уже готовый HTML (экранирует вызывающий).
-function monTable(rows) {
-  return `<table class="mon-table mon-3"><tbody>${rows.filter(Boolean).map(([label, value, note]) =>
+// headers — названия колонок (27.11.2026, слово владелицы: «нет ни названия таблицы, ни названия колонок…
+// сделать как на странице Задачи, всё подписать»). Без headers таблица остаётся как прежде.
+function monTable(rows, headers) {
+  const шапка = headers ? `<thead><tr>${headers.map(h => `<th>${esc(h)}</th>`).join("")}</tr></thead>` : "";
+  return `<table class="mon-table mon-3">${шапка}<tbody>${rows.filter(Boolean).map(([label, value, note]) =>
     `<tr><td class="mon-label">${esc(label)}</td><td class="mon-value">${value ?? "—"}</td><td class="mon-note">${note || ""}</td></tr>`).join("")}</tbody></table>`;
 }
 
@@ -6629,7 +6632,7 @@ async function renderAwaitingTab() {
       ["Сколько ждёт", `<b>${g.count}</b>`, g.oldest ? `самое старое — ${esc(g.oldest)}` : ""],
       ["Что нужно", esc(g.what), ""],
       ["Если не ответить", esc(g.consequence), `<a href="${g.where}">${esc(g.where_text)}</a>`],
-    ]);
+    ], ["Показатель", "Значение", "Что делать"]);
     const подробности = (g.details || []).length
       ? `<div class="page-sub" style="margin:6px 0 0">Из чего состоит: ${g.details.map(d => `${esc(d.label)} — ${d.count}`).join(" · ")}</div>` : "";
     const примеры = (g.examples || []).length
@@ -6899,7 +6902,7 @@ function voiceWriters(v) {
               ? `${esc(v.contrib.models_hint)} — текст записей Проекта ERP распознаётся и без них`
               : `писать пока нечем: ${esc(v.contrib.models_hint || "разбор по голосам недоступен")} — что именно положить, перечислено в «Мониторинге RealTime»`))]);
   }
-  return monSection("Кто пишет в базу", monTable(rows) + `<div class="page-sub" style="margin:8px 0 0">
+  return monSection("Кто пишет в базу", monTable(rows, ["Система", "Отпечатки и записи", "Пояснение"]) + `<div class="page-sub" style="margin:8px 0 0">
     Планёрка пишет отпечатки со своих планёрок и подтверждает людей (только её оператор решает «этот
     голос — этот человек»). Производство с 05.10.26 пишет отпечатки со своих записей — по кускам речи длиннее
     ${v.contrib ? v.contrib.min_segment_sec : 5} с, — а имя даёт ЗАЯВЛЕННОЕ: только если голос совпал с уже
@@ -6938,7 +6941,7 @@ async function renderVoiceBase() {
     ["Людей с эталоном голоса", String(people.length), "оператор Планёрки сверил имя с «Командой»"],
     ["Имён ждут сверки", String(pending.length), "подтверждают в Планёрке, во вкладке «Разбор»"],
     ["Файл базы", esc(v.path), "вне папок обоих проектов"],
-  ]), "по голосу");
+  ], ["Показатель", "Значение", "Пояснение"]), "по голосу");
   const writers = voiceWriters(v);
   const forErp = monSection("Что получает Производство", monTable([
     ["Подтверждённых людей", String(people.length), ""],
@@ -6948,22 +6951,26 @@ async function renderVoiceBase() {
       ? "свои отпечатки кладём в базу, подтверждённые написания имён берём подсказкой"
       : `вклад Проекта ERP выключен (${esc((v.contrib || {}).off_switch || "WEBAPP_VOICE_CONTRIB=off")}) — база наполняется только Планёркой`],
     ["Ожидание общей базы", `${v.lock_wait_seconds} с`, "сколько ждём, если базу сейчас пишет другая программа"],
-  ]), "подсказки");
+  ], ["Показатель", "Значение", "Пояснение"]), "подсказки");
   const peopleBlock = !people.length ? пустойРаздел("Подтверждённые люди", "пока никого не подтвердили") : monSection("Подтверждённые люди", monTable(people.map(p => [p.full_name,
     // Команда названа продуктом (владелец 07.10.26): база голосов общая с Планёркой, и «нет в «Команде»»
     // без имени продукта читается как «нет вообще», хотя речь о справочнике именно ERP.
     p.in_team ? `в «Команде»` : `<span class="mon-off">нет в «Команде»</span>`,
-    esc([p.aliases.length ? "написания: " + p.aliases.join(", ") : "", p.confirmed_at ? "подтверждён " + датаРу(p.confirmed_at) : ""].filter(Boolean).join(" · "))])));
+    esc([p.aliases.length ? "написания: " + p.aliases.join(", ") : "", p.confirmed_at ? "подтверждён " + датаРу(p.confirmed_at) : ""].filter(Boolean).join(" · "))]),
+    ["Человек", "В «Команде»", "Написания и подтверждение"]));
   const pendingBlock = pending.length ? monSection("Имена ждут сверки", monTable(pending.map(p => [p.name,
-    `${p.samples} отп.`, esc(`${p.minutes} мин речи, записей: ${p.recordings}; источник — ${p.source}`)])), "в Планёрке") : "";
+    `${p.samples} отп.`, esc(`${p.minutes} мин речи, записей: ${p.recordings}; источник — ${p.source}`)]),
+    ["Имя", "Отпечатков", "Речь и источник"]), "в Планёрке") : "";
   // Панель не молчит (владелец 06.10.26): рядом со списком отпечатков — записи, с которых их НЕТ,
   // с причиной. Иначе запись 05.10 просто отсутствовала, и отличить «распознавания не было» от
   // «отпечатки не снялись» было нельзя.
   const безОтпечатков = (v.recordings_with_fingerprints || []).filter(h => !h.samples);
   const безBlock = безОтпечатков.length ? monSection(`Записи без отпечатков (${безОтпечатков.length})`,
-    monTable(безОтпечатков.map(h => [`${esc(датаРу(h.date))}`, `${h.lines} строк`, `${esc(h.reason)} · распознано ${esc(датаРу(h.when))}`]))) : "";
+    monTable(безОтпечатков.map(h => [`${esc(датаРу(h.date))}`, `${h.lines} строк`, `${esc(h.reason)} · распознано ${esc(датаРу(h.when))}`]),
+      ["Запись", "Строк", "Причина"])) : "";
   const recBlock = !recs.length ? пустойРаздел("С каких записей", "записей пока нет") : monSection("С каких записей", monTable(recs.map(r => [`${r.project} · ${esc(датаРу(r.ref))}`,
-    `${r.samples} отп.`, esc(`${r.minutes} мин речи, снято ${датаРу(r.when)}`)])));
+    `${r.samples} отп.`, esc(`${r.minutes} мин речи, снято ${датаРу(r.when)}`)]),
+    ["Запись", "Отпечатков", "Речь и когда"]));
   // «Протокол последнего распознавания» (владелец 12.10.26: «добавь в монитор, на вкладку „База голосов“,
   // эти параметры по результатам записи»). Шаги и числа одной строкой на шаг: где распознавание провело
   // время и что оно дало. Числа — с задания очереди; чего задание не сохранило (записи до 12.10.26),
@@ -6998,7 +7005,7 @@ async function renderVoiceBase() {
       ...текущиеСтроки,
       ["Распознавание", "законченных распознаваний ещё не было",
        "строки выше — что происходит с очередью и чем закончилась последняя попытка"],
-    ]), "по шагам");
+    ], ["Шаг", "Значение", "Пояснение"]), "по шагам");
   } else {
     const перерывов = Math.max(0, (последнее.attempts || 1) - 1);
     const какшло = [
@@ -7039,7 +7046,7 @@ async function renderVoiceBase() {
         : `голосов ${последнее.speakers}, подписано строк ${последнее.signed_lines} из ${последнее.lines}`,
        "подписи «Говорящий N» — имён разбор не даёт"],
       ["Отпечатки в общую базу", отпечатки, "ими пополняется общая база двух программ"],
-    ]), "по шагам");
+    ], ["Шаг", "Значение", "Пояснение"]), "по шагам");
   }
   $box.innerHTML = протоколBlock + accumulated + writers + forErp + peopleBlock + pendingBlock + безBlock + recBlock;
   // Ширины колонок по объёму текста — тот же замер, что на «Мониторинге»: без него таблица делится
@@ -7070,7 +7077,8 @@ function renderMonitoringLive() {
   const m = _monitoringCache;
   if (!$box || !m) return;
   const wf = m.watch_folder || {};
-  const services = monTable((m.services_live || []).map(s => [s.name, s.checking ? '<span class="badge badge-neutral">проверка</span>' : monState(s.ok), esc(s.detail)]));
+  const services = monTable((m.services_live || []).map(s => [s.name, s.checking ? '<span class="badge badge-neutral">проверка</span>' : monState(s.ok), esc(s.detail)]),
+    ["Служба", "Состояние", "Что показывает"]);
   // «Проверить связь» (18.10.2026; доработка 26.11.2026): точки опрашиваются фоном раз в 60 с, результаты видны
   // строками под кнопкой — раньше кнопка считала их и выбрасывала, на мониторинге ничего не появлялось.
   // Блок отделён от поля папки: кнопка больше не сливается со строкой ввода пути (замечание владелицы).
@@ -7081,20 +7089,14 @@ function renderMonitoringLive() {
   const пробаВремя = пробаСек === null ? "ещё не проверяли"
     : пробаСек < 5 ? "проверено только что"
       : `проверено ${пробаСек < 60 ? пробаСек + " с" : Math.round(пробаСек / 60) + " мин"} назад`;
-  const строкаПробы = (r) => {
-    const хорошо = r.ok === true, плохо = r.ok === false;
-    return `<div class="mon-probe-row${хорошо ? " ok" : плохо ? " bad" : ""}">
-      <span class="mon-probe-dot"></span>
-      <span class="mon-probe-name">${esc(r.name || "точка")}</span>
-      <span class="mon-probe-detail">${esc(r.detail || (хорошо ? "ответила" : плохо ? "нет ответа" : "не проверена"))}</span>
-    </div>`;
-  };
   const проверитьСвязь = `<div class="mon-probe">
     <div class="mon-probe-head"><b>Связь с моделями</b>
       <button class="btn-sm" id="probe-now-btn">Проверить связь</button>
       <span class="page-sub" style="margin:0">${esc(пробаВремя)} · фон опрашивает точки раз в 60 секунд, кнопка — сейчас</span></div>
     ${проба.error ? `<div class="page-sub" style="margin:0 0 6px">Проверка не удалась: ${esc(проба.error)}</div>` : ""}
-    ${строкиПробы.length ? `<div class="mon-probe-rows">${строкиПробы.map(строкаПробы).join("")}</div>`
+    ${строкиПробы.length ? monTable(строкиПробы.map(r => [r.name || "точка", monState(r.ok),
+        esc(r.detail || (r.ok === true ? "ответила" : r.ok === false ? "нет ответа" : "не проверена"))]),
+        ["Точка", "Состояние", "Ответ"])
       : `<div class="page-sub" style="margin:0">Результатов пока нет — нажмите «Проверить связь».</div>`}
   </div>`;
   const folderSource = wf.folder_source ? ` Сейчас путь взят: ${esc(wf.folder_source)}.` : "";
@@ -7134,7 +7136,8 @@ function renderMonitoringLive() {
     <div class="mon-subblock">
     <div class="mon-subhead">Папка-приёмник</div>
     <div class="mon-folder-form">
-      <input type="text" id="watch-folder-input" value="${esc(wf.folder || "")}" placeholder="Папка-приёмник записей не задана — укажите полный путь" autocomplete="off">
+      <label class="mon-field-label" for="watch-folder-input">Папка-приёмник записей</label>
+      <input type="text" id="watch-folder-input" value="${esc(wf.folder || "")}" placeholder="Полный путь к папке" autocomplete="off">
       <button class="btn-sm" id="watch-folder-btn">Сменить папку</button>
     </div>${интервал}${проходПоПапке}
     <div class="page-sub" style="margin:6px 0 0">Меняется в два шага: сначала показываем, что в папке лежит и что заберёт первый проход,
@@ -7169,7 +7172,8 @@ function renderMonitoringLive() {
       .concat(распознанные)
       .concat(записи)
       .concat((r.history || []).map(h => [`Распознано на ${h.device === "процессор" ? "процессоре" : "видеокарте"}`,
-        `${h.count} зап.`, `за ${h.min}–${h.max} длительности записи, обычно ${h.median}`])))}
+        `${h.count} зап.`, `за ${h.min}–${h.max} длительности записи, обычно ${h.median}`])),
+      ["Этап или запись", "Состояние", "Подробности"])}
     ${r.running && r.device === "процессор" ? `<div class="page-sub" style="margin:8px 0 0">Идёт на процессоре — в разы медленнее, эталона для процессора нет. Причина — в технических сообщениях (обычно не видны библиотеки видеокарты).</div>` : ""}
     <div class="page-sub" style="margin:8px 0 0">Эталон — замер 30.09.26 на шести записях Проекта ERP: на видеокарте распознавание занимает
       до ${Math.round(100 * ((r.reference_share || {})["видеокарта"] || 0.5))}% длительности записи (обычно около трети). Протокол нужен быстрее — приложите транскрипцию текстом.</div>`);
@@ -7183,12 +7187,13 @@ function renderMonitoringLive() {
       ["Технические сообщения", `открыто ${q.system_open}`, `за сутки закрыто ${q.system_closed_day} · <a href="#" id="open-system-tab">открыть</a>`],
       ["Записи с нетипичной длительностью", `ждут ответа ${q.recordings_held}`, "карточкой в «Разборе»"],
       ["Записи, которые не распознались", `ждут ответа ${q.recordings_failed || 0}`, "карточкой «повторить / удалить»; без ответа 7 дней удаляются сами"],
-    ])}`);
+    ], ["Очередь", "Сейчас", "Где разобрать"])}`);
 
   const a = m.autorun || {};
   const autorun = monSection("Автозапуск Протокола", `
     ${monTable([["Сейчас", (a.enabled ? "включён" : "выключен") + (a.scope === "все проекты" ? " · для всех проектов и записей без проекта" : ""),
-      "собирает Протокол встречи сразу после первого источника (файл, текст, распознанная запись), если Протокола ещё нет и источник не вызывает сомнений. При «Все проекты» выключатель общий (28.10.2026)"]])}
+      "собирает Протокол встречи сразу после первого источника (файл, текст, распознанная запись), если Протокола ещё нет и источник не вызывает сомнений. При «Все проекты» выключатель общий (28.10.2026)"]],
+      ["Служба", "Состояние", "Что делает"])}
     <button class="btn-sm${a.enabled ? "" : " btn-primary"}" id="autorun-toggle-btn" style="margin-top:8px">${a.enabled ? "Выключить" : "Включить"}</button>`);
 
   const waiting = m.awaiting_total;
@@ -7328,7 +7333,7 @@ function renderMonitoringRuns() {
       // Очередь сборок (14.10.26): сборки идут по одной, по датам встреч — что собирается и что ждёт.
       ["Очередь сборок", esc(строкиОчереди(r.build_queue) || "пусто"), "сборки идут по одной, по датам встреч; Карта и Сводка — после протоколов"],
       ["Остановок по пределу за 7 дней", String(r.stopped_by_limit), `пределы на прогон: ${esc(r.limits)}`],
-    ]));
+    ], ["Показатель", "Значение", "Пояснение"]));
 }
 
 // «Расход» — токены и деньги (поручение владельца 15.10.26, через «Мониторинг», п. 4): сегодня / 7 / 30 дней; итог, по встречам,
@@ -7361,7 +7366,7 @@ function renderMonitoringCost() {
       ["Цена прогона (средняя)", u.cost_per_run_usd != null ? `${u.cost_per_run_usd.toFixed(3)} $` : "—", "прогон = все вызовы с одним номером встречи"],
       ["Цена серии по дням", series || "—", "серия = все прогоны за календарный день"],
       ...Object.entries(u.by_purpose).map(([p, s]) => [`Назначение: ${esc(PURPOSE_LABELS[p] || p)}`, `${долларыРу(s.cost_usd)} · ${s.calls} вызовов`, ""]),
-    ]));
+    ], ["Показатель", "Значение", "Пояснение"]));
   $box.querySelectorAll("[data-cost-period]").forEach(a => a.addEventListener("click", (e) => {
     e.preventDefault();
     расходПериод = a.dataset.costPeriod;
@@ -7386,19 +7391,19 @@ function renderMonitoringDataState() {
     monSection("Встречи и записи", monTable([
       ["Встреч в базе", `${d.meetings}, с источниками ${d.with_sources}, с Протоколом ${d.with_minutes}`, d.last_meeting ? `последняя встреча ${esc(fmtRuDate(d.last_meeting))}` : ""],
       ["Источники", esc(kinds), "вид файла интерфейс не спрашивает (решение 12.09.26) — точно известен только у записей и расшифровок из них"],
-    ])) +
+    ], ["Показатель", "Значение", "Пояснение"])) +
     monSection("Реестр задач", monTable([
       ["По статусам", `активных ${st.active}, выполнено ${st.done}`, ""],   // снятые не упоминаются (26.10.2026)
       ["Закрытия по источнику", esc(closed), "по истории статусов"],
       ["Активных сейчас / на момент Карты", !ks.roadmap_generated_at ? `${ks.active_tasks_now} / Карта не собрана` : `${ks.active_tasks_now} / ${ks.active_tasks_as_of_roadmap}`,
         diverge ? "расходятся: реестр менялся после сборки Карты/Сводки — это не сбой" : (ks.roadmap_generated_at ? `Карта собрана ${esc(fmtDate(ks.roadmap_generated_at))}` : "")],
-    ])) +
+    ], ["Показатель", "Значение", "Пояснение"])) +
     monSection("Люди", monTable([
       ["«Команда» Проекта ERP", `${d.team_active} активных, не подтверждено ${d.team_unconfirmed}`, "неподтверждённые — карточками в «Разборе»"],
       ["База голосов", !(m.voice_directory && m.voice_directory.configured) ? "не подключена"
         : m.voice_directory.read_error ? `подключена, но не читается: ${esc(m.voice_directory.read_error)}` : `подтверждённых людей ${m.voice_directory.confirmed_people}`,
         "общая с Планёркой: Производство берёт подсказки и кладёт свои отпечатки (с 05.10.26)"],
-    ]));
+    ], ["Показатель", "Значение", "Пояснение"]));
 }
 
 function renderMonitoringStatic() {
