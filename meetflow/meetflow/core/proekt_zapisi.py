@@ -206,7 +206,12 @@ def общая_папка(store, project_id: int, папка: Path) -> bool:
 
 
 def папки_других(store, project_id: int) -> list[Path]:
-    """Приёмники других проектов — их подпапки обходит свой проект, владелец общей папки их не берёт."""
+    """Приёмники других проектов — их подпапки обходит свой проект, владелец общей папки их не берёт.
+
+    27.11.2026 (рецидив «запись в корне не забрана», 3-й раз): общая папка MeetFlow поднята на корень
+    «Протоколы встреч», чтобы забирать файлы, положенные в корень. Подпапки соседних систем (ERP «Производство
+    встречи», Планёрка) и других проектов MeetFlow обходятся своими системами — владелец корня их пропускает.
+    Список соседних систем — настройка `watch_skip_folders` (общая, project_id NULL), пути через JSON-массив."""
     out = []
     for r in store.q("SELECT project_id, value FROM settings WHERE key='watch_folder' AND project_id IS NOT NULL"):
         if r["project_id"] == project_id:
@@ -215,6 +220,15 @@ def папки_других(store, project_id: int) -> list[Path]:
             v = json.loads(r["value"]) if r["value"] else None
         except ValueError:
             v = r["value"]
+        if v:
+            out.append(Path(str(v)))
+    skip = store.get_setting("watch_skip_folders", None, []) or []
+    if isinstance(skip, str):
+        try:
+            skip = json.loads(skip)
+        except ValueError:
+            skip = [skip]
+    for v in skip:
         if v:
             out.append(Path(str(v)))
     return out
