@@ -840,7 +840,9 @@ def mount(r: APIRouter, ctx: Ctx) -> None:
             контроль = bool(meta.get("control")) or "контрольная Whisper" in имя
             текстом = (meta.get("connector") == "text") or (
                 not meta.get("model") and not meta.get("route") and not контроль)
-            порядок = 2 if контроль else (1 if текстом else 0)
+            транс = "транс" in (str(meta.get("route") or "") + " " + str(meta.get("model") or "")).lower()
+            # Транс (основная) — первой, прочее распознавание (Whisper) — затем, текстом — после, контрольная — последней
+            порядок = 3 if контроль else (2 if текстом else (0 if транс else 1))
             разобранные.append((порядок, s, meta, текстом, контроль))
         разобранные.sort(key=lambda x: x[0])
         for _порядок, s, meta, текстом, контроль in разобранные:
