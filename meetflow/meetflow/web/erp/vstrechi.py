@@ -824,7 +824,9 @@ def mount(r: APIRouter, ctx: Ctx) -> None:
         if not srcs:
             raise HTTPException(404, "У этой встречи нет расшифровки записи")
         строки = [f"Итоги распознавания — встреча {ru_date(m['date'])}", ""]
-        рамка = "#" * 76
+        # 27.11.2026, слово владелицы: основная расшифровка (Транс) — первой, контрольная Whisper — последней,
+        # переданные текстом — между ними; весь технический текст о модели — внутри шапки (рамка по длинной строке).
+        разобранные = []
         for s in srcs:
             meta = s.get("meta")
             if isinstance(meta, str):
@@ -834,9 +836,22 @@ def mount(r: APIRouter, ctx: Ctx) -> None:
                     meta = {}
             if not isinstance(meta, dict):
                 meta = {}
-            # 26.11.2026, слово владелицы: каждое распознавание — отдельным блоком с подписью, откуда оно,
-            # из какой системы, какой моделью и когда. Блоки разделены несколькими пустыми строками.
-            модель = str(meta.get("model") or meta.get("route") or meta.get("connector") or "—")
+            имя = s.get("name") or ""
+            контроль = bool(meta.get("control")) or "контрольная Whisper" in имя
+            текстом = (meta.get("connector") == "text") or (
+                not meta.get("model") and not meta.get("route") and not контроль)
+            порядок = 2 if контроль else (1 if текстом else 0)
+            разобранные.append((порядок, s, meta, текстом, контроль))
+        разобранные.sort(key=lambda x: x[0])
+        for _порядок, s, meta, текстом, контроль in разобранные:
+            # 26.11.2026: каждое распознавание — отдельным блоком с подписью (система, модель, когда).
+            if текстом:
+                модель = "транскрибация передана текстом"
+            elif контроль:
+                модель = str(meta.get("model") or meta.get("route") or "Whisper (контрольная)")
+            else:
+                модель = str(meta.get("model") or meta.get("route") or meta.get("connector") or "не записана")
+            устройство = str(meta.get("device") or "")
             когда = str(s.get("created_at") or "—").replace("T", " ")[:16]
             if len(когда) >= 16 and когда[4:5] == "-" and когда[7:8] == "-":
                 когда = f"{когда[8:10]}.{когда[5:7]}.{когда[0:4]} {когда[11:16]}"
@@ -844,11 +859,14 @@ def mount(r: APIRouter, ctx: Ctx) -> None:
             метки = sum(1 for x in текст.splitlines() if len(x.split("\t")) >= 3)
             именованных = sum(1 for x in текст.splitlines() if len(x.split("\t")) >= 3
                               and not x.split("\t")[1].strip().startswith("Говорящий"))
-            строки += [рамка,
-                       f"# Файл: {s.get('name') or 'расшифровка'}",
-                       f"# Система: MeetFlow | Модель распознавания: {модель} | Когда: {когда}",
-                       f"# Строк: {len(текст.splitlines())} | Подписано: {метки} | С именем: {именованных}",
-                       рамка, текст, "", "", ""]
+            шапка = [
+                f"# Файл: {s.get('name') or 'расшифровка'}",
+                f"# Система: MeetFlow | Модель распознавания: {модель}",
+                (f"# Устройство: {устройство} | Когда: {когда}" if устройство else f"# Когда: {когда}"),
+                f"# Строк: {len(текст.splitlines())} | Подписано: {метки} | С именем: {именованных}",
+            ]
+            рамка = "#" * max(len(с) for с in шапка)
+            строки += [рамка, *шапка, рамка, текст, "", "", ""]
         имя = quote(f"Итоги распознавания {ru_date(m['date'])}.txt")
         return Response("\n".join(строки), media_type="text/plain; charset=utf-8",
                         headers={"Content-Disposition": f"attachment; filename*=UTF-8''{имя}"})
