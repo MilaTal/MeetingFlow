@@ -241,6 +241,8 @@ h3 { font-size: 16px; font-weight: 600; }
 .mon-subhead { font-weight: 600; margin: 0 0 4px; }
 .mon-probe { margin-top: 18px; padding-top: 14px; border-top: 1px solid var(--reg-line, #e6e9ee); }
 .mon-probe-head { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; margin-bottom: 8px; }
+.mon-probe-head b { font-size: 15.5px; }
+.mon-field-label { font-size: 14.5px; color: var(--text-muted, #71717a); white-space: nowrap; }
 .mon-probe-rows { display: flex; flex-direction: column; gap: 2px; }
 .mon-probe-row { display: flex; flex-wrap: wrap; align-items: baseline; gap: 8px; padding: 3px 0; }
 .mon-probe-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--text-muted, #8a8f98);
